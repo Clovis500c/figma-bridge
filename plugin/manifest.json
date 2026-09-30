@@ -1,0 +1,15 @@
+{
+  "name": "Figma Bridge",
+  "id": "figma-bridge-local",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "devAllowedDomains": ["http://localhost:3055", "ws://localhost:3055"],
+    "reasoning": "Connects to the local Figma Bridge MCP server so an AI agent can edit this file."
+  },
+  "relaunchButtons": [{ "command": "open", "name": "Figma Bridge" }]
+}

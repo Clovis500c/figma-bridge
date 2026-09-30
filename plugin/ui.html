@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --bg: var(--figma-color-bg, #ffffff);
+    --bg-2: var(--figma-color-bg-secondary, #f5f5f5);
+    --bg-3: var(--figma-color-bg-tertiary, #e6e6e6);
+    --bg-hover: var(--figma-color-bg-hover, #f0f0f0);
+    --text: var(--figma-color-text, #1e1e1e);
+    --text-2: var(--figma-color-text-secondary, #6b6b6b);
+    --text-3: var(--figma-color-text-tertiary, #9a9a9a);
+    --border: var(--figma-color-border, #e6e6e6);
+    --ok: #14ae5c;
+    --warn: #f5a623;
+    --err: var(--figma-color-text-danger, #e5484d);
+    --brand-a: #d97757;
+    --brand-b: #a259ff;
+    --brand-c: #1abcfe;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 12px/1.4 Inter, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    user-select: none;
+  }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  code, .mono { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; font-size: 11px; }
+
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  /* Header */
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px; }
+  .logo {
+    width: 30px; height: 30px; border-radius: 9px; flex: none;
+    background: linear-gradient(135deg, var(--brand-a), var(--brand-b) 55%, var(--brand-c));
+    display: grid; place-items: center;
+    box-shadow: 0 2px 8px rgba(162, 89, 255, .35), inset 0 0 0 1px rgba(255,255,255,.18);
+  }
+  .title { flex: 1; min-width: 0; }
+  .title b { display: block; font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+  .title span { color: var(--text-2); font-size: 11px; }
+  .icon-btn {
+    width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--text-2);
+    transition: background .15s, color .15s;
+  }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+  /* Status card */
+  .card { margin: 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); }
+  .status { padding: 12px; position: relative; overflow: hidden; }
+  .status::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 2px;
+    background: var(--state-color); opacity: .9; transition: background .3s;
+  }
+  .status-row { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--state-color); flex: none; position: relative; }
+  .dot::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%;
+    border: 2px solid var(--state-color); opacity: 0;
+  }
+  .pulse .dot::after, .busy .dot::after { animation: ping 1.4s cubic-bezier(0, 0, .2, 1) infinite; }
+  @keyframes ping { 0% { transform: scale(.6); opacity: .8; } 100% { transform: scale(1.6); opacity: 0; } }
+  #statusText { font-weight: 600; font-size: 13px; flex: 1; }
+  .badge {
+    font-size: 10px; font-weight: 500; color: var(--text-2); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 99px; padding: 1px 7px;
+  }
+  .file { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--text-2); min-width: 0; }
+  .file span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #fileName { color: var(--text); font-weight: 500; flex: 0 1 auto; }
+  #pageName { flex: 1 1 0; }
+  .help { margin-top: 10px; color: var(--text-2); display: none; }
+  .help p { margin-bottom: 8px; }
+  .help-actions { display: flex; align-items: center; gap: 10px; }
+  .btn {
+    padding: 6px 12px; border-radius: 7px; font-weight: 500; color: #fff;
+    background: linear-gradient(135deg, var(--brand-a), var(--brand-b));
+    box-shadow: 0 1px 2px rgba(0,0,0,.15);
+    transition: filter .15s, transform .05s;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: translateY(1px); }
+  .btn.ghost { background: var(--bg); color: var(--text); border: 1px solid var(--border); box-shadow: none; }
+  #retryIn { color: var(--text-3); font-size: 11px; }
+
+  .s-connected { --state-color: var(--ok); }
+  .s-connecting { --state-color: var(--warn); }
+  .s-offline { --state-color: var(--text-3); }
+  .s-foreign { --state-color: var(--err); }
+  .s-offline .help, .s-foreign .help { display: block; }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 12px 0; }
+  .stat { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+  .stat b { display: block; font-size: 15px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--text-2); font-size: 10.5px; }
+  .stat.err b { color: var(--err); }
+
+  /* Activity */
+  .log-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 6px; }
+  .log-head h2 { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; }
+  .log-head button { color: var(--text-3); font-size: 11px; }
+  .log-head button:hover { color: var(--text); }
+  #log { list-style: none; flex: 1; overflow-y: auto; padding: 0 8px 10px; }
+  #log::-webkit-scrollbar { width: 8px; }
+  #log::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 8px; border: 2px solid var(--bg); }
+  .entry { display: flex; gap: 8px; padding: 7px 6px; border-radius: 8px; cursor: default; animation: in .18s ease-out; }
+  .entry:hover { background: var(--bg-hover); }
+  .entry.err { cursor: pointer; }
+  @keyframes in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+  .ico { width: 16px; height: 16px; flex: none; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; }
+  .ok .ico { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .err .ico { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); }
+  .run .ico { border: 2px solid var(--bg-3); border-top-color: var(--brand-b); animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .body { flex: 1; min-width: 0; }
+  .top { display: flex; align-items: center; gap: 6px; }
+  .chip { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 5px; color: var(--chip); background: color-mix(in srgb, var(--chip) 14%, transparent); }
+  .when { color: var(--text-3); font-size: 10.5px; }
+  .dur { margin-left: auto; color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .sum { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .errmsg {
+    display: none; margin-top: 6px; padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-word;
+    color: var(--err); background: color-mix(in srgb, var(--err) 8%, transparent); user-select: text;
+  }
+  .entry.open .errmsg { display: block; }
+  .entry.err .sum { color: var(--err); }
+  .empty { text-align: center; color: var(--text-3); padding: 28px 16px; }
+  .empty svg { display: block; margin: 0 auto 8px; opacity: .6; }
+
+  /* Settings sheet */
+  .sheet {
+    position: absolute; inset: 0; background: var(--bg); padding: 14px; display: flex; flex-direction: column; gap: 12px;
+    transform: translateY(100%); transition: transform .22s cubic-bezier(.2, .8, .2, 1); z-index: 5;
+  }
+  .sheet.open { transform: none; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; }
+  .sheet-head b { font-size: 13px; }
+  label { display: block; color: var(--text-2); font-size: 11px; margin-bottom: 4px; }
+  input {
+    width: 100%; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg-2);
+    color: var(--text); font: inherit; outline: none;
+  }
+  input:focus { border-color: var(--brand-b); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-b) 25%, transparent); }
+  .hint { color: var(--text-3); font-size: 11px; margin-top: 4px; }
+  .kv { display: flex; justify-content: space-between; color: var(--text-2); padding: 4px 0; border-bottom: 1px dashed var(--border); }
+  .kv:last-child { border: 0; }
+
+  /* Compact bar */
+  #bar { display: none; align-items: center; gap: 10px; height: 52px; padding: 0 8px 0 14px; }
+  .compact #app { display: none; }
+  .compact #bar { display: flex; }
+  .bar-text { flex: 1; min-width: 0; }
+  .bar-text b, .bar-text span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-text b { font-size: 12px; font-weight: 600; }
+  .bar-text span { color: var(--text-2); font-size: 11px; }
+</style>
+</head>
+<body class="s-connecting">
+  <div id="app">
+    <header>
+      <div class="logo">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 17c3-6 15-6 18 0" /><path d="M7 13.6V17M12 12.5V17M17 13.6V17" /><path d="M2 17h20" />
+        </svg>
+      </div>
+      <div class="title"><b>Figma Bridge</b><span>Claude ⇄ Figma, sans limite</span></div>
+      <button class="icon-btn" id="btnSettings" title="Réglages">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+      <button class="icon-btn" id="btnCompact" title="Réduire en barre">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
+      </button>
+    </header>
+
+    <section class="card status">
+      <div class="status-row">
+        <span class="dot"></span>
+        <span id="statusText">Connexion…</span>
+        <span class="badge" id="channelBadge" title="Canal">default</span>
+      </div>
+      <div class="file">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
+        <span id="fileName">—</span><span>·</span><span id="pageName"></span>
+      </div>
+      <div class="help">
+        <p id="helpText"></p>
+        <div class="help-actions">
+          <button class="btn" id="btnRetry">Réessayer maintenant</button>
+          <span id="retryIn"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><b id="stCount">0</b><span>Commandes</span></div>
+      <div class="stat err"><b id="stErr">0</b><span>Erreurs</span></div>
+      <div class="stat"><b id="stAvg">—</b><span>Moyenne</span></div>
+    </section>
+
+    <div class="log-head"><h2>Activité</h2><button id="btnClear">Effacer</button></div>
+    <ul id="log"></ul>
+  </div>
+
+  <div id="bar">
+    <span class="dot"></span>
+    <div class="bar-text"><b id="barTitle">Connexion…</b><span id="barSub">—</span></div>
+    <button class="icon-btn" id="btnExpand" title="Agrandir">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+    </button>
+  </div>
+
+  <div class="sheet" id="settings">
+    <div class="sheet-head"><b>Réglages</b><button class="icon-btn" id="btnCloseSettings" title="Fermer">✕</button></div>
+    <div>
+      <label for="inChannel">Canal</label>
+      <input id="inChannel" spellcheck="false" />
+      <div class="hint">Laisse « default » sauf si le serveur MCP a FIGMA_BRIDGE_CHANNEL.</div>
+    </div>
+    <div>
+      <div class="kv"><span>Serveur</span><span class="mono">ws://localhost:3055</span></div>
+      <div class="kv"><span>Session</span><span class="mono" id="sessId">—</span></div>
+      <div class="kv"><span>Version</span><span class="mono" id="verText">—</span></div>
+    </div>
+    <button class="btn" id="btnSave">Enregistrer et reconnecter</button>
+  </div>
+
+<script>
+"use strict";
+const WS_URL = "ws://localhost:3055";
+const CHUNK = 1 << 20;
+const MAX_LOG = 20;
+const HANDSHAKE_MS = 3000;
+const METHODS = {
+  run_script: ["script", "#a259ff"],
+  screenshot: ["capture", "#1abcfe"],
+  place_image: ["image", "#14ae5c"],
+  import_svg: ["svg", "#f5a623"],
+  get_context: ["contexte", "#8a8a8a"],
+  list_fonts: ["polices", "#8a8a8a"],
+  ping: ["ping", "#8a8a8a"],
+};
+
+const $ = (id) => document.getElementById(id);
+const toPlugin = (msg) => parent.postMessage({ pluginMessage: msg }, "*");
+
+let version = "";
+let session = null;
+let settings = { channel: "default", compact: false };
+let ws = null;
+let state = "connecting";
+let everConnected = false;
+let retryDelay = 400;
+let retryAt = 0;
+let retryTimer = 0;
+let handshakeTimer = 0;
+const entries = [];
+const running = new Map();
+const stats = { count: 0, errors: 0, totalMs: 0 };
+
+// ─── Framing (mirror of src/bridge.ts) ──────────────────────────────────────
+const partials = new Map();
+function encode(msg) {
+  const text = JSON.stringify(msg);
+  if (text.length <= CHUNK) return [text];
+  const cid = crypto.randomUUID();
+  const n = Math.ceil(text.length / CHUNK);
+  const frames = [];
+  for (let i = 0; i < n; i++) frames.push(JSON.stringify({ t: "chunk", cid, i, n, d: text.slice(i * CHUNK, (i + 1) * CHUNK) }));
+  return frames;
+}
+function decode(raw) {
+  const msg = JSON.parse(raw);
+  if (msg.t !== "chunk") return msg;
+  let p = partials.get(msg.cid);
+  if (!p) partials.set(msg.cid, (p = { parts: new Array(msg.n), got: 0 }));
+  if (p.parts[msg.i] === undefined) { p.parts[msg.i] = msg.d; p.got++; }
+  if (p.got < msg.n) return null;
+  partials.delete(msg.cid);
+  return JSON.parse(p.parts.join(""));
+}
+function send(msg) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  for (const f of encode(msg)) ws.send(f);
+  return true;
+}
+
+// ─── Binary helpers ─────────────────────────────────────────────────────────
+function bytesToB64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function b64ToBytes(b64) {
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+// Converts WEBP and oversized images to PNG/JPEG within Figma's 4096 px limit.
+async function transcode(bytes, mime, maxDim) {
+  const bmp = await createImageBitmap(new Blob([bytes], { type: mime }));
+  const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bmp.width * scale));
+  canvas.height = Math.max(1, Math.round(bmp.height * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  const type = mime === "image/jpeg" ? "image/jpeg" : "image/png";
+  const blob = await new Promise((r) => canvas.toBlob(r, type, 0.92));
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+// ─── Connection ─────────────────────────────────────────────────────────────
+function connect() {
+  clearTimeout(retryTimer);
+  clearTimeout(handshakeTimer);
+  if (ws) { ws.onclose = null; try { ws.close(); } catch (e) {} ws = null; }
+  if (state !== "offline" && state !== "foreign") setState("connecting");
+  let sock;
+  try { sock = new WebSocket(WS_URL); } catch (e) { return scheduleRetry("offline"); }
+  ws = sock;
+  sock.onopen = () => {
+    send({ t: "hello", role: "plugin", channel: settings.channel, session, version });
+    handshakeTimer = setTimeout(() => { sock.onclose = null; sock.close(); ws = null; scheduleRetry("foreign"); }, HANDSHAKE_MS);
+  };
+  sock.onmessage = (ev) => {
+    let msg;
+    try { msg = decode(ev.data); } catch (e) { return; }
+    if (!msg) return;
+    if (msg.t === "welcome") {
+      clearTimeout(handshakeTimer);
+      if (msg.bridge !== "figma-bridge") { sock.onclose = null; sock.close(); ws = null; return scheduleRetry("foreign"); }
+      retryDelay = 400;
+      setState("connected");
+      if (!everConnected) { everConnected = true; toPlugin({ t: "notify", text: "✦ Figma Bridge connecté à l'IA" }); }
+    } else if (msg.t === "req") {
+      onRequest(msg);
+    }
+  };
+  sock.onclose = () => { if (ws === sock) { ws = null; scheduleRetry("offline"); } };
+}
+
+function scheduleRetry(nextState) {
+  clearTimeout(retryTimer);
+  setState(nextState);
+  const delay = nextState === "foreign" ? 4000 : retryDelay;
+  retryDelay = Math.min(Math.round(retryDelay * 1.6), 5000);
+  retryAt = Date.now() + delay;
+  retryTimer = setTimeout(connect, delay);
+}
+
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send('{"t":"ping"}');
+}, 20000);
+setInterval(() => {
+  if (state === "offline" || state === "foreign") {
+    const s = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
+    $("retryIn").textContent = s > 0 ? "Nouvel essai dans " + s + " s" : "Connexion…";
+  }
+}, 250);
+window.addEventListener("focus", () => { if (state === "offline") { retryDelay = 400; connect(); } });
+
+// ─── Requests ───────────────────────────────────────────────────────────────
+function summarize(msg) {
+  const p = msg.params || {};
+  switch (msg.method) {
+    case "run_script": {
+      const line = String(p.code || "").split("\n").map((l) => l.trim()).find((l) => l && !l.startsWith("//"));
+      return line || "(script vide)";
+    }
+    case "screenshot": return (p.nodeId || "sélection") + (p.scale ? " @" + p.scale + "x" : "");
+    case "place_image": return p.name || (p.nodeId ? "remplissage " + p.nodeId : "nouveau rectangle");
+    case "import_svg": return p.name || (p.svg ? Math.round(p.svg.length / 1024 * 10) / 10 + " Ko" : "SVG");
+    case "list_fonts": return p.filter ? "« " + p.filter + " »" : "toutes";
+    default: return "";
+  }
+}
+
+async function onRequest(msg) {
+  const entry = { id: msg.id, method: msg.method, sum: summarize(msg), start: performance.now(), at: new Date(), status: "run" };
+  running.set(msg.id, entry);
+  entries.unshift(entry);
+  if (entries.length > MAX_LOG) entries.length = MAX_LOG;
+  render();
+  let params = msg.params || {};
+  try {
+    if (params.bytesB64) {
+      let bytes = b64ToBytes(params.bytesB64);
+      if (params.transcode) bytes = await transcode(bytes, params.mime, params.transcode.maxDim);
+      params = Object.assign({}, params, { bytes });
+      delete params.bytesB64;
+    }
+  } catch (e) {
+    return onResult({ t: "res", id: msg.id, ok: false, code: "BAD_IMAGE", error: "Impossible de décoder l'image : " + (e && e.message || e) });
+  }
+  toPlugin({ t: "req", id: msg.id, method: msg.method, params, timeoutMs: msg.timeoutMs });
+}
+
+function onResult(res) {
+  const entry = running.get(res.id);
+  if (entry) {
+    running.delete(res.id);
+    entry.ms = Math.round(performance.now() - entry.start);
+    entry.status = res.ok ? "ok" : "err";
+    entry.error = res.ok ? "" : (res.line ? "Ligne " + res.line + " — " : "") + res.error;
+    stats.count++;
+    stats.totalMs += entry.ms;
+    if (!res.ok) stats.errors++;
+    render();
+  }
+  if (res.ok && res.result && res.result.bytes instanceof Uint8Array) {
+    res.result.bytesB64 = bytesToB64(res.result.bytes);
+    delete res.result.bytes;
+  }
+  send(res);
+}
+
+// ─── Rendering ──────────────────────────────────────────────────────────────
+const TEXT = {
+  connecting: ["Connexion…", ""],
+  connected: ["Connecté à l'IA", ""],
+  offline: ["En attente de Claude Code",
+    "Le bridge démarre tout seul avec Claude Code (serveur MCP « FigmaBridge »). Garde ce plugin ouvert : il se connecte dès que le serveur est prêt."],
+  foreign: ["Port 3055 occupé",
+    "Un autre programme utilise le port 3055 (par exemple l'ancien socket TalkToFigma). Ferme-le : la connexion reprendra toute seule."],
+};
+
+function setState(next) {
+  state = next;
+  document.body.classList.remove("s-connecting", "s-connected", "s-offline", "s-foreign");
+  document.body.classList.add("s-" + next);
+  document.body.classList.toggle("pulse", next === "connecting");
+  $("statusText").textContent = TEXT[next][0];
+  $("helpText").textContent = TEXT[next][1];
+  renderBar();
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+const hhmm = (d) => d.toTimeString().slice(0, 8);
+const fmtMs = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(ms >= 10000 ? 0 : 1) + " s" : ms + " ms");
+const ICON_OK = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const ICON_ERR = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>';
+
+function render() {
+  document.body.classList.toggle("busy", running.size > 0);
+  $("stCount").textContent = stats.count;
+  $("stErr").textContent = stats.errors;
+  $("stAvg").textContent = stats.count ? fmtMs(Math.round(stats.totalMs / stats.count)) : "—";
+  const log = $("log");
+  if (!entries.length) {
+    log.innerHTML = '<li class="empty"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8L20 10l-5 3.9L16.5 20 12 16.6 7.5 20 9 13.9 4 10l6.1-1.2z"/></svg>'
+      + (state === "connected" ? "Prêt. Demande à Claude de designer quelque chose." : "Les commandes de l'IA apparaîtront ici.") + "</li>";
+  } else {
+    log.innerHTML = entries.map((e) => {
+      const m = METHODS[e.method] || [e.method, "#8a8a8a"];
+      return '<li class="entry ' + e.status + (e.open ? " open" : "") + '" data-id="' + e.id + '">'
+        + '<span class="ico">' + (e.status === "ok" ? ICON_OK : e.status === "err" ? ICON_ERR : "") + "</span>"
+        + '<div class="body"><div class="top"><span class="chip" style="--chip:' + m[1] + '">' + m[0] + "</span>"
+        + '<span class="when">' + hhmm(e.at) + "</span>"
+        + '<span class="dur">' + (e.status === "run" ? "…" : fmtMs(e.ms)) + "</span></div>"
+        + '<div class="sum mono">' + esc(e.status === "err" ? e.error.split("\n")[0] : e.sum) + "</div>"
+        + (e.status === "err" ? '<div class="errmsg mono">' + esc(e.error) + "</div>" : "")
+        + "</div></li>";
+    }).join("");
+  }
+  renderBar();
+}
+
+function renderBar() {
+  $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connecté") : TEXT[state][0];
+  const last = entries[0];
+  $("barSub").textContent = last
+    ? (METHODS[last.method] || [last.method])[0] + " · " + (last.status === "run" ? "en cours…" : last.status === "ok" ? fmtMs(last.ms) : "erreur")
+    : state === "connected" ? "Prêt" : "Garde ce plugin ouvert";
+}
+
+function renderSession() {
+  $("fileName").textContent = session ? session.fileName : "—";
+  $("pageName").textContent = session ? session.page : "";
+  $("channelBadge").textContent = settings.channel;
+  $("sessId").textContent = session ? session.id.slice(0, 8) : "—";
+  $("verText").textContent = version || "—";
+  renderBar();
+}
+
+// ─── UI events ──────────────────────────────────────────────────────────────
+$("log").addEventListener("click", (ev) => {
+  const li = ev.target.closest(".entry.err");
+  if (!li) return;
+  const e = entries.find((x) => x.id === li.dataset.id);
+  if (e) { e.open = !e.open; render(); }
+});
+$("btnClear").onclick = () => { entries.length = 0; render(); };
+$("btnRetry").onclick = () => { retryDelay = 400; connect(); };
+$("btnCompact").onclick = () => setCompact(true);
+$("btnExpand").onclick = () => setCompact(false);
+$("btnSettings").onclick = () => { $("inChannel").value = settings.channel; $("settings").classList.add("open"); $("inChannel").focus(); };
+$("btnCloseSettings").onclick = () => $("settings").classList.remove("open");
+$("btnSave").onclick = () => {
+  settings.channel = $("inChannel").value.trim() || "default";
+  toPlugin({ t: "set", key: "channel", value: settings.channel });
+  $("settings").classList.remove("open");
+  renderSession();
+  retryDelay = 400;
+  connect();
+};
+$("inChannel").addEventListener("keydown", (ev) => { if (ev.key === "Enter") $("btnSave").click(); });
+
+function setCompact(on) {
+  settings.compact = on;
+  document.body.classList.toggle("compact", on);
+  toPlugin({ t: "compact", value: on });
+}
+
+// ─── Plugin messages ────────────────────────────────────────────────────────
+window.onmessage = (ev) => {
+  const msg = ev.data && ev.data.pluginMessage;
+  if (!msg) return;
+  if (msg.t === "init") {
+    version = msg.version;
+    session = msg.session;
+    settings = msg.settings;
+    document.body.classList.toggle("compact", !!settings.compact);
+    renderSession();
+    render();
+    connect();
+  } else if (msg.t === "info") {
+    session = msg.session;
+    renderSession();
+    send({ t: "info", fileName: session.fileName, page: session.page });
+  } else if (msg.t === "res") {
+    onResult(msg);
+  }
+};
+
+render();
+toPlugin({ t: "ready" });
+</script>
+</body>
+</html>

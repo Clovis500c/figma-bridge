@@ -1,0 +1,29 @@
+{
+  "name": "figma-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Figma MCP bridge: lets an AI agent design in the Figma desktop app with no rate limits.",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "setup": "bun run scripts/setup.ts",
+    "build": "bun build plugin/code.ts --outfile plugin/code.js --target browser --format iife",
+    "postinstall": "bun run build",
+    "check": "tsc -p tsconfig.json && tsc -p plugin/tsconfig.json",
+    "test": "bun run build && bun run test/selftest.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.139.0",
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Clovis500c/figma-bridge"
+  }
+}
