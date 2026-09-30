@@ -1,6 +1,6 @@
 (() => {
   // plugin/code.ts
-  var VERSION = "1.0.1";
+  var VERSION = "1.0.2";
   var FULL_SIZE = { width: 320, height: 500 };
   var COMPACT_SIZE = { width: 320, height: 52 };
   figma.skipInvisibleInstanceChildren = true;
@@ -54,7 +54,25 @@
       figma.clientStorage.setAsync("compact", !!msg.value);
     } else if (msg.t === "notify")
       figma.notify(String(msg.text), { timeout: 2500 });
+    else if (msg.t === "focus")
+      focusNode(String(msg.nodeId));
   };
+  async function focusNode(id) {
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node || node.type === "DOCUMENT") {
+      figma.notify("This layer no longer exists", { timeout: 2000 });
+      return;
+    }
+    let page = node;
+    while (page && page.type !== "PAGE")
+      page = page.parent;
+    if (page && page !== figma.currentPage)
+      await figma.setCurrentPageAsync(page);
+    if (node.type === "PAGE")
+      return;
+    figma.currentPage.selection = [node];
+    figma.viewport.scrollAndZoomIntoView([node]);
+  }
   var HANDLERS = {
     run_script: runScript,
     screenshot,

@@ -7,7 +7,7 @@ import { z } from "zod";
 import { Bridge, BridgeError } from "./bridge";
 import { imageInfo } from "./image";
 
-const VERSION = "1.0.1";
+const VERSION = "1.0.2";
 const PORT = Number(process.env.FIGMA_BRIDGE_PORT) || 3055;
 const CHANNEL = process.env.FIGMA_BRIDGE_CHANNEL || "default";
 const OUT_DIR = process.env.FIGMA_BRIDGE_OUT || join(tmpdir(), "figma-bridge");

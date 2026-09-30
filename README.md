@@ -153,8 +153,14 @@ context and lists fonts. It then **deletes everything it created**, so your file
    - *"Rename every layer in the selected frame based on its content."*
    - *"Place C:\photos\hero.jpg as the background of frame 'Hero'."*
 
-The plugin window shows what's happening: connection status, file and page, how many commands ran, how many failed,
-average duration, and the last 20 commands. Click a failed command to see the full error.
+The plugin window shows what's happening:
+
+- **Status card**: connection state, file and page, and a progress bar plus "Claude is working…" while a command runs.
+  When it isn't connected, it shows the steps to fix it.
+- **Stats**: commands run, errors, and average time with a small chart of recent durations.
+- **Activity**: the last 20 commands with their duration (slow ones in orange). Hover a command to get:
+  - **Show**: selects the layer it created or changed and zooms to it, switching page if needed;
+  - **Copy**: copies an error message. Click a failed command to see the full error.
 
 The **—** button collapses the plugin into a thin bar so it stays out of the way. The plugin keeps working while
 collapsed, but **not when closed**: closing it disconnects the file.

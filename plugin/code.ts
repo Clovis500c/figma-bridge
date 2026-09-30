@@ -1,7 +1,7 @@
 // Figma Bridge — plugin main thread.
 // Syntax stays ES2017 (no ?. ?? or object spread): the plugin sandbox parser is conservative.
 
-const VERSION = "1.0.1";
+const VERSION = "1.0.2";
 const FULL_SIZE = { width: 320, height: 500 };
 const COMPACT_SIZE = { width: 320, height: 52 };
 
@@ -57,7 +57,23 @@ figma.ui.onmessage = function (msg: any) {
     figma.ui.resize(size.width, size.height);
     void figma.clientStorage.setAsync("compact", !!msg.value);
   } else if (msg.t === "notify") figma.notify(String(msg.text), { timeout: 2500 });
+  else if (msg.t === "focus") void focusNode(String(msg.nodeId));
 };
+
+/** Selects a node and zooms to it, switching page if needed ("Show" in the activity log). */
+async function focusNode(id: string) {
+  const node = await figma.getNodeByIdAsync(id);
+  if (!node || node.type === "DOCUMENT") {
+    figma.notify("This layer no longer exists", { timeout: 2000 });
+    return;
+  }
+  let page: BaseNode | null = node;
+  while (page && page.type !== "PAGE") page = page.parent;
+  if (page && page !== figma.currentPage) await figma.setCurrentPageAsync(page as PageNode);
+  if (node.type === "PAGE") return;
+  figma.currentPage.selection = [node as SceneNode];
+  figma.viewport.scrollAndZoomIntoView([node as SceneNode]);
+}
 
 // ─── Request dispatch ───────────────────────────────────────────────────────
 
