@@ -9,6 +9,8 @@ frames, write text, apply styles, import images and SVGs, take screenshots to ch
 Everything runs on your machine. Commands go through a small Figma **development plugin**, not through Figma's web API,
 so there are **no API quotas, no tokens, and no rate limits**.
 
+<p align="center"><img src="docs/plugin.jpg" alt="The Figma Bridge plugin, waiting for Claude (light) and live with activity (dark)" width="640"></p>
+
 ---
 
 ## Contents
