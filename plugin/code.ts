@@ -1,12 +1,28 @@
 // Figma Bridge — plugin main thread.
 // Syntax stays ES2017 (no ?. ?? or object spread): the plugin sandbox parser is conservative.
 
-const VERSION = "1.0.2";
-const FULL_SIZE = { width: 320, height: 500 };
-const COMPACT_SIZE = { width: 320, height: 52 };
+const VERSION = "1.1.0";
+const DEFAULT_SIZE = { width: 340, height: 540 };
+const MIN_SIZE = { width: 280, height: 260 };
+const MAX_SIZE = { width: 900, height: 1200 };
+const COMPACT_HEIGHT = 44;
 
 figma.skipInvisibleInstanceChildren = true;
-figma.showUI(__html__, { width: FULL_SIZE.width, height: FULL_SIZE.height, themeColors: true, title: "Figma Bridge" });
+figma.showUI(__html__, { width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height, themeColors: true, title: "Figma Bridge" });
+
+let size = { width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height };
+let compact = false;
+
+function clampSize(w: number, h: number) {
+  return {
+    width: Math.round(Math.min(MAX_SIZE.width, Math.max(MIN_SIZE.width, Number(w) || DEFAULT_SIZE.width))),
+    height: Math.round(Math.min(MAX_SIZE.height, Math.max(MIN_SIZE.height, Number(h) || DEFAULT_SIZE.height))),
+  };
+}
+
+function applySize() {
+  figma.ui.resize(size.width, compact ? COMPACT_HEIGHT : size.height);
+}
 
 const sessionId = randomId();
 
@@ -26,8 +42,10 @@ function sessionInfo() {
 
 async function sendInit() {
   const channel = (await figma.clientStorage.getAsync("channel")) || "default";
-  const compact = !!(await figma.clientStorage.getAsync("compact"));
-  if (compact) figma.ui.resize(COMPACT_SIZE.width, COMPACT_SIZE.height);
+  const saved = await figma.clientStorage.getAsync("size");
+  if (saved) size = clampSize(saved.width, saved.height);
+  compact = !!(await figma.clientStorage.getAsync("compact"));
+  applySize();
   post({ t: "init", version: VERSION, session: sessionInfo(), settings: { channel: channel, compact: compact } });
 }
 
@@ -53,9 +71,19 @@ figma.ui.onmessage = function (msg: any) {
   else if (msg.t === "req") void handleRequest(msg);
   else if (msg.t === "set") void figma.clientStorage.setAsync(msg.key, msg.value);
   else if (msg.t === "compact") {
-    const size = msg.value ? COMPACT_SIZE : FULL_SIZE;
-    figma.ui.resize(size.width, size.height);
-    void figma.clientStorage.setAsync("compact", !!msg.value);
+    compact = !!msg.value;
+    applySize();
+    void figma.clientStorage.setAsync("compact", compact);
+  } else if (msg.t === "resize") {
+    // Drag from the UI's corner grip; saved once the drag ends.
+    size = clampSize(msg.width, msg.height);
+    compact = false;
+    applySize();
+    if (msg.save) void figma.clientStorage.setAsync("size", size);
+  } else if (msg.t === "resetSize") {
+    size = { width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height };
+    applySize();
+    void figma.clientStorage.setAsync("size", size);
   } else if (msg.t === "notify") figma.notify(String(msg.text), { timeout: 2500 });
   else if (msg.t === "focus") void focusNode(String(msg.nodeId));
 };

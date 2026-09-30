@@ -155,12 +155,19 @@ context and lists fonts. It then **deletes everything it created**, so your file
 
 The plugin window shows what's happening:
 
-- **Status card**: connection state, file and page, and a progress bar plus "Claude is working…" while a command runs.
-  When it isn't connected, it shows the steps to fix it.
-- **Stats**: commands run, errors, and average time with a small chart of recent durations.
-- **Activity**: the last 20 commands with their duration (slow ones in orange). Hover a command to get:
-  - **Show**: selects the layer it created or changed and zooms to it, switching page if needed;
-  - **Copy**: copies an error message. Click a failed command to see the full error.
+- **The bridge**: *Claude Code* on the left, your *Figma file* (and current page) on the right. When connected, the line
+  between them is solid. Each command travels along it as a dot, and comes back green (success) or red (error).
+  When it isn't connected, the line is dashed and a short checklist explains what to do.
+- **Stats**: commands run, errors, and average time with a small bar chart of recent durations.
+- **Activity**: every command with an icon for its type (script, screenshot, image, SVG…), how long it took
+  (slow ones in orange), and an **All / Errors** filter.
+  - **Click a row** to see details: full error message, duration, time, and the layer it touched.
+  - **Show in canvas** selects the layer the command created and zooms to it, switching page if needed.
+  - **Copy error** / **Copy command** copy text to the clipboard.
+- **Settings** (sliders icon): channel, window size reset, session info.
+
+**Resize the window** by dragging the grip in the bottom-right corner. The size is remembered for next time
+(*Settings → Reset window size* restores the default).
 
 The **—** button collapses the plugin into a thin bar so it stays out of the way. The plugin keeps working while
 collapsed, but **not when closed**: closing it disconnects the file.

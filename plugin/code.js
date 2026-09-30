@@ -1,10 +1,23 @@
 (() => {
   // plugin/code.ts
-  var VERSION = "1.0.2";
-  var FULL_SIZE = { width: 320, height: 500 };
-  var COMPACT_SIZE = { width: 320, height: 52 };
+  var VERSION = "1.1.0";
+  var DEFAULT_SIZE = { width: 340, height: 540 };
+  var MIN_SIZE = { width: 280, height: 260 };
+  var MAX_SIZE = { width: 900, height: 1200 };
+  var COMPACT_HEIGHT = 44;
   figma.skipInvisibleInstanceChildren = true;
-  figma.showUI(__html__, { width: FULL_SIZE.width, height: FULL_SIZE.height, themeColors: true, title: "Figma Bridge" });
+  figma.showUI(__html__, { width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height, themeColors: true, title: "Figma Bridge" });
+  var size = { width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height };
+  var compact = false;
+  function clampSize(w, h) {
+    return {
+      width: Math.round(Math.min(MAX_SIZE.width, Math.max(MIN_SIZE.width, Number(w) || DEFAULT_SIZE.width))),
+      height: Math.round(Math.min(MAX_SIZE.height, Math.max(MIN_SIZE.height, Number(h) || DEFAULT_SIZE.height)))
+    };
+  }
+  function applySize() {
+    figma.ui.resize(size.width, compact ? COMPACT_HEIGHT : size.height);
+  }
   var sessionId = randomId();
   function randomId() {
     let s = "";
@@ -20,9 +33,11 @@
   }
   async function sendInit() {
     const channel = await figma.clientStorage.getAsync("channel") || "default";
-    const compact = !!await figma.clientStorage.getAsync("compact");
-    if (compact)
-      figma.ui.resize(COMPACT_SIZE.width, COMPACT_SIZE.height);
+    const saved = await figma.clientStorage.getAsync("size");
+    if (saved)
+      size = clampSize(saved.width, saved.height);
+    compact = !!await figma.clientStorage.getAsync("compact");
+    applySize();
     post({ t: "init", version: VERSION, session: sessionInfo(), settings: { channel, compact } });
   }
   try {
@@ -49,9 +64,19 @@
     else if (msg.t === "set")
       figma.clientStorage.setAsync(msg.key, msg.value);
     else if (msg.t === "compact") {
-      const size = msg.value ? COMPACT_SIZE : FULL_SIZE;
-      figma.ui.resize(size.width, size.height);
-      figma.clientStorage.setAsync("compact", !!msg.value);
+      compact = !!msg.value;
+      applySize();
+      figma.clientStorage.setAsync("compact", compact);
+    } else if (msg.t === "resize") {
+      size = clampSize(msg.width, msg.height);
+      compact = false;
+      applySize();
+      if (msg.save)
+        figma.clientStorage.setAsync("size", size);
+    } else if (msg.t === "resetSize") {
+      size = { width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height };
+      applySize();
+      figma.clientStorage.setAsync("size", size);
     } else if (msg.t === "notify")
       figma.notify(String(msg.text), { timeout: 2500 });
     else if (msg.t === "focus")

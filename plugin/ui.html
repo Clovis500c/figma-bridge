@@ -3,307 +3,416 @@
 <head>
 <meta charset="utf-8" />
 <style>
+  /* ── Tokens (light by default, dark when Figma is dark) ─────────────────── */
   :root {
-    --bg: var(--figma-color-bg, #ffffff);
-    --bg-2: var(--figma-color-bg-secondary, #f5f5f5);
-    --bg-3: var(--figma-color-bg-tertiary, #e6e6e6);
-    --bg-hover: var(--figma-color-bg-hover, #f0f0f0);
-    --text: var(--figma-color-text, #1e1e1e);
-    --text-2: var(--figma-color-text-secondary, #6b6b6b);
-    --text-3: var(--figma-color-text-tertiary, #9a9a9a);
-    --border: var(--figma-color-border, #e6e6e6);
-    --ok: #14ae5c;
-    --warn: #f5a623;
-    --err: var(--figma-color-text-danger, #e5484d);
-    --brand-a: #d97757;
-    --brand-b: #a259ff;
-    --brand-c: #1abcfe;
-    --brand: linear-gradient(135deg, var(--brand-a), var(--brand-b) 55%, var(--brand-c));
-    --radius: 12px;
+    --bg: #ffffff;
+    --surface: #f6f6f7;
+    --surface-2: #ececef;
+    --hover: rgba(0, 0, 0, .04);
+    --border: rgba(0, 0, 0, .08);
+    --border-strong: rgba(0, 0, 0, .14);
+    --text: #111113;
+    --text-2: #5d5d66;
+    --text-3: #9a9aa3;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --err: #e5484d;
+    --accent: #7c5cff;
+    --accent-soft: rgba(124, 92, 255, .12);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 6px 16px -6px rgba(0, 0, 0, .12);
+    --brand: linear-gradient(135deg, #e0845f 0%, #a259ff 60%, #6d7bff 100%);
+    --r: 10px;
     --ease: cubic-bezier(.2, .8, .2, 1);
+    color-scheme: light;
   }
+  html.figma-dark {
+    --bg: #1a1a1d;
+    --surface: #222226;
+    --surface-2: #2b2b30;
+    --hover: rgba(255, 255, 255, .045);
+    --border: rgba(255, 255, 255, .08);
+    --border-strong: rgba(255, 255, 255, .15);
+    --text: #f4f4f5;
+    --text-2: #a8a8b3;
+    --text-3: #6e6e78;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --accent: #a08cff;
+    --accent-soft: rgba(160, 140, 255, .15);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 20px -8px rgba(0, 0, 0, .6);
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not(.figma-light):not(.figma-dark) {
+      --bg: #1a1a1d; --surface: #222226; --surface-2: #2b2b30; --hover: rgba(255,255,255,.045);
+      --border: rgba(255,255,255,.08); --border-strong: rgba(255,255,255,.15);
+      --text: #f4f4f5; --text-2: #a8a8b3; --text-3: #6e6e78;
+      --ok: #34d399; --warn: #fbbf24; --err: #f87171; --accent: #a08cff; --accent-soft: rgba(160,140,255,.15);
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 20px -8px rgba(0,0,0,.6);
+      color-scheme: dark;
+    }
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
-    background: var(--bg);
-    color: var(--text);
-    font: 12px/1.4 Inter, "Segoe UI", system-ui, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    overflow: hidden;
-    user-select: none;
+    background: var(--bg); color: var(--text);
+    font: 12px/1.45 "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; overflow: hidden; user-select: none;
   }
   button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
-  code, .mono { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; font-size: 11px; }
-  svg { flex: none; }
+  svg { flex: none; display: block; }
+  .mono { font-family: "JetBrains Mono", "Cascadia Mono", "Cascadia Code", Consolas, monospace; font-size: 11px; }
+  .trunc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
   #app { display: flex; flex-direction: column; height: 100%; }
 
-  /* ── Header ─────────────────────────────────────────────── */
-  header { display: flex; align-items: center; gap: 10px; padding: 12px 10px 10px 12px; }
-  .logo {
-    width: 30px; height: 30px; border-radius: 9px; flex: none; background: var(--brand);
-    display: grid; place-items: center;
-    box-shadow: 0 3px 10px -2px rgba(162, 89, 255, .45), inset 0 0 0 1px rgba(255, 255, 255, .2);
+  /* ── Top bar ────────────────────────────────────────────────────────────── */
+  .top { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); flex: none; }
+  .mark {
+    width: 22px; height: 22px; border-radius: 7px; background: var(--brand); display: grid; place-items: center; flex: none;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.18), 0 2px 6px -1px rgba(162,89,255,.5); position: relative;
   }
-  .title { flex: 1; min-width: 0; }
-  .title-row { display: flex; align-items: center; gap: 6px; }
-  .title b { font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
-  .ver { font-size: 9.5px; font-weight: 600; color: var(--text-3); border: 1px solid var(--border); border-radius: 5px; padding: 0 4px; }
-  #subtitle { display: block; color: var(--text-2); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .busy #subtitle {
-    background: linear-gradient(90deg, var(--text-2) 0%, var(--brand-b) 40%, var(--brand-a) 60%, var(--text-2) 100%);
-    background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
-    animation: shimmer 1.6s linear infinite;
+  .name { font-weight: 650; font-size: 12.5px; letter-spacing: -.01em; flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 7px; border-radius: 99px;
+    font-size: 11px; font-weight: 550; color: var(--state); background: color-mix(in srgb, var(--state) 12%, transparent);
+    transition: color .3s, background .3s;
   }
-  @keyframes shimmer { to { background-position: -200% 0; } }
-  .icon-btn {
-    width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--text-2);
-    transition: background .15s, color .15s;
-  }
-  .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--state); position: relative; flex: none; }
+  .dot::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 1.5px solid var(--state); opacity: 0; }
+  .s-connecting .dot::after, .busy .dot::after { animation: ping 1.3s cubic-bezier(0,0,.2,1) infinite; }
+  @keyframes ping { from { transform: scale(.5); opacity: .9; } to { transform: scale(1.8); opacity: 0; } }
+  .ibtn { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--text-2); transition: background .15s, color .15s; }
+  .ibtn:hover { background: var(--hover); color: var(--text); }
+  .ibtn:active { background: var(--surface-2); }
 
-  /* ── Status card ────────────────────────────────────────── */
-  .card { margin: 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); }
-  .status { padding: 12px; position: relative; overflow: hidden; }
-  .status::before {
-    content: ""; position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--state-color) 14%, transparent), transparent 60%);
-    transition: background .4s;
-  }
-  .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity .2s; }
-  .progress::after {
-    content: ""; position: absolute; top: 0; bottom: 0; width: 40%; background: var(--brand);
-    animation: slide 1.1s var(--ease) infinite;
-  }
-  .busy .progress { opacity: 1; }
-  @keyframes slide { from { left: -40%; } to { left: 100%; } }
-  .status-row { display: flex; align-items: center; gap: 8px; position: relative; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--state-color); flex: none; position: relative; transition: background .3s; }
-  .dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--state-color); opacity: 0; }
-  .pulse .dot::after, .busy .dot::after { animation: ping 1.4s cubic-bezier(0, 0, .2, 1) infinite; }
-  @keyframes ping { 0% { transform: scale(.6); opacity: .8; } 100% { transform: scale(1.6); opacity: 0; } }
-  #statusText { font-weight: 600; font-size: 13px; flex: 1; }
-  #since { color: var(--text-3); font-size: 10.5px; }
-  .meta { margin-top: 9px; display: grid; gap: 4px; position: relative; }
-  .meta-row { display: flex; align-items: center; gap: 7px; color: var(--text-2); min-width: 0; }
-  .meta-row span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .meta-row svg { color: var(--text-3); }
-  #fileName { color: var(--text); font-weight: 500; }
-  .s-connected .meta-row:first-child svg { color: var(--ok); }
+  .s-connected { --state: var(--ok); }
+  .s-connecting { --state: var(--warn); }
+  .s-offline { --state: var(--text-3); }
+  .s-foreign { --state: var(--err); }
 
-  .help { display: none; margin-top: 12px; position: relative; }
-  .s-offline .help, .s-foreign .help { display: block; }
-  .steps { list-style: none; display: grid; gap: 8px; margin-bottom: 12px; }
-  .steps li { display: flex; gap: 9px; color: var(--text-2); }
-  .steps b { color: var(--text); font-weight: 600; }
-  .num {
-    width: 18px; height: 18px; border-radius: 50%; flex: none; display: grid; place-items: center;
-    font-size: 10px; font-weight: 700; color: #fff; background: var(--brand);
+  /* ── Bridge visual ──────────────────────────────────────────────────────── */
+  .bridge { padding: 16px 16px 14px; flex: none; }
+  .bridge-row { display: flex; align-items: center; }
+  .tile {
+    width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; position: relative;
+    background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); color: var(--text-2);
+    transition: border-color .3s, color .3s;
   }
-  .help-actions { display: flex; align-items: center; gap: 10px; }
-  .btn {
-    padding: 6px 12px; border-radius: 8px; font-weight: 600; color: #fff; background: var(--brand);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, .15), inset 0 0 0 1px rgba(255, 255, 255, .15);
-    transition: filter .15s, transform .05s;
+  .tile.claude { color: #e0845f; }
+  .s-connected .tile { border-color: var(--border-strong); }
+  .s-connected .tile.figma { color: var(--accent); }
+  .tile.hit { animation: hit .45s var(--ease); }
+  @keyframes hit { 40% { transform: scale(1.08); } }
+  .link { flex: 1; height: 40px; position: relative; margin: 0 6px; }
+  .wire { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; border-radius: 2px; transition: opacity .3s; }
+  .s-connected .wire { background: linear-gradient(90deg, #e0845f, var(--accent)); opacity: .55; }
+  .s-connected.busy .wire { opacity: 1; background: linear-gradient(90deg, #e0845f, var(--accent), #e0845f); background-size: 200% 100%; animation: flow 1s linear infinite; }
+  @keyframes flow { to { background-position: -200% 0; } }
+  .s-connecting .wire, .s-offline .wire, .s-foreign .wire {
+    background: repeating-linear-gradient(90deg, var(--state) 0 5px, transparent 5px 10px); opacity: .6;
   }
-  .btn:hover { filter: brightness(1.08); }
-  .btn:active { transform: translateY(1px); }
-  #retryIn { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .s-connecting .wire { animation: dash .6s linear infinite; background-size: 20px 2px; }
+  @keyframes dash { to { background-position: 20px 0; } }
+  .badge {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); white-space: nowrap;
+    font-size: 10px; font-weight: 600; letter-spacing: .02em; padding: 2px 7px; border-radius: 99px;
+    background: var(--bg); color: var(--state); border: 1px solid color-mix(in srgb, var(--state) 35%, var(--border));
+  }
+  .s-connected:not(.busy) .badge { display: none; }
+  .packet {
+    position: absolute; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
+    background: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 25%, transparent), 0 0 10px var(--c);
+  }
+  .labels { display: flex; justify-content: space-between; gap: 12px; margin-top: 9px; }
+  .lbl { display: flex; flex-direction: column; min-width: 0; max-width: 50%; }
+  .lbl.right { align-items: flex-end; text-align: right; }
+  .lbl b { font-weight: 600; font-size: 12px; }
+  .lbl span { color: var(--text-3); font-size: 11px; }
+
+  /* ── Setup checklist ────────────────────────────────────────────────────── */
+  .setup { margin: 0 12px 12px; padding: 12px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--border); display: none; flex: none; }
+  .s-offline .setup, .s-foreign .setup { display: block; }
+  .check { display: flex; gap: 10px; padding: 5px 0; }
+  .check b { display: block; font-weight: 600; }
+  .check span { color: var(--text-2); }
+  .cico { width: 18px; height: 18px; border-radius: 50%; flex: none; display: grid; place-items: center; margin-top: 1px; }
+  .check.done .cico { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .check.wait .cico { border: 1.5px dashed var(--text-3); }
+  .check.fail .cico { background: color-mix(in srgb, var(--err) 18%, transparent); color: var(--err); }
+  .s-foreign #chkServer, .s-offline #chkPort { display: none; }
   .cmd {
-    display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin-bottom: 12px; border-radius: 7px;
+    display: flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 4px 4px 8px; border-radius: 7px;
     background: var(--bg); border: 1px solid var(--border); user-select: text;
   }
-  .cmd code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmd code { flex: 1; }
+  .setup-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .btn {
+    height: 28px; padding: 0 12px; border-radius: 8px; font-weight: 600; color: #fff; background: var(--brand);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.16), 0 1px 2px rgba(0,0,0,.2); transition: filter .15s, transform .06s;
+  }
+  .btn:hover { filter: brightness(1.07); }
+  .btn:active { transform: translateY(1px); }
+  .btn.quiet { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+  .mini {
+    height: 22px; padding: 0 8px; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--text);
+    background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-strong); transition: color .15s, box-shadow .15s;
+  }
+  .mini:hover { color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .countdown { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
 
-  .s-connected { --state-color: var(--ok); }
-  .s-connecting { --state-color: var(--warn); }
-  .s-offline { --state-color: var(--text-3); }
-  .s-foreign { --state-color: var(--err); }
+  /* ── Metrics ────────────────────────────────────────────────────────────── */
+  .metrics { display: flex; margin: 0 12px; border: 1px solid var(--border); border-radius: var(--r); flex: none; overflow: hidden; }
+  .metric { flex: 1; padding: 8px 10px; min-width: 0; position: relative; }
+  .metric + .metric { border-left: 1px solid var(--border); }
+  .metric .v { font-size: 15px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .metric .k { color: var(--text-3); font-size: 10.5px; }
+  .metric.bad .v { color: var(--err); }
+  .metric.wide { flex: 1.4; }
+  .s-offline.idle .metrics, .s-foreign.idle .metrics { display: none; }
+  #spark { position: absolute; right: 8px; top: 10px; width: 46px; height: 18px; }
 
-  /* ── Stats ──────────────────────────────────────────────── */
-  .stats { display: grid; grid-template-columns: 1fr 1fr 1.35fr; gap: 8px; margin: 10px 12px 0; }
-  .stat { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); position: relative; overflow: hidden; }
-  .stat b { display: block; font-size: 15px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; position: relative; }
-  .stat span { color: var(--text-2); font-size: 10.5px; position: relative; }
-  .stat.has-err b { color: var(--err); }
-  #spark { position: absolute; right: 0; bottom: 0; left: 0; height: 30px; width: 100%; }
+  /* ── Activity ───────────────────────────────────────────────────────────── */
+  .act-head { display: flex; align-items: center; gap: 8px; padding: 14px 8px 6px 14px; flex: none; }
+  .act-head h2 { font-size: 11px; font-weight: 650; color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; flex: 1; }
+  .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+  .seg button { height: 20px; padding: 0 8px; border-radius: 6px; font-size: 11px; font-weight: 550; color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; }
+  .seg button.on { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12), inset 0 0 0 1px var(--border); }
+  .count { font-size: 10px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 99px; background: var(--err); color: #fff; display: none; place-items: center; }
+  .count.show { display: inline-grid; }
 
-  /* ── Activity ───────────────────────────────────────────── */
-  .log-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 6px; }
-  .log-head h2 { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; }
-  .link { color: var(--text-3); font-size: 11px; }
-  .link:hover { color: var(--text); }
-  #log { list-style: none; flex: 1; overflow-y: auto; padding: 0 8px 10px; }
-  #log::-webkit-scrollbar { width: 8px; }
-  #log::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 8px; border: 2px solid var(--bg); }
-  .entry { display: flex; gap: 9px; padding: 7px 6px; border-radius: 9px; position: relative; }
-  .entry.new { animation: in .2s var(--ease); }
-  .entry:hover { background: var(--bg-hover); }
-  @keyframes in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-  .ico { width: 18px; height: 18px; flex: none; border-radius: 50%; display: grid; place-items: center; }
-  .ok .ico { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
-  .err .ico { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); }
-  .run .ico { border: 2px solid var(--bg-3); border-top-color: var(--brand-b); animation: spin .7s linear infinite; }
+  #log { list-style: none; flex: 1; overflow-y: auto; padding: 0 6px 8px; }
+  #log::-webkit-scrollbar { width: 10px; }
+  #log::-webkit-scrollbar-thumb { background: var(--surface-2); border-radius: 10px; border: 3px solid var(--bg); }
+  .row { display: flex; gap: 10px; padding: 7px 8px; border-radius: 9px; cursor: pointer; transition: background .12s; }
+  .row:hover { background: var(--hover); }
+  .row.open { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+  .row.new { animation: rowin .25s var(--ease); }
+  @keyframes rowin { from { opacity: 0; transform: translateY(-5px); } }
+  .ic {
+    width: 26px; height: 26px; border-radius: 8px; flex: none; display: grid; place-items: center; position: relative;
+    color: var(--c); background: color-mix(in srgb, var(--c) 13%, transparent);
+  }
+  .row.err .ic { --c: var(--err) !important; }
+  .row.run .ic::after {
+    content: ""; position: absolute; inset: -3px; border-radius: 10px; border: 2px solid transparent;
+    border-top-color: var(--c); border-right-color: var(--c); animation: spin .8s linear infinite;
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .body { flex: 1; min-width: 0; }
-  .top { display: flex; align-items: center; gap: 6px; min-height: 18px; }
-  .chip { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 5px; color: var(--chip); background: color-mix(in srgb, var(--chip) 14%, transparent); }
-  .when { color: var(--text-3); font-size: 10.5px; }
-  .dur { margin-left: auto; color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .slow .dur { color: var(--warn); }
-  .actions { display: none; margin-left: auto; gap: 4px; }
-  .entry:hover .actions { display: flex; }
-  .entry:hover .dur { display: none; }
-  .act {
-    font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 5px; color: var(--text);
-    background: var(--bg); border: 1px solid var(--border);
+  .main { flex: 1; min-width: 0; }
+  .l1 { display: flex; align-items: baseline; gap: 6px; }
+  .l1 .m { font-weight: 600; }
+  .l1 .t { color: var(--text-3); font-size: 10.5px; }
+  .l2 { color: var(--text-2); margin-top: 1px; }
+  .row.err .l2 { color: var(--err); }
+  .side { display: flex; align-items: center; gap: 4px; flex: none; align-self: flex-start; height: 18px; }
+  .dur { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .row.slow .dur { color: var(--warn); }
+  .row .quick { display: none; }
+  .row:hover .quick { display: inline-block; }
+  .row:hover .dur { display: none; }
+  .detail { display: none; margin-top: 8px; }
+  .row.open .detail { display: block; }
+  .row.open .l2 { white-space: normal; word-break: break-word; }
+  .row.open.err .l2 { display: none; }
+  .errbox {
+    padding: 7px 9px; border-radius: 7px; white-space: pre-wrap; word-break: break-word; user-select: text; cursor: text;
+    color: var(--err); background: color-mix(in srgb, var(--err) 9%, transparent);
   }
-  .act:hover { border-color: var(--brand-b); color: var(--brand-b); }
-  .sum { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-  .entry.err .sum { color: var(--err); }
-  .errmsg {
-    display: none; margin-top: 6px; padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-word;
-    color: var(--err); background: color-mix(in srgb, var(--err) 8%, transparent); user-select: text;
-  }
-  .entry.open .errmsg { display: block; }
-  .entry.err { cursor: pointer; }
-  .empty { text-align: center; color: var(--text-3); padding: 26px 20px; }
-  .empty .logo { margin: 0 auto 10px; width: 36px; height: 36px; border-radius: 11px; opacity: .9; }
-  .empty b { display: block; color: var(--text); font-size: 12.5px; margin-bottom: 3px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-3); font-size: 11px; margin-top: 7px; }
+  .facts b { color: var(--text-2); font-weight: 550; }
+  .detail-actions { display: flex; gap: 6px; margin-top: 8px; }
 
-  /* ── Settings sheet ─────────────────────────────────────── */
-  .sheet {
-    position: absolute; inset: 0; background: var(--bg); padding: 14px; display: flex; flex-direction: column; gap: 14px;
-    transform: translateY(100%); transition: transform .24s var(--ease); z-index: 5;
-  }
-  .sheet.open { transform: none; }
-  .sheet-head { display: flex; align-items: center; justify-content: space-between; }
-  .sheet-head b { font-size: 13px; }
-  label { display: block; color: var(--text-2); font-size: 11px; margin-bottom: 4px; }
-  input {
-    width: 100%; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-2);
-    color: var(--text); font: inherit; outline: none;
-  }
-  input:focus { border-color: var(--brand-b); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-b) 22%, transparent); }
-  .hint { color: var(--text-3); font-size: 11px; margin-top: 4px; }
-  .kv { display: flex; justify-content: space-between; color: var(--text-2); padding: 6px 0; border-bottom: 1px dashed var(--border); }
-  .kv:last-child { border: 0; }
-  .spacer { flex: 1; }
+  .empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 28px 24px; color: var(--text-3); }
+  .empty .art { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; background: var(--surface); border: 1px solid var(--border); color: var(--text-3); margin-bottom: 4px; }
+  .empty b { color: var(--text); font-size: 12.5px; font-weight: 600; }
+  .quote { margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 500; }
 
-  /* ── Toast ──────────────────────────────────────────────── */
-  #toast {
-    position: fixed; left: 50%; bottom: 12px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
-    background: var(--text); color: var(--bg); padding: 5px 11px; border-radius: 8px; font-weight: 500;
-    transition: opacity .18s, transform .18s var(--ease); z-index: 10;
+  /* ── Footer + resize grip ───────────────────────────────────────────────── */
+  .foot {
+    display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 22px 0 12px; flex: none;
+    border-top: 1px solid var(--border); color: var(--text-3); font-size: 10.5px;
   }
-  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .foot .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--text-3); opacity: .6; }
+  .foot .grow { flex: 1; }
+  #grip {
+    position: fixed; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 20;
+    display: grid; place-items: center; color: var(--text-3);
+  }
+  #grip:hover { color: var(--text); }
+  .compact #grip { display: none; }
 
-  /* ── Compact bar ────────────────────────────────────────── */
-  #bar { display: none; align-items: center; gap: 10px; height: 52px; padding: 0 8px 0 12px; position: relative; overflow: hidden; }
+  /* ── Compact bar ────────────────────────────────────────────────────────── */
+  #bar { display: none; align-items: center; gap: 10px; height: 44px; padding: 0 6px 0 12px; }
   .compact #app { display: none; }
   .compact #bar { display: flex; }
-  #bar .logo { width: 24px; height: 24px; border-radius: 7px; position: relative; }
-  #bar .logo .dot { position: absolute; right: -2px; bottom: -2px; box-shadow: 0 0 0 2px var(--bg); }
-  .bar-text { flex: 1; min-width: 0; }
-  .bar-text b, .bar-text span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .bar-text b { font-size: 12px; font-weight: 600; }
-  .bar-text span { color: var(--text-2); font-size: 11px; }
+  #bar .mark .dot { position: absolute; right: -3px; bottom: -3px; width: 8px; height: 8px; box-shadow: 0 0 0 2px var(--bg); }
+  .bar-text { flex: 1; min-width: 0; line-height: 1.3; }
+  .bar-text b { display: block; font-size: 12px; font-weight: 600; }
+  .bar-text span { display: block; color: var(--text-3); font-size: 11px; }
+
+  /* ── Settings sheet ─────────────────────────────────────────────────────── */
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.28); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
+  .sheet {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(300px, 88%); background: var(--bg); z-index: 31;
+    border-left: 1px solid var(--border); box-shadow: -12px 0 30px -12px rgba(0,0,0,.35);
+    display: flex; flex-direction: column; transform: translateX(100%); transition: transform .25s var(--ease);
+  }
+  .settings-open .scrim { opacity: 1; pointer-events: auto; }
+  .settings-open .sheet { transform: none; }
+  .sheet-head { display: flex; align-items: center; height: 44px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--border); }
+  .sheet-head b { flex: 1; font-size: 12.5px; }
+  .sheet-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 18px; }
+  .group h3 { font-size: 10.5px; font-weight: 650; color: var(--text-3); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+  label { display: block; font-weight: 550; margin-bottom: 5px; }
+  input {
+    width: 100%; height: 30px; padding: 0 10px; border-radius: 8px; border: 0; outline: none; font: inherit;
+    background: var(--surface); color: var(--text); box-shadow: inset 0 0 0 1px var(--border);
+  }
+  input:focus { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
+  .hint { color: var(--text-3); font-size: 11px; margin-top: 5px; }
+  .kv { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); color: var(--text-2); }
+  .kv:last-child { border: 0; }
+  .kv .mono { color: var(--text); }
+  .sheet-foot { padding: 12px 14px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* ── Toast ──────────────────────────────────────────────────────────────── */
+  #toast {
+    position: fixed; left: 50%; bottom: 38px; transform: translate(-50%, 8px); opacity: 0; pointer-events: none; z-index: 40;
+    padding: 6px 12px; border-radius: 8px; background: var(--text); color: var(--bg); font-weight: 550;
+    transition: opacity .18s, transform .2s var(--ease); box-shadow: var(--shadow);
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
 </style>
 </head>
-<body class="s-connecting pulse">
-  <svg width="0" height="0" style="position:absolute">
+<body class="s-connecting">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
-      <symbol id="mark" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="5.5" cy="16" r="2.5" /><circle cx="18.5" cy="16" r="2.5" /><path d="M5.5 13.5C7 7.5 17 7.5 18.5 13.5" />
-        <path d="M12 9.2V5.5M9.5 5.5h5" />
+      <symbol id="i-mark" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="5" cy="15.5" r="2.4"/><circle cx="19" cy="15.5" r="2.4"/><path d="M5 13c1.6-6 12.4-6 14 0"/>
       </symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2.5c.5 0 .9.4 1 .9l.6 4.3 3-3.1a1 1 0 0 1 1.6 1.2l-2 3.8 4.3-.6a1 1 0 0 1 .4 2l-4.2 1.3 3.8 2.1a1 1 0 0 1-.8 1.9l-4.1-1.6.9 4.2a1 1 0 0 1-1.9.6L12.6 16l-1.7 3.9a1 1 0 0 1-1.9-.6l.9-4.2-4.1 1.6a1 1 0 0 1-.8-1.9l3.8-2.1L4.6 11.4a1 1 0 0 1 .4-2l4.3.6-2-3.8a1 1 0 0 1 1.6-1.2l3 3.1.6-4.3c.1-.5.5-.9 1-.9z"/>
+      </symbol>
+      <symbol id="i-frame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M8 3v18M16 3v18M3 8h18M3 16h18"/>
+      </symbol>
+      <symbol id="i-script" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 8 4.5 12l4 4M15.5 8l4 4-4 4M13 5.5 11 18.5"/></symbol>
+      <symbol id="i-shot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m20 16-4.5-4.5L7 19.5"/></symbol>
+      <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19.5 19.5 12l2 2-7.5 7.5z"/><path d="m18 13.5-1.4-7L3 3l3.5 13.6 7 1.4z"/><path d="m3 3 7.2 7.2"/><circle cx="11.5" cy="11.5" r="1.8"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5"/><path d="m3.5 16.5 8.5 4.5 8.5-4.5" opacity=".5"/></symbol>
+      <symbol id="i-type" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h11v2M9.5 5v14M7.5 19h4M14 13v-1.5h7V13M17.5 11.5V19M16 19h3"/></symbol>
+      <symbol id="i-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 5 12 2.5-6h4"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5.5 12.5 4 4 9-9"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     </defs>
   </svg>
 
   <div id="app">
-    <header>
-      <div class="logo"><svg width="18" height="18"><use href="#mark" /></svg></div>
-      <div class="title">
-        <div class="title-row"><b>Figma Bridge</b><span class="ver" id="verPill">v—</span></div>
-        <span id="subtitle">Claude ⇄ Figma, no rate limits</span>
-      </div>
-      <button class="icon-btn" id="btnSettings" title="Settings">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+    <header class="top">
+      <div class="mark"><svg width="14" height="14"><use href="#i-mark"/></svg></div>
+      <div class="name">Figma Bridge</div>
+      <span class="pill"><span class="dot"></span><span id="pillText">Connecting</span></span>
+      <button class="ibtn" id="btnSettings" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
       </button>
-      <button class="icon-btn" id="btnCompact" title="Collapse to a bar">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>
+      <button class="ibtn" id="btnCompact" title="Collapse to a bar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
       </button>
     </header>
 
-    <section class="card status">
-      <div class="status-row">
-        <span class="dot"></span>
-        <span id="statusText">Connecting…</span>
-        <span id="since"></span>
+    <section class="bridge">
+      <div class="bridge-row">
+        <div class="tile claude" id="tileAgent"><svg width="20" height="20"><use href="#i-spark"/></svg></div>
+        <div class="link"><div class="wire"></div><div id="packets"></div><span class="badge" id="badge">connecting</span></div>
+        <div class="tile figma" id="tileFigma"><svg width="18" height="18"><use href="#i-frame"/></svg></div>
       </div>
-      <div class="meta">
-        <div class="meta-row">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
-          <span id="fileName">—</span>
-        </div>
-        <div class="meta-row">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
-          <span id="pageName">—</span>
-        </div>
+      <div class="labels">
+        <div class="lbl"><b>Claude Code</b><span class="trunc" id="agentSub">MCP · localhost:3055</span></div>
+        <div class="lbl right"><b class="trunc" id="fileName">This file</b><span class="trunc" id="pageName">—</span></div>
       </div>
-      <div class="help" id="helpOffline">
-        <ol class="steps">
-          <li><span class="num">1</span><span>Open <b>Claude Code</b>. The bridge starts with it (MCP server <b>FigmaBridge</b>).</span></li>
-          <li><span class="num">2</span><span>Keep <b>this plugin open</b>. It connects on its own as soon as the server is up.</span></li>
-        </ol>
-        <div class="help-actions"><button class="btn js-retry">Retry now</button><span class="js-retry-in" id="retryIn"></span></div>
-      </div>
-      <div class="help" id="helpForeign">
-        <ol class="steps">
-          <li><span class="num">!</span><span>Another program is using <b>port 3055</b> (often an old TalkToFigma socket). Close it and the connection resumes by itself.</span></li>
-        </ol>
-        <div class="cmd"><code>Get-NetTCPConnection -LocalPort 3055</code><button class="act" id="btnCopyCmd">Copy</button></div>
-        <div class="help-actions"><button class="btn js-retry">Retry now</button><span class="js-retry-in"></span></div>
-      </div>
-      <div class="progress"></div>
     </section>
 
-    <section class="stats">
-      <div class="stat"><b id="stCount">0</b><span>Commands</span></div>
-      <div class="stat" id="errTile"><b id="stErr">0</b><span>Errors</span></div>
-      <div class="stat"><svg id="spark" preserveAspectRatio="none"></svg><b id="stAvg">—</b><span>Avg. time</span></div>
+    <section class="setup">
+      <div class="check done">
+        <span class="cico"><svg width="10" height="10"><use href="#i-check"/></svg></span>
+        <div class="trunc"><b>Plugin is running</b><span class="trunc" id="chkFile">in this file</span></div>
+      </div>
+      <div class="check wait" id="chkServer">
+        <span class="cico"></span>
+        <div><b>Start Claude Code</b><span>The bridge starts with it (MCP server <b style="display:inline">FigmaBridge</b>). This panel connects by itself.</span></div>
+      </div>
+      <div class="check fail" id="chkPort">
+        <span class="cico"><svg width="10" height="10"><use href="#i-x"/></svg></span>
+        <div style="flex:1;min-width:0"><b>Port 3055 is used by another app</b><span>Often an old TalkToFigma socket. Close it and the bridge reconnects.</span>
+          <div class="cmd"><code class="mono trunc">Get-NetTCPConnection -LocalPort 3055</code><button class="mini" id="btnCopyCmd">Copy</button></div>
+        </div>
+      </div>
+      <div class="setup-actions"><button class="btn" id="btnRetry">Retry now</button><span class="countdown" id="countdown"></span></div>
     </section>
 
-    <div class="log-head"><h2>Activity</h2><button class="link" id="btnClear">Clear</button></div>
+    <section class="metrics">
+      <div class="metric"><div class="v" id="mCount">0</div><div class="k">Commands</div></div>
+      <div class="metric" id="mErrCell"><div class="v" id="mErr">0</div><div class="k">Errors</div></div>
+      <div class="metric wide"><div class="v" id="mAvg">—</div><div class="k">Avg. time</div><svg id="spark" viewBox="0 0 46 18" preserveAspectRatio="none"></svg></div>
+    </section>
+
+    <div class="act-head">
+      <h2>Activity</h2>
+      <div class="seg" id="filter"><button data-f="all" class="on">All</button><button data-f="err">Errors<span class="count" id="errCount"></span></button></div>
+      <button class="ibtn" id="btnClear" title="Clear activity">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 12.5h9l1-12.5"/></svg>
+      </button>
+    </div>
     <ul id="log"></ul>
+
+    <footer class="foot">
+      <span id="footChannel">default</span><span class="sep"></span><span>localhost:3055</span>
+      <span class="grow"></span><span id="footVer">v—</span>
+    </footer>
   </div>
 
   <div id="bar">
-    <div class="logo"><svg width="14" height="14"><use href="#mark" /></svg><span class="dot"></span></div>
-    <div class="bar-text"><b id="barTitle">Connecting…</b><span id="barSub">—</span></div>
-    <button class="icon-btn" id="btnExpand" title="Expand">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+    <div class="mark"><svg width="14" height="14"><use href="#i-mark"/></svg><span class="dot"></span></div>
+    <div class="bar-text trunc"><b class="trunc" id="barTitle">Connecting…</b><span class="trunc" id="barSub">—</span></div>
+    <button class="ibtn" id="btnExpand" title="Expand">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h5v5M9 20H4v-5M20 4l-6 6M4 20l6-6"/></svg>
     </button>
-    <div class="progress"></div>
   </div>
 
-  <div class="sheet" id="settings">
-    <div class="sheet-head"><b>Settings</b><button class="icon-btn" id="btnCloseSettings" title="Close">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-    </button></div>
-    <div>
-      <label for="inChannel">Channel</label>
-      <input id="inChannel" spellcheck="false" />
-      <div class="hint">Keep “default” unless the MCP server sets FIGMA_BRIDGE_CHANNEL.</div>
-    </div>
-    <div>
-      <div class="kv"><span>Server</span><span class="mono">ws://localhost:3055</span></div>
-      <div class="kv"><span>Session</span><span class="mono" id="sessId">—</span></div>
-      <div class="kv"><span>Version</span><span class="mono" id="verText">—</span></div>
-    </div>
-    <div class="spacer"></div>
-    <button class="btn" id="btnSave">Save and reconnect</button>
+  <div id="grip" title="Drag to resize">
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M9 3 3 9M9 6.5 6.5 9"/></svg>
   </div>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="sheet" id="sheet">
+    <div class="sheet-head"><b>Settings</b>
+      <button class="ibtn" id="btnCloseSettings" title="Close"><svg width="14" height="14"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="sheet-body">
+      <div class="group">
+        <h3>Connection</h3>
+        <label for="inChannel">Channel</label>
+        <input id="inChannel" spellcheck="false" autocomplete="off" />
+        <div class="hint">Keep “default” unless the MCP server sets FIGMA_BRIDGE_CHANNEL.</div>
+      </div>
+      <div class="group">
+        <h3>Window</h3>
+        <button class="btn quiet" id="btnResetSize">Reset window size</button>
+        <div class="hint">Drag the bottom-right corner to resize. The size is remembered.</div>
+      </div>
+      <div class="group">
+        <h3>About</h3>
+        <div class="kv"><span>Server</span><span class="mono">ws://localhost:3055</span></div>
+        <div class="kv"><span>Session</span><span class="mono" id="sessId">—</span></div>
+        <div class="kv"><span>Version</span><span class="mono" id="verText">—</span></div>
+      </div>
+    </div>
+    <div class="sheet-foot"><button class="btn quiet" id="btnCancel">Cancel</button><button class="btn" id="btnSave">Save</button></div>
+  </aside>
 
   <div id="toast"></div>
 
@@ -311,21 +420,21 @@
 "use strict";
 const WS_URL = "ws://localhost:3055";
 const CHUNK = 1 << 20;
-const MAX_LOG = 20;
+const MAX_LOG = 50;
 const HANDSHAKE_MS = 3000;
 const SLOW_MS = 3000;
 const METHODS = {
-  run_script: ["script", "#a259ff"],
-  screenshot: ["screenshot", "#1abcfe"],
-  place_image: ["image", "#14ae5c"],
-  import_svg: ["svg", "#f5a623"],
-  get_context: ["context", "#8a8a8a"],
-  list_fonts: ["fonts", "#8a8a8a"],
-  ping: ["ping", "#8a8a8a"],
+  run_script: { label: "Script", color: "#8b5cf6", icon: "i-script" },
+  screenshot: { label: "Screenshot", color: "#0ea5e9", icon: "i-shot" },
+  place_image: { label: "Image", color: "#10b981", icon: "i-image" },
+  import_svg: { label: "SVG", color: "#f59e0b", icon: "i-pen" },
+  get_context: { label: "Context", color: "#64748b", icon: "i-layers" },
+  list_fonts: { label: "Fonts", color: "#ec4899", icon: "i-type" },
+  ping: { label: "Ping", color: "#64748b", icon: "i-pulse" },
 };
+const methodOf = (m) => METHODS[m] || { label: m, color: "#64748b", icon: "i-pulse" };
 
 const $ = (id) => document.getElementById(id);
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const toPlugin = (msg) => parent.postMessage({ pluginMessage: msg }, "*");
 
 let version = "";
@@ -333,12 +442,13 @@ let session = null;
 let settings = { channel: "default", compact: false };
 let ws = null;
 let state = "connecting";
-let connectedAt = 0;
 let everConnected = false;
 let retryDelay = 400;
 let retryAt = 0;
 let retryTimer = 0;
 let handshakeTimer = 0;
+let filter = "all";
+let openId = null;
 const entries = [];
 const running = new Map();
 const stats = { count: 0, errors: 0, totalMs: 0 };
@@ -418,7 +528,6 @@ function connect() {
       clearTimeout(handshakeTimer);
       if (msg.bridge !== "figma-bridge") { sock.onclose = null; sock.close(); ws = null; return scheduleRetry("foreign"); }
       retryDelay = 400;
-      connectedAt = Date.now();
       setState("connected");
       if (!everConnected) { everConnected = true; toPlugin({ t: "notify", text: "✦ Figma Bridge connected to your AI" }); }
     } else if (msg.t === "req") {
@@ -437,16 +546,13 @@ function scheduleRetry(nextState) {
   retryTimer = setTimeout(connect, delay);
 }
 
+setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('{"t":"ping"}'); }, 20000);
 setInterval(() => {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send('{"t":"ping"}');
-}, 20000);
-setInterval(() => {
-  if (state === "offline" || state === "foreign") {
-    const s = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
-    for (const el of $$(".js-retry-in")) el.textContent = s > 0 ? "Retrying in " + s + " s" : "Connecting…";
-  }
+  if (state !== "offline" && state !== "foreign") return;
+  const s = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
+  $("countdown").textContent = s > 0 ? "Retrying in " + s + " s" : "Trying…";
 }, 250);
-setInterval(() => { renderSince(); if (entries.length) render(); }, 30000);
+setInterval(() => { if (entries.length) renderLog(); }, 30000);
 window.addEventListener("focus", () => { if (state === "offline") { retryDelay = 400; connect(); } });
 
 // ─── Requests ───────────────────────────────────────────────────────────────
@@ -457,11 +563,11 @@ function summarize(msg) {
       const line = String(p.code || "").split("\n").map((l) => l.trim()).find((l) => l && !l.startsWith("//"));
       return line || "(empty script)";
     }
-    case "screenshot": return (p.nodeId || "selection") + (p.scale ? " @" + p.scale + "x" : "");
-    case "place_image": return p.name || (p.nodeId ? "fill " + p.nodeId : "new rectangle");
-    case "import_svg": return p.name || (p.svg ? Math.round(p.svg.length / 1024 * 10) / 10 + " KB" : "SVG");
-    case "list_fonts": return p.filter ? "“" + p.filter + "”" : "all fonts";
-    case "get_context": return "file, pages, selection";
+    case "screenshot": return (p.nodeId ? "Node " + p.nodeId : "Selection") + (p.scale ? " · " + p.scale + "×" : "") + (p.format === "JPG" ? " · JPG" : "");
+    case "place_image": return p.name || (p.nodeId ? "Fill on " + p.nodeId : "New image layer");
+    case "import_svg": return p.name || (p.svg ? (Math.round(p.svg.length / 102.4) / 10) + " KB of SVG" : "SVG");
+    case "list_fonts": return p.filter ? "Matching “" + p.filter + "”" : "All fonts";
+    case "get_context": return "File, pages and selection";
     default: return "";
   }
 }
@@ -482,6 +588,7 @@ async function onRequest(msg) {
   running.set(msg.id, entry);
   entries.unshift(entry);
   if (entries.length > MAX_LOG) entries.length = MAX_LOG;
+  packet("out");
   render();
   let params = msg.params || {};
   try {
@@ -503,11 +610,13 @@ function onResult(res) {
     running.delete(res.id);
     entry.ms = Math.round(performance.now() - entry.start);
     entry.status = res.ok ? "ok" : "err";
-    entry.error = res.ok ? "" : (res.line ? "Line " + res.line + " — " : "") + res.error;
+    entry.error = res.ok ? "" : (res.line ? "Line " + res.line + ": " : "") + res.error;
+    entry.code = res.code;
     entry.nodeId = res.ok ? resultNode(entry.method, res.result) : null;
     stats.count++;
     stats.totalMs += entry.ms;
     if (!res.ok) stats.errors++;
+    packet(res.ok ? "ok" : "err");
     render();
   }
   if (res.ok && res.result && res.result.bytes instanceof Uint8Array) {
@@ -517,26 +626,37 @@ function onResult(res) {
   send(res);
 }
 
+// A dot travels along the bridge for each request and each answer.
+function packet(kind) {
+  const host = $("packets");
+  if (!host.animate) return;
+  const dot = document.createElement("span");
+  dot.className = "packet";
+  const css = getComputedStyle(document.documentElement);
+  dot.style.setProperty("--c", kind === "out" ? css.getPropertyValue("--accent") : kind === "ok" ? css.getPropertyValue("--ok") : css.getPropertyValue("--err"));
+  host.appendChild(dot);
+  const frames = kind === "out" ? [{ left: "0%", opacity: 0 }, { opacity: 1, offset: .15 }, { left: "100%", opacity: 1 }] : [{ left: "100%", opacity: 0 }, { opacity: 1, offset: .15 }, { left: "0%", opacity: 1 }];
+  dot.animate(frames, { duration: 520, easing: "cubic-bezier(.4,0,.2,1)" }).onfinish = () => {
+    dot.remove();
+    const tile = $(kind === "out" ? "tileFigma" : "tileAgent");
+    tile.classList.remove("hit");
+    void tile.offsetWidth;
+    tile.classList.add("hit");
+  };
+}
+
 // ─── Rendering ──────────────────────────────────────────────────────────────
-const STATUS = {
-  connecting: "Connecting…",
-  connected: "Connected to your AI",
-  offline: "Waiting for Claude Code",
-  foreign: "Port 3055 is busy",
-};
+const PILL = { connecting: "Connecting", connected: "Live", offline: "Offline", foreign: "Port busy" };
+const BADGE = { connecting: "connecting", connected: "working", offline: "waiting for Claude", foreign: "port 3055 busy" };
 
 function setState(next) {
   state = next;
   document.body.classList.remove("s-connecting", "s-connected", "s-offline", "s-foreign");
   document.body.classList.add("s-" + next);
-  document.body.classList.toggle("pulse", next === "connecting");
-  $("statusText").textContent = STATUS[next];
-  $("helpOffline").style.display = next === "offline" ? "block" : "none";
-  $("helpForeign").style.display = next === "foreign" ? "block" : "none";
-  renderSince();
-  renderSubtitle();
+  $("pillText").textContent = PILL[next];
+  $("badge").textContent = BADGE[next];
   renderBar();
-  if (!entries.length) render();
+  if (!entries.length) renderLog();
 }
 
 function esc(s) {
@@ -544,93 +664,95 @@ function esc(s) {
 }
 function ago(t) {
   const s = Math.round((Date.now() - t) / 1000);
-  if (s < 45) return "now";
-  if (s < 3600) return Math.round(s / 60) + "m ago";
+  if (s < 45) return "just now";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
   return new Date(t).toTimeString().slice(0, 5);
 }
 const fmtMs = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(ms >= 10000 ? 0 : 1) + " s" : ms + " ms");
-const ICON_OK = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
-const ICON_ERR = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>';
-
-function renderSince() {
-  $("since").textContent = state === "connected" && connectedAt ? "since " + new Date(connectedAt).toTimeString().slice(0, 5) : "";
-}
-
-function renderSubtitle() {
-  const run = running.size ? [...running.values()][0] : null;
-  $("subtitle").textContent = run
-    ? "Claude is working… " + (METHODS[run.method] || [run.method])[0]
-    : state === "connected" ? "Linked to Claude Code" : "Claude ⇄ Figma, no rate limits";
-}
-
-function renderSpark() {
-  const done = entries.filter((e) => e.status !== "run").slice(0, 20).reverse();
-  const svg = $("spark");
-  if (done.length < 2) { svg.innerHTML = ""; return; }
-  const w = 100, h = 30, max = Math.max(...done.map((e) => e.ms), 1);
-  const pts = done.map((e, i) => [(i / (done.length - 1)) * w, h - 3 - (e.ms / max) * (h - 8)]);
-  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-  svg.setAttribute("viewBox", "0 0 " + w + " " + h);
-  svg.innerHTML =
-    '<defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a259ff" stop-opacity=".28"/><stop offset="1" stop-color="#a259ff" stop-opacity="0"/></linearGradient></defs>'
-    + '<path d="' + line + " L" + w + " " + h + " L0 " + h + ' Z" fill="url(#sg)"/>'
-    + '<path d="' + line + '" fill="none" stroke="#a259ff" stroke-width="1.4" vector-effect="non-scaling-stroke" opacity=".8"/>';
-}
+const icon = (id, size) => '<svg width="' + size + '" height="' + size + '"><use href="#' + id + '"/></svg>';
 
 function render() {
   document.body.classList.toggle("busy", running.size > 0);
-  $("stCount").textContent = stats.count;
-  $("stErr").textContent = stats.errors;
-  $("errTile").classList.toggle("has-err", stats.errors > 0);
-  $("stAvg").textContent = stats.count ? fmtMs(Math.round(stats.totalMs / stats.count)) : "—";
+  document.body.classList.toggle("idle", stats.count === 0);
+  $("mCount").textContent = stats.count;
+  $("mErr").textContent = stats.errors;
+  $("mErrCell").classList.toggle("bad", stats.errors > 0);
+  $("mAvg").textContent = stats.count ? fmtMs(Math.round(stats.totalMs / stats.count)) : "—";
+  const errCount = entries.filter((e) => e.status === "err").length;
+  $("errCount").textContent = errCount;
+  $("errCount").classList.toggle("show", errCount > 0);
   renderSpark();
-  renderSubtitle();
-  const log = $("log");
-  if (!entries.length) {
-    log.innerHTML = '<li class="empty"><div class="logo"><svg width="20" height="20"><use href="#mark"/></svg></div>'
-      + (state === "connected"
-        ? "<b>Ready when you are</b>Ask Claude to design something in this file."
-        : "<b>No activity yet</b>Commands from your AI will show up here.")
-      + "</li>";
-  } else {
-    log.innerHTML = entries.map((e) => {
-      const m = METHODS[e.method] || [e.method, "#8a8a8a"];
-      const actions = (e.nodeId ? '<button class="act" data-act="show">Show</button>' : "")
-        + (e.status === "err" ? '<button class="act" data-act="copy">Copy</button>' : "");
-      const cls = "entry " + e.status + (e.open ? " open" : "") + (e.isNew ? " new" : "") + (e.ms > SLOW_MS ? " slow" : "");
-      e.isNew = false;
-      return '<li class="' + cls + '" data-id="' + e.id + '">'
-        + '<span class="ico">' + (e.status === "ok" ? ICON_OK : e.status === "err" ? ICON_ERR : "") + "</span>"
-        + '<div class="body"><div class="top"><span class="chip" style="--chip:' + m[1] + '">' + m[0] + "</span>"
-        + '<span class="when">' + ago(e.at) + "</span>"
-        + '<span class="dur">' + (e.status === "run" ? "…" : fmtMs(e.ms)) + "</span>"
-        + (actions ? '<span class="actions">' + actions + "</span>" : "") + "</div>"
-        + '<div class="sum mono">' + esc(e.status === "err" ? e.error.split("\n")[0] : e.sum) + "</div>"
-        + (e.status === "err" ? '<div class="errmsg mono">' + esc(e.error) + "</div>" : "")
-        + "</div></li>";
-    }).join("");
-  }
+  renderLog();
   renderBar();
 }
 
+function renderSpark() {
+  const done = entries.filter((e) => e.status !== "run").slice(0, 16).reverse();
+  const svg = $("spark");
+  if (done.length < 2) { svg.innerHTML = ""; return; }
+  // Square-root scale so one slow command doesn't flatten the others.
+  const w = 46, h = 18, max = Math.sqrt(Math.max(...done.map((e) => e.ms), 1));
+  const bw = w / done.length;
+  svg.innerHTML = done.map((e, i) => {
+    const bh = Math.max(2, (Math.sqrt(e.ms) / max) * h);
+    const color = e.status === "err" ? "var(--err)" : "var(--accent)";
+    return '<rect x="' + (i * bw + 0.6).toFixed(2) + '" y="' + (h - bh).toFixed(2) + '" width="' + Math.max(1, bw - 1.2).toFixed(2) + '" height="' + bh.toFixed(2) + '" rx="1" fill="' + color + '" opacity=".75"/>';
+  }).join("");
+}
+
+function renderLog() {
+  const log = $("log");
+  const list = filter === "err" ? entries.filter((e) => e.status === "err") : entries;
+  if (!list.length) {
+    log.innerHTML = filter === "err"
+      ? '<li class="empty"><div class="art">' + icon("i-check", 18) + "</div><b>No errors</b>Everything Claude ran worked.</li>"
+      : state === "connected"
+        ? '<li class="empty"><div class="art">' + icon("i-spark", 20) + '</div><b>Ready when you are</b>Ask Claude to design something in this file.<span class="quote">“Design a pricing card on a new page”</span></li>'
+        : '<li class="empty"><div class="art">' + icon("i-pulse", 18) + "</div><b>No activity yet</b>Commands from Claude will show up here.</li>";
+    return;
+  }
+  log.innerHTML = list.map((e) => {
+    const m = methodOf(e.method);
+    const cls = "row " + e.status + (e.id === openId ? " open" : "") + (e.isNew ? " new" : "") + (e.ms > SLOW_MS ? " slow" : "");
+    e.isNew = false;
+    const quick = e.nodeId ? '<button class="mini quick" data-act="show">Show</button>' : e.status === "err" ? '<button class="mini quick" data-act="copy">Copy</button>' : "";
+    const facts = '<div class="facts"><span>Took <b>' + (e.status === "run" ? "…" : fmtMs(e.ms)) + "</b></span>"
+      + "<span>At <b>" + new Date(e.at).toTimeString().slice(0, 8) + "</b></span>"
+      + (e.nodeId ? '<span>Layer <b class="mono">' + esc(e.nodeId) + "</b></span>" : "")
+      + (e.code && e.status === "err" ? '<span>Code <b class="mono">' + esc(e.code) + "</b></span>" : "") + "</div>";
+    const actions = (e.nodeId ? '<button class="mini" data-act="show">Show in canvas</button>' : "")
+      + (e.status === "err" ? '<button class="mini" data-act="copy">Copy error</button>' : "")
+      + '<button class="mini" data-act="copysum">Copy command</button>';
+    return '<li class="' + cls + '" data-id="' + e.id + '">'
+      + '<div class="ic" style="--c:' + m.color + '">' + icon(m.icon, 14) + "</div>"
+      + '<div class="main"><div class="l1"><span class="m">' + esc(m.label) + '</span><span class="t">' + (e.status === "run" ? "running…" : ago(e.at)) + "</span></div>"
+      + '<div class="l2 mono trunc">' + esc(e.status === "err" ? e.error.split("\n")[0] : e.sum) + "</div>"
+      + '<div class="detail">' + (e.status === "err" ? '<div class="errbox mono">' + esc(e.error) + "</div>" : "") + facts
+      + '<div class="detail-actions">' + actions + "</div></div></div>"
+      + '<div class="side"><span class="dur">' + (e.status === "run" ? "" : fmtMs(e.ms)) + "</span>" + quick + "</div></li>";
+  }).join("");
+}
+
 function renderBar() {
-  $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connected") : STATUS[state];
+  $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connected") : PILL[state] + (state === "offline" ? ": waiting for Claude Code" : "");
   const last = entries[0];
   $("barSub").textContent = last
-    ? (METHODS[last.method] || [last.method])[0] + " · " + (last.status === "run" ? "running…" : last.status === "ok" ? fmtMs(last.ms) : "error")
+    ? methodOf(last.method).label + " · " + (last.status === "run" ? "running…" : last.status === "ok" ? fmtMs(last.ms) : "error")
     : state === "connected" ? "Ready" : "Keep this plugin open";
 }
 
 function renderSession() {
-  $("fileName").textContent = session ? session.fileName : "—";
+  $("fileName").textContent = session ? session.fileName : "This file";
   $("pageName").textContent = session ? session.page : "—";
+  $("chkFile").textContent = session ? "in “" + session.fileName + "”" : "in this file";
   $("sessId").textContent = session ? session.id.slice(0, 8) : "—";
   $("verText").textContent = version || "—";
-  $("verPill").textContent = "v" + (version || "—");
+  $("footVer").textContent = "v" + (version || "—");
+  $("footChannel").textContent = settings.channel === "default" ? "default channel" : "channel " + settings.channel;
   renderBar();
 }
 
-// ─── UI events ──────────────────────────────────────────────────────────────
+// ─── Interactions ───────────────────────────────────────────────────────────
 let toastTimer = 0;
 function toast(text) {
   const el = $("toast");
@@ -643,8 +765,7 @@ function toast(text) {
 function copy(text) {
   const ta = document.createElement("textarea");
   ta.value = text;
-  ta.style.position = "fixed";
-  ta.style.opacity = "0";
+  ta.style.cssText = "position:fixed;opacity:0";
   document.body.appendChild(ta);
   ta.select();
   let ok = false;
@@ -654,38 +775,86 @@ function copy(text) {
 }
 
 $("log").addEventListener("click", (ev) => {
-  const li = ev.target.closest(".entry");
+  const li = ev.target.closest(".row");
   if (!li) return;
   const e = entries.find((x) => x.id === li.dataset.id);
   if (!e) return;
   const act = ev.target.closest("[data-act]");
-  if (act && act.dataset.act === "show") return toPlugin({ t: "focus", nodeId: e.nodeId });
-  if (act && act.dataset.act === "copy") return copy(e.error);
-  if (e.status === "err") { e.open = !e.open; render(); }
+  if (act) {
+    if (act.dataset.act === "show") { toPlugin({ t: "focus", nodeId: e.nodeId }); toast("Selected in canvas"); }
+    else if (act.dataset.act === "copy") copy(e.error);
+    else if (act.dataset.act === "copysum") copy(e.sum);
+    return;
+  }
+  if (window.getSelection().toString()) return;
+  openId = openId === e.id ? null : e.id;
+  renderLog();
 });
-$("btnClear").onclick = () => { entries.length = 0; render(); };
-for (const b of $$(".js-retry")) b.onclick = () => { retryDelay = 400; connect(); };
+
+$("filter").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-f]");
+  if (!b) return;
+  filter = b.dataset.f;
+  for (const x of $("filter").children) x.classList.toggle("on", x === b);
+  renderLog();
+});
+
+$("btnClear").onclick = () => { entries.length = 0; openId = null; render(); };
+$("btnRetry").onclick = () => { retryDelay = 400; connect(); };
 $("btnCopyCmd").onclick = () => copy("Get-NetTCPConnection -LocalPort 3055");
 $("btnCompact").onclick = () => setCompact(true);
 $("btnExpand").onclick = () => setCompact(false);
-$("btnSettings").onclick = () => { $("inChannel").value = settings.channel; $("settings").classList.add("open"); $("inChannel").focus(); };
-$("btnCloseSettings").onclick = () => $("settings").classList.remove("open");
+
+function openSettings(on) {
+  if (on) $("inChannel").value = settings.channel;
+  document.body.classList.toggle("settings-open", on);
+  if (on) setTimeout(() => $("inChannel").focus(), 120);
+}
+$("btnSettings").onclick = () => openSettings(true);
+$("btnCloseSettings").onclick = $("btnCancel").onclick = $("scrim").onclick = () => openSettings(false);
+$("btnResetSize").onclick = () => { toPlugin({ t: "resetSize" }); toast("Window size reset"); };
 $("btnSave").onclick = () => {
-  settings.channel = $("inChannel").value.trim() || "default";
-  toPlugin({ t: "set", key: "channel", value: settings.channel });
-  $("settings").classList.remove("open");
+  const next = $("inChannel").value.trim() || "default";
+  openSettings(false);
+  if (next === settings.channel) return;
+  settings.channel = next;
+  toPlugin({ t: "set", key: "channel", value: next });
   renderSession();
   retryDelay = 400;
   connect();
+  toast("Reconnecting on “" + next + "”");
 };
 $("inChannel").addEventListener("keydown", (ev) => { if (ev.key === "Enter") $("btnSave").click(); });
-document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") $("settings").classList.remove("open"); });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") openSettings(false); });
 
 function setCompact(on) {
   settings.compact = on;
   document.body.classList.toggle("compact", on);
   toPlugin({ t: "compact", value: on });
 }
+
+// Resize from the corner grip: Figma windows can only be resized by the plugin itself.
+$("grip").addEventListener("pointerdown", (ev) => {
+  ev.preventDefault();
+  const grip = $("grip");
+  grip.setPointerCapture(ev.pointerId);
+  const startX = ev.screenX, startY = ev.screenY, startW = window.innerWidth, startH = window.innerHeight;
+  let size = null;
+  let frame = 0;
+  const move = (e) => {
+    size = { width: startW + e.screenX - startX, height: startH + e.screenY - startY };
+    if (!frame) frame = requestAnimationFrame(() => { frame = 0; toPlugin({ t: "resize", width: size.width, height: size.height }); });
+  };
+  const up = () => {
+    grip.removeEventListener("pointermove", move);
+    grip.removeEventListener("pointerup", up);
+    grip.removeEventListener("pointercancel", up);
+    if (size) toPlugin({ t: "resize", width: size.width, height: size.height, save: true });
+  };
+  grip.addEventListener("pointermove", move);
+  grip.addEventListener("pointerup", up);
+  grip.addEventListener("pointercancel", up);
+});
 
 // ─── Plugin messages ────────────────────────────────────────────────────────
 window.onmessage = (ev) => {
