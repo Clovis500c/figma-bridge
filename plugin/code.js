@@ -1,6 +1,6 @@
 (() => {
   // plugin/code.ts
-  var VERSION = "1.0.0";
+  var VERSION = "1.0.1";
   var FULL_SIZE = { width: 320, height: 500 };
   var COMPACT_SIZE = { width: 320, height: 52 };
   figma.skipInvisibleInstanceChildren = true;

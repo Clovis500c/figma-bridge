@@ -1,7 +1,7 @@
 // Figma Bridge — plugin main thread.
 // Syntax stays ES2017 (no ?. ?? or object spread): the plugin sandbox parser is conservative.
 
-const VERSION = "1.0.0";
+const VERSION = "1.0.1";
 const FULL_SIZE = { width: 320, height: 500 };
 const COMPACT_SIZE = { width: 320, height: 52 };
 

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <style>
@@ -171,11 +171,11 @@
           <path d="M3 17c3-6 15-6 18 0" /><path d="M7 13.6V17M12 12.5V17M17 13.6V17" /><path d="M2 17h20" />
         </svg>
       </div>
-      <div class="title"><b>Figma Bridge</b><span>Claude ⇄ Figma, sans limite</span></div>
-      <button class="icon-btn" id="btnSettings" title="Réglages">
+      <div class="title"><b>Figma Bridge</b><span>Claude ⇄ Figma, no rate limits</span></div>
+      <button class="icon-btn" id="btnSettings" title="Settings">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       </button>
-      <button class="icon-btn" id="btnCompact" title="Réduire en barre">
+      <button class="icon-btn" id="btnCompact" title="Collapse to a bar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
       </button>
     </header>
@@ -183,8 +183,8 @@
     <section class="card status">
       <div class="status-row">
         <span class="dot"></span>
-        <span id="statusText">Connexion…</span>
-        <span class="badge" id="channelBadge" title="Canal">default</span>
+        <span id="statusText">Connecting…</span>
+        <span class="badge" id="channelBadge" title="Channel">default</span>
       </div>
       <div class="file">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
@@ -193,43 +193,43 @@
       <div class="help">
         <p id="helpText"></p>
         <div class="help-actions">
-          <button class="btn" id="btnRetry">Réessayer maintenant</button>
+          <button class="btn" id="btnRetry">Retry now</button>
           <span id="retryIn"></span>
         </div>
       </div>
     </section>
 
     <section class="stats">
-      <div class="stat"><b id="stCount">0</b><span>Commandes</span></div>
-      <div class="stat err"><b id="stErr">0</b><span>Erreurs</span></div>
-      <div class="stat"><b id="stAvg">—</b><span>Moyenne</span></div>
+      <div class="stat"><b id="stCount">0</b><span>Commands</span></div>
+      <div class="stat err"><b id="stErr">0</b><span>Errors</span></div>
+      <div class="stat"><b id="stAvg">—</b><span>Average</span></div>
     </section>
 
-    <div class="log-head"><h2>Activité</h2><button id="btnClear">Effacer</button></div>
+    <div class="log-head"><h2>Activity</h2><button id="btnClear">Clear</button></div>
     <ul id="log"></ul>
   </div>
 
   <div id="bar">
     <span class="dot"></span>
-    <div class="bar-text"><b id="barTitle">Connexion…</b><span id="barSub">—</span></div>
-    <button class="icon-btn" id="btnExpand" title="Agrandir">
+    <div class="bar-text"><b id="barTitle">Connecting…</b><span id="barSub">—</span></div>
+    <button class="icon-btn" id="btnExpand" title="Expand">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
     </button>
   </div>
 
   <div class="sheet" id="settings">
-    <div class="sheet-head"><b>Réglages</b><button class="icon-btn" id="btnCloseSettings" title="Fermer">✕</button></div>
+    <div class="sheet-head"><b>Settings</b><button class="icon-btn" id="btnCloseSettings" title="Close">✕</button></div>
     <div>
-      <label for="inChannel">Canal</label>
+      <label for="inChannel">Channel</label>
       <input id="inChannel" spellcheck="false" />
-      <div class="hint">Laisse « default » sauf si le serveur MCP a FIGMA_BRIDGE_CHANNEL.</div>
+      <div class="hint">Keep “default” unless the MCP server sets FIGMA_BRIDGE_CHANNEL.</div>
     </div>
     <div>
-      <div class="kv"><span>Serveur</span><span class="mono">ws://localhost:3055</span></div>
+      <div class="kv"><span>Server</span><span class="mono">ws://localhost:3055</span></div>
       <div class="kv"><span>Session</span><span class="mono" id="sessId">—</span></div>
       <div class="kv"><span>Version</span><span class="mono" id="verText">—</span></div>
     </div>
-    <button class="btn" id="btnSave">Enregistrer et reconnecter</button>
+    <button class="btn" id="btnSave">Save and reconnect</button>
   </div>
 
 <script>
@@ -240,11 +240,11 @@ const MAX_LOG = 20;
 const HANDSHAKE_MS = 3000;
 const METHODS = {
   run_script: ["script", "#a259ff"],
-  screenshot: ["capture", "#1abcfe"],
+  screenshot: ["screenshot", "#1abcfe"],
   place_image: ["image", "#14ae5c"],
   import_svg: ["svg", "#f5a623"],
-  get_context: ["contexte", "#8a8a8a"],
-  list_fonts: ["polices", "#8a8a8a"],
+  get_context: ["context", "#8a8a8a"],
+  list_fonts: ["fonts", "#8a8a8a"],
   ping: ["ping", "#8a8a8a"],
 };
 
@@ -341,7 +341,7 @@ function connect() {
       if (msg.bridge !== "figma-bridge") { sock.onclose = null; sock.close(); ws = null; return scheduleRetry("foreign"); }
       retryDelay = 400;
       setState("connected");
-      if (!everConnected) { everConnected = true; toPlugin({ t: "notify", text: "✦ Figma Bridge connecté à l'IA" }); }
+      if (!everConnected) { everConnected = true; toPlugin({ t: "notify", text: "✦ Figma Bridge connected to your AI" }); }
     } else if (msg.t === "req") {
       onRequest(msg);
     }
@@ -364,7 +364,7 @@ setInterval(() => {
 setInterval(() => {
   if (state === "offline" || state === "foreign") {
     const s = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
-    $("retryIn").textContent = s > 0 ? "Nouvel essai dans " + s + " s" : "Connexion…";
+    $("retryIn").textContent = s > 0 ? "Retrying in " + s + " s" : "Connecting…";
   }
 }, 250);
 window.addEventListener("focus", () => { if (state === "offline") { retryDelay = 400; connect(); } });
@@ -375,12 +375,12 @@ function summarize(msg) {
   switch (msg.method) {
     case "run_script": {
       const line = String(p.code || "").split("\n").map((l) => l.trim()).find((l) => l && !l.startsWith("//"));
-      return line || "(script vide)";
+      return line || "(empty script)";
     }
-    case "screenshot": return (p.nodeId || "sélection") + (p.scale ? " @" + p.scale + "x" : "");
-    case "place_image": return p.name || (p.nodeId ? "remplissage " + p.nodeId : "nouveau rectangle");
-    case "import_svg": return p.name || (p.svg ? Math.round(p.svg.length / 1024 * 10) / 10 + " Ko" : "SVG");
-    case "list_fonts": return p.filter ? "« " + p.filter + " »" : "toutes";
+    case "screenshot": return (p.nodeId || "selection") + (p.scale ? " @" + p.scale + "x" : "");
+    case "place_image": return p.name || (p.nodeId ? "fill " + p.nodeId : "new rectangle");
+    case "import_svg": return p.name || (p.svg ? Math.round(p.svg.length / 1024 * 10) / 10 + " KB" : "SVG");
+    case "list_fonts": return p.filter ? "“" + p.filter + "”" : "all";
     default: return "";
   }
 }
@@ -400,7 +400,7 @@ async function onRequest(msg) {
       delete params.bytesB64;
     }
   } catch (e) {
-    return onResult({ t: "res", id: msg.id, ok: false, code: "BAD_IMAGE", error: "Impossible de décoder l'image : " + (e && e.message || e) });
+    return onResult({ t: "res", id: msg.id, ok: false, code: "BAD_IMAGE", error: "Could not decode the image: " + (e && e.message || e) });
   }
   toPlugin({ t: "req", id: msg.id, method: msg.method, params, timeoutMs: msg.timeoutMs });
 }
@@ -411,7 +411,7 @@ function onResult(res) {
     running.delete(res.id);
     entry.ms = Math.round(performance.now() - entry.start);
     entry.status = res.ok ? "ok" : "err";
-    entry.error = res.ok ? "" : (res.line ? "Ligne " + res.line + " — " : "") + res.error;
+    entry.error = res.ok ? "" : (res.line ? "Line " + res.line + " — " : "") + res.error;
     stats.count++;
     stats.totalMs += entry.ms;
     if (!res.ok) stats.errors++;
@@ -426,12 +426,12 @@ function onResult(res) {
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
 const TEXT = {
-  connecting: ["Connexion…", ""],
-  connected: ["Connecté à l'IA", ""],
-  offline: ["En attente de Claude Code",
-    "Le bridge démarre tout seul avec Claude Code (serveur MCP « FigmaBridge »). Garde ce plugin ouvert : il se connecte dès que le serveur est prêt."],
-  foreign: ["Port 3055 occupé",
-    "Un autre programme utilise le port 3055 (par exemple l'ancien socket TalkToFigma). Ferme-le : la connexion reprendra toute seule."],
+  connecting: ["Connecting…", ""],
+  connected: ["Connected to your AI", ""],
+  offline: ["Waiting for Claude Code",
+    "The bridge starts automatically with Claude Code (MCP server “FigmaBridge”). Keep this plugin open: it connects as soon as the server is up."],
+  foreign: ["Port 3055 is busy",
+    "Another program is using port 3055 (for example an old TalkToFigma socket). Close it and the connection resumes by itself."],
 };
 
 function setState(next) {
@@ -460,7 +460,7 @@ function render() {
   const log = $("log");
   if (!entries.length) {
     log.innerHTML = '<li class="empty"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8L20 10l-5 3.9L16.5 20 12 16.6 7.5 20 9 13.9 4 10l6.1-1.2z"/></svg>'
-      + (state === "connected" ? "Prêt. Demande à Claude de designer quelque chose." : "Les commandes de l'IA apparaîtront ici.") + "</li>";
+      + (state === "connected" ? "Ready. Ask Claude to design something." : "Commands from your AI will show up here.") + "</li>";
   } else {
     log.innerHTML = entries.map((e) => {
       const m = METHODS[e.method] || [e.method, "#8a8a8a"];
@@ -478,11 +478,11 @@ function render() {
 }
 
 function renderBar() {
-  $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connecté") : TEXT[state][0];
+  $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connected") : TEXT[state][0];
   const last = entries[0];
   $("barSub").textContent = last
-    ? (METHODS[last.method] || [last.method])[0] + " · " + (last.status === "run" ? "en cours…" : last.status === "ok" ? fmtMs(last.ms) : "erreur")
-    : state === "connected" ? "Prêt" : "Garde ce plugin ouvert";
+    ? (METHODS[last.method] || [last.method])[0] + " · " + (last.status === "run" ? "running…" : last.status === "ok" ? fmtMs(last.ms) : "error")
+    : state === "connected" ? "Ready" : "Keep this plugin open";
 }
 
 function renderSession() {
