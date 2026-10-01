@@ -18,7 +18,7 @@ test("prompts and resources over MCP", async () => {
   );
   try {
     const { prompts } = await client.listPrompts();
-    expect(prompts.map((p) => p.name)).toEqual(["new-screen", "apply-design-system", "reproduce-screenshot", "import-website", "figma-to-code", "audit-and-fix"]);
+    expect(prompts.map((p) => p.name)).toEqual(["new-screen", "apply-design-system", "reproduce-screenshot", "import-website", "figma-to-code", "figma-to-roblox", "audit-and-fix"]);
     for (const p of prompts) expect(p.arguments?.every((a) => !a.required)).toBe(true);
     const web = await client.getPrompt({ name: "import-website", arguments: { url: "https://example.com", viewports: "1280, 375" } });
     const webText = (web.messages[0]!.content as { text: string }).text;

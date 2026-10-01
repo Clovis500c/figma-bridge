@@ -7,10 +7,21 @@ startCommand:
       figmaToken:
         type: string
         description: Optional Figma personal access token, only for the comments and versions tools.
+      robloxApiKey:
+        type: string
+        description: Optional Roblox Open Cloud API key (Assets API), only to upload export_roblox pictures.
+      robloxCreatorId:
+        type: string
+        description: Roblox user id, or group:<id>, that owns uploaded pictures.
   commandFunction: |-
     (config) => ({
       command: "npx",
       args: ["-y", "@clovis500c/figma-bridge"],
-      env: config.figmaToken ? { FIGMA_TOKEN: config.figmaToken } : {}
+      env: Object.assign(
+        {},
+        config.figmaToken ? { FIGMA_TOKEN: config.figmaToken } : {},
+        config.robloxApiKey ? { ROBLOX_API_KEY: config.robloxApiKey } : {},
+        config.robloxCreatorId ? { ROBLOX_CREATOR_ID: config.robloxCreatorId } : {}
+      )
     })
   exampleConfig: {}

@@ -11,6 +11,7 @@ import { designTokens } from "./lib/tokens";
 import { exportTokens } from "./lib/tokens-export";
 import { find } from "./lib/find";
 import { prototype } from "./lib/prototype";
+import { robloxImages, robloxTree } from "./lib/roblox";
 import { cancelWait, waitForSelection } from "./lib/selection";
 import {
   clearCancelled,
@@ -165,6 +166,8 @@ const HANDLERS: { [method: string]: Handler } = {
   annotate: annotate,
   export_tree: exportTree,
   node_info: nodeInfo,
+  roblox_tree: robloxTree,
+  roblox_images: robloxImages,
   ping: function () {
     return Promise.resolve({ pong: true, session: sessionInfo() });
   },
@@ -193,6 +196,7 @@ const READ_ONLY: { [method: string]: boolean } = {
   wait_for_selection: true,
   export_tree: true,
   node_info: true,
+  roblox_tree: true,
   ping: true,
 };
 

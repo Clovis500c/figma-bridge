@@ -8,13 +8,13 @@
     "url": "https://github.com/Clovis500c/figma-bridge",
     "source": "github"
   },
-  "version": "1.11.0",
+  "version": "1.12.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@clovis500c/figma-bridge",
-      "version": "1.11.0",
+      "version": "1.12.0",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         {
@@ -22,6 +22,19 @@
           "description": "Optional Figma personal access token, only for the comments and versions tools",
           "isRequired": false,
           "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "ROBLOX_API_KEY",
+          "description": "Optional Roblox Open Cloud API key (Assets API), only to upload export_roblox pictures",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "ROBLOX_CREATOR_ID",
+          "description": "Roblox user id, or group:<id>, that owns uploaded pictures",
+          "isRequired": false,
           "format": "string"
         },
         {
