@@ -12,11 +12,13 @@ import { find } from "./lib/find";
 import { prototype } from "./lib/prototype";
 import { cancelWait, waitForSelection } from "./lib/selection";
 import {
+  clearCancelled,
   codeError,
   fontNamesOf,
   getNode,
   invalidateCaches,
   loadFont,
+  markCancelled,
   pageOf,
   parentFor,
   parseHex,
@@ -111,6 +113,11 @@ figma.ui.onmessage = function (msg: any) {
   } else if (msg.t === "notify") figma.notify(String(msg.text), { timeout: 2500 });
   else if (msg.t === "focus") void focusNode(String(msg.nodeId));
   else if (msg.t === "cancelWait") cancelWait(String(msg.id));
+  else if (msg.t === "cancel") {
+    // The UI already answered the agent; long commands stop at their next checkpoint.
+    markCancelled(String(msg.id));
+    cancelWait(String(msg.id));
+  }
 };
 
 /** Selects a node and zooms to it, switching page if needed ("Show" in the activity log). */
@@ -188,6 +195,7 @@ async function handleRequest(msg: any) {
     commitUndo();
     invalidateCaches();
   }
+  clearCancelled(String(msg.id));
   reply.ms = Date.now() - started;
   post(reply);
 }

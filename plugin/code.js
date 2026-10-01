@@ -8,6 +8,17 @@
     e.code = code;
     return e;
   }
+  var cancelled = {};
+  function markCancelled(id) {
+    cancelled[id] = true;
+  }
+  function clearCancelled(id) {
+    delete cancelled[id];
+  }
+  function checkCancelled(id) {
+    if (id && cancelled[id])
+      throw codeError("Cancelled from the Figma plugin", "CANCELLED");
+  }
   function parseHex(hex) {
     let h = String(hex).trim().replace(/^#/, "");
     if (h.length === 3 || h.length === 4) {
@@ -1100,7 +1111,7 @@
   // plugin/lib/build.ts
   var MAX_NODES2 = 3000;
   var SHADOW_DEFAULT = { x: 0, y: 4, blur: 16, spread: 0, color: "#0000001F" };
-  async function build(p) {
+  async function build(p, _timeoutMs, requestId) {
     const spec = p.spec;
     if (!spec || typeof spec !== "object")
       throw codeError("`spec` must be a node object or an array of node objects", "BAD_ARGS");
@@ -1114,7 +1125,10 @@
       fonts: {},
       defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 },
       binds: [],
-      reactions: []
+      reactions: [],
+      requestId,
+      total: countNodes(roots),
+      lastProgress: 0
     };
     await preloadFonts(roots, ctx);
     const parent = await parentFor(p.parentId);
@@ -1154,6 +1168,31 @@
     if (ctx.warnings.length)
       out.warnings = ctx.warnings.slice(0, 50);
     return out;
+  }
+  function countNodes(list2) {
+    let n = 0;
+    for (let i = 0;i < list2.length; i++) {
+      const s = list2[i];
+      if (!s || typeof s !== "object")
+        continue;
+      n++;
+      if (Array.isArray(s.children))
+        n += countNodes(s.children);
+      if (Array.isArray(s.variants)) {
+        for (let k = 0;k < s.variants.length; k++)
+          n += countNodes([Object.assign({}, s.base || {}, s.variants[k])]);
+      }
+    }
+    return n;
+  }
+  function progress(ctx) {
+    if (!ctx.requestId)
+      return;
+    const now = Date.now();
+    if (now - ctx.lastProgress < 150 && ctx.count < ctx.total)
+      return;
+    ctx.lastProgress = now;
+    figma.ui.postMessage({ t: "progress", id: ctx.requestId, text: Math.min(ctx.count, ctx.total) + " / " + ctx.total + " layers" });
   }
   function fontKey(s, ctx) {
     return parseFont(s.font || ctx.defaults.font, s.weight, ctx.defaults.font);
@@ -1227,6 +1266,7 @@
     }
     if (ctx.count >= MAX_NODES2)
       throw codeError("Spec is too large (max " + MAX_NODES2 + " nodes). Split it into several build calls.", "TOO_LARGE");
+    checkCancelled(ctx.requestId);
     const type = nodeType(s);
     let node;
     switch (type) {
@@ -1265,6 +1305,7 @@
         throw codeError(path + ': unknown type "' + s.type + '"', "BAD_ARGS");
     }
     ctx.count++;
+    progress(ctx);
     parent.appendChild(node);
     const parentAuto = isAutoLayout(parent);
     if (s.bind)
@@ -1342,7 +1383,7 @@
       try {
         await createNode(children[i], f, ctx, path + ".children[" + i + "]");
       } catch (e) {
-        if (e.code === "TOO_LARGE")
+        if (e.code === "TOO_LARGE" || e.code === "CANCELLED")
           throw e;
         ctx.warnings.push(path + ".children[" + i + "]: " + (e.message || e));
       }
@@ -2874,6 +2915,10 @@
       focusNode(String(msg.nodeId));
     else if (msg.t === "cancelWait")
       cancelWait(String(msg.id));
+    else if (msg.t === "cancel") {
+      markCancelled(String(msg.id));
+      cancelWait(String(msg.id));
+    }
   };
   async function focusNode(id) {
     const node = await figma.getNodeByIdAsync(id);
@@ -2944,6 +2989,7 @@
       commitUndo();
       invalidateCaches();
     }
+    clearCancelled(String(msg.id));
     reply.ms = Date.now() - started;
     post(reply);
   }

@@ -11,6 +11,23 @@ export function codeError(message: string, code: string): Error {
   return e;
 }
 
+// ─── Cancellation (Cancel button in the plugin UI) ──────────────────────────
+
+const cancelled: { [requestId: string]: boolean } = {};
+
+export function markCancelled(id: string) {
+  cancelled[id] = true;
+}
+
+export function clearCancelled(id: string) {
+  delete cancelled[id];
+}
+
+/** Long commands check this between steps; run_script cannot be interrupted. */
+export function checkCancelled(id?: string) {
+  if (id && cancelled[id]) throw codeError("Cancelled from the Figma plugin", "CANCELLED");
+}
+
 // ─── Colors ─────────────────────────────────────────────────────────────────
 
 export function parseHex(hex: string): RGBA {

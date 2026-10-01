@@ -150,6 +150,7 @@ export class Hub {
   constructor(
     readonly port: number,
     private log: (line: string) => void,
+    readonly version = "",
   ) {
     this.server = Bun.serve<PeerData>({
       hostname: "127.0.0.1",
@@ -157,7 +158,7 @@ export class Hub {
       fetch: (req, server) => {
         const url = new URL(req.url);
         if (url.pathname === "/health") {
-          return Response.json({ bridge: BRIDGE_NAME, protocol: PROTOCOL_VERSION, sessions: this.sessions() });
+          return Response.json({ bridge: BRIDGE_NAME, protocol: PROTOCOL_VERSION, version: this.version, sessions: this.sessions() });
         }
         const origin = req.headers.get("origin");
         if (server.upgrade(req, { data: { origin, framer: new Framer() } })) return undefined;
@@ -296,7 +297,7 @@ export class Hub {
     } else {
       return void ws.close(1008, "unknown role");
     }
-    sendFrames(ws, { t: "welcome", bridge: BRIDGE_NAME, protocol: PROTOCOL_VERSION, role: ws.data.role });
+    sendFrames(ws, { t: "welcome", bridge: BRIDGE_NAME, protocol: PROTOCOL_VERSION, version: this.version, role: ws.data.role });
   }
 
   private onClose(ws: Peer) {
@@ -320,6 +321,8 @@ export class Hub {
 export interface BridgeOptions {
   port: number;
   channel: string;
+  /** Server version, sent to plugins so they can warn about a mismatch. */
+  version?: string;
   log: (line: string) => void;
   /** How long a request waits for a Figma plugin to connect before failing. */
   waitForPluginMs?: number;
@@ -377,7 +380,7 @@ export class Bridge {
 
   private tryHost(): boolean {
     try {
-      this.hub = new Hub(this.opts.port, this.opts.log);
+      this.hub = new Hub(this.opts.port, this.opts.log, this.opts.version);
     } catch (e) {
       const err = e as { code?: string; message?: string };
       if (err.code !== "EADDRINUSE" && !/in use/i.test(String(err.message))) {

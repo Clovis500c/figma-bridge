@@ -1,5 +1,6 @@
 // Declarative builder: turns a JSON layout spec into Figma nodes in one pass.
 import {
+  checkCancelled,
   codeError,
   findStyle,
   findVariable,
@@ -25,12 +26,15 @@ interface Ctx {
   binds: { node: SceneNode; bind: any; path: string }[];
   /** Prototype links, applied at the end because destinations may come later in the spec. */
   reactions: { node: SceneNode; reactions: any; path: string }[];
+  requestId?: string;
+  total: number;
+  lastProgress: number;
 }
 
 const MAX_NODES = 3000;
 const SHADOW_DEFAULT = { x: 0, y: 4, blur: 16, spread: 0, color: "#0000001F" };
 
-export async function build(p: any) {
+export async function build(p: any, _timeoutMs?: number, requestId?: string) {
   const spec = p.spec;
   if (!spec || typeof spec !== "object") throw codeError("`spec` must be a node object or an array of node objects", "BAD_ARGS");
   const roots: any[] = Array.isArray(spec) ? spec : [spec];
@@ -44,6 +48,9 @@ export async function build(p: any) {
     defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 },
     binds: [],
     reactions: [],
+    requestId: requestId,
+    total: countNodes(roots),
+    lastProgress: 0,
   };
   await preloadFonts(roots, ctx);
 
@@ -80,6 +87,29 @@ export async function build(p: any) {
   };
   if (ctx.warnings.length) out.warnings = ctx.warnings.slice(0, 50);
   return out;
+}
+
+function countNodes(list: any[]): number {
+  let n = 0;
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i];
+    if (!s || typeof s !== "object") continue;
+    n++;
+    if (Array.isArray(s.children)) n += countNodes(s.children);
+    if (Array.isArray(s.variants)) {
+      for (let k = 0; k < s.variants.length; k++) n += countNodes([Object.assign({}, s.base || {}, s.variants[k])]);
+    }
+  }
+  return n;
+}
+
+/** "n / total layers" in the plugin UI, a few times per second. */
+function progress(ctx: Ctx) {
+  if (!ctx.requestId) return;
+  const now = Date.now();
+  if (now - ctx.lastProgress < 150 && ctx.count < ctx.total) return;
+  ctx.lastProgress = now;
+  figma.ui.postMessage({ t: "progress", id: ctx.requestId, text: Math.min(ctx.count, ctx.total) + " / " + ctx.total + " layers" });
 }
 
 // ─── Fonts ──────────────────────────────────────────────────────────────────
@@ -153,6 +183,7 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
     return null;
   }
   if (ctx.count >= MAX_NODES) throw codeError("Spec is too large (max " + MAX_NODES + " nodes). Split it into several build calls.", "TOO_LARGE");
+  checkCancelled(ctx.requestId);
   const type = nodeType(s);
   let node: SceneNode;
   switch (type) {
@@ -190,6 +221,7 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
       throw codeError(path + ': unknown type "' + s.type + '"', "BAD_ARGS");
   }
   ctx.count++;
+  progress(ctx);
   parent.appendChild(node);
   const parentAuto = isAutoLayout(parent);
   if (s.bind) ctx.binds.push({ node: node, bind: s.bind, path: path });
@@ -250,7 +282,7 @@ async function setupFrame(f: FrameNode, s: any, ctx: Ctx, path: string) {
     try {
       await createNode(children[i], f, ctx, path + ".children[" + i + "]");
     } catch (e) {
-      if ((e as any).code === "TOO_LARGE") throw e;
+      if ((e as any).code === "TOO_LARGE" || (e as any).code === "CANCELLED") throw e;
       ctx.warnings.push(path + ".children[" + i + "]: " + ((e as Error).message || e));
     }
   }

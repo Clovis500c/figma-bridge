@@ -35,7 +35,7 @@ function log(line: string) {
   } catch {}
 }
 
-const bridge = new Bridge({ port: PORT, channel: CHANNEL, log });
+const bridge = new Bridge({ port: PORT, channel: CHANNEL, version: VERSION, log });
 bridge.start();
 
 // ─── Result helpers ─────────────────────────────────────────────────────────
@@ -169,7 +169,8 @@ server.registerTool(
       "Execute JavaScript in the Figma plugin main thread (full Plugin API via `figma`). The code is the body of an async " +
       "function: use top-level await and `return` the output (JSON-serialized; a single expression is returned automatically). " +
       "Helpers: utils.loadFonts, utils.node, utils.page, utils.hex, utils.solid, utils.build, utils.describe; lib.<snippet>(args); " +
-      "console.log is captured. On error returns {ok:false, error, line, stack}. Prefer build for creating new layouts.",
+      "console.log is captured. On error returns {ok:false, error, line, stack}. Prefer build for creating new layouts. " +
+      "If the user presses Cancel in the plugin you get code CANCELLED, but a script cannot be interrupted and may still finish: check the file before retrying.",
     inputSchema: {
       code: z.string().min(1).describe("Script body, e.g. `const f = figma.createFrame(); f.name = 'Card'; return f.id`"),
       timeoutMs: z.number().int().min(1_000).max(120_000).optional().describe("Default 30000, max 120000"),
@@ -758,6 +759,9 @@ server.registerTool(
           fileName: s.fileName,
           page: s.page,
           pluginVersion: s.version,
+          ...(s.version && s.version !== VERSION
+            ? { versionMismatch: `Plugin v${s.version}, server v${VERSION}: ask the user to reopen the plugin in Figma, or update it.` }
+            : {}),
           connectedSeconds: Math.round((Date.now() - s.connectedAt) / 1000),
           selected: s.id === selected || undefined,
         })),

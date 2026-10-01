@@ -227,8 +227,11 @@
   .dur { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
   .row.slow .dur { color: var(--warn); }
   .row .quick { display: none; }
-  .row:hover .quick { display: inline-block; }
+  .row:hover .quick, .row.run .quick { display: inline-block; }
   .row:hover .dur { display: none; }
+  .mini.danger:hover { color: var(--err); box-shadow: inset 0 0 0 1px var(--err); }
+  .row.cancelled .l2 { color: var(--text-3); }
+  .row.open.cancelled .l2 { display: none; }
   .detail { display: none; margin-top: 8px; }
   .row.open .detail { display: block; }
   .row.open .l2 { white-space: normal; word-break: break-word; }
@@ -333,6 +336,7 @@
       <symbol id="i-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 3.5 13.5 6-5.8 1.9-2 5.9z"/><path d="m13 13 5.5 5.5"/></symbol>
       <symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.8v6.4l5-3.2z"/></symbol>
       <symbol id="i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v9.5a1.5 1.5 0 0 1-1.5 1.5H12l-4.5 3.5V17H5A1.5 1.5 0 0 1 3.5 15.5V6A1.5 1.5 0 0 1 5 4.5z"/><path d="M8 9h8M8 12.5h5"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 21 19.5H3z"/><path d="M12 10v4.5M12 17.3v.2"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5.5 12.5 4 4 9-9"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     </defs>
@@ -350,6 +354,11 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
       </button>
     </header>
+
+    <section class="banner warn" id="verBar">
+      <span class="bico"><svg width="14" height="14"><use href="#i-alert"/></svg></span>
+      <div class="main"><b>Version mismatch</b><span id="verMsg">Reopen the plugin or update.</span></div>
+    </section>
 
     <section class="banner" id="waitBar">
       <span class="bico"><svg width="14" height="14"><use href="#i-pointer"/></svg></span>
@@ -499,6 +508,9 @@ const waits = new Map();
 let openId = null;
 const entries = [];
 const running = new Map();
+// Requests answered with CANCELLED: the plugin's late reply must not reach the agent twice.
+const cancelled = new Set();
+let serverVersion = "";
 const stats = { count: 0, errors: 0, totalMs: 0 };
 
 // ─── Framing (mirror of src/bridge.ts) ──────────────────────────────────────
@@ -704,6 +716,8 @@ function connect() {
       clearTimeout(handshakeTimer);
       if (msg.bridge !== "figma-bridge") { sock.onclose = null; sock.close(); ws = null; return scheduleRetry("foreign"); }
       retryDelay = 400;
+      serverVersion = msg.version || "";
+      renderVersion();
       setState("connected");
       if (!everConnected) { everConnected = true; toPlugin({ t: "notify", text: "✦ Figma Bridge connected to your AI" }); }
     } else if (msg.t === "req") {
@@ -844,17 +858,23 @@ async function onRequest(msg) {
 }
 
 function onResult(res) {
+  if (cancelled.has(res.id)) {
+    cancelled.delete(res.id);
+    const late = entries.find((e) => e.id === res.id);
+    if (late) { late.lateNote = res.ok ? "Finished in the background after the cancel" : ""; renderLog(); }
+    return;
+  }
   const entry = running.get(res.id);
   if (entry) {
     running.delete(res.id);
     entry.ms = Math.round(performance.now() - entry.start);
-    entry.status = res.ok ? "ok" : "err";
+    entry.status = res.ok ? "ok" : res.code === "CANCELLED" ? "cancelled" : "err";
     entry.error = res.ok ? "" : (res.line ? "Line " + res.line + ": " : "") + res.error;
     entry.code = res.code;
     entry.nodeId = res.ok ? resultNode(entry.method, res.result) : null;
     stats.count++;
     stats.totalMs += entry.ms;
-    if (!res.ok) stats.errors++;
+    if (!res.ok && res.code !== "CANCELLED") stats.errors++;
     packet(res.ok ? "ok" : "err");
     render();
   }
@@ -882,6 +902,32 @@ function packet(kind) {
     void tile.offsetWidth;
     tile.classList.add("hit");
   };
+}
+
+// Answers the agent right away; the plugin stops long commands (build) at their next step,
+// but a running script cannot be interrupted and finishes in the background.
+function cancelRequest(e) {
+  if (!running.has(e.id)) return;
+  onResult({ t: "res", id: e.id, ok: false, code: "CANCELLED", error: "Cancelled by the user in Figma. A running script may still finish in the background: check the file before retrying." });
+  cancelled.add(e.id);
+  toPlugin({ t: "cancel", id: e.id });
+  toast("Cancelled");
+}
+
+// Updates the row text in place: re-rendering the log would replace the Cancel button mid-click.
+function onProgress(msg) {
+  const entry = running.get(msg.id);
+  if (!entry) return;
+  entry.progress = msg.text;
+  const l2 = document.querySelector('.row[data-id="' + msg.id + '"] .l2');
+  if (l2) l2.textContent = entry.progress + " · " + entry.sum;
+  renderBar();
+}
+
+function renderVersion() {
+  const mismatch = !!(serverVersion && version && serverVersion !== version);
+  document.body.classList.toggle("mismatch", mismatch);
+  if (mismatch) $("verMsg").textContent = "Plugin v" + version + ", server v" + serverVersion + ": reopen the plugin or update.";
 }
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
@@ -954,19 +1000,23 @@ function renderLog() {
     const m = methodOf(e.method);
     const cls = "row " + e.status + (e.id === openId ? " open" : "") + (e.isNew ? " new" : "") + (e.ms > SLOW_MS ? " slow" : "");
     e.isNew = false;
-    const quick = e.nodeId ? '<button class="mini quick" data-act="show">Show</button>' : e.status === "err" ? '<button class="mini quick" data-act="copy">Copy</button>' : "";
+    const quick = e.status === "run"
+      ? '<button class="mini quick danger" data-act="cancel">Cancel</button>'
+      : e.nodeId ? '<button class="mini quick" data-act="show">Show</button>' : e.status === "err" ? '<button class="mini quick" data-act="copy">Copy</button>' : "";
     const facts = '<div class="facts"><span>Took <b>' + (e.status === "run" ? "…" : fmtMs(e.ms)) + "</b></span>"
       + "<span>At <b>" + new Date(e.at).toTimeString().slice(0, 8) + "</b></span>"
       + (e.nodeId ? '<span>Layer <b class="mono">' + esc(e.nodeId) + "</b></span>" : "")
-      + (e.code && e.status === "err" ? '<span>Code <b class="mono">' + esc(e.code) + "</b></span>" : "") + "</div>";
-    const actions = (e.nodeId ? '<button class="mini" data-act="show">Show in canvas</button>' : "")
-      + (e.status === "err" ? '<button class="mini" data-act="copy">Copy error</button>' : "")
+      + (e.code && e.status !== "ok" && e.status !== "run" ? '<span>Code <b class="mono">' + esc(e.code) + "</b></span>" : "")
+      + (e.lateNote ? "<span>" + esc(e.lateNote) + "</span>" : "") + "</div>";
+    const actions = (e.status === "run" ? '<button class="mini danger" data-act="cancel">Cancel</button>' : "")
+      + (e.nodeId ? '<button class="mini" data-act="show">Show in canvas</button>' : "")
+      + (e.status !== "ok" && e.status !== "run" ? '<button class="mini" data-act="copy">Copy error</button>' : "")
       + '<button class="mini" data-act="copysum">Copy command</button>';
     return '<li class="' + cls + '" data-id="' + e.id + '">'
       + '<div class="ic" style="--c:' + m.color + '">' + icon(m.icon, 14) + "</div>"
       + '<div class="main"><div class="l1"><span class="m">' + esc(m.label) + '</span><span class="t">' + (e.status === "run" ? "running…" : ago(e.at)) + "</span></div>"
-      + '<div class="l2 mono trunc">' + esc(e.status === "err" ? e.error.split("\n")[0] : e.sum) + "</div>"
-      + '<div class="detail">' + (e.status === "err" ? '<div class="errbox mono">' + esc(e.error) + "</div>" : "") + facts
+      + '<div class="l2 mono trunc">' + esc(e.status !== "ok" && e.status !== "run" ? e.error.split("\n")[0] : e.progress && e.status === "run" ? e.progress + " · " + e.sum : e.sum) + "</div>"
+      + '<div class="detail">' + (e.status !== "ok" && e.status !== "run" ? '<div class="errbox mono">' + esc(e.error) + "</div>" : "") + facts
       + '<div class="detail-actions">' + actions + "</div></div></div>"
       + '<div class="side"><span class="dur">' + (e.status === "run" ? "" : fmtMs(e.ms)) + "</span>" + quick + "</div></li>";
   }).join("");
@@ -993,7 +1043,7 @@ function renderBar() {
   $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connected") : PILL[state] + (state === "offline" ? ": waiting for your agent" : "");
   const last = entries[0];
   $("barSub").textContent = last
-    ? methodOf(last.method).label + " · " + (last.status === "run" ? "running…" : last.status === "ok" ? fmtMs(last.ms) : "error")
+    ? methodOf(last.method).label + " · " + (last.status === "run" ? last.progress || "running…" : last.status === "ok" ? fmtMs(last.ms) : last.code === "CANCELLED" ? "cancelled" : "error")
     : state === "connected" ? "Ready" : "Keep this plugin open";
 }
 
@@ -1037,7 +1087,8 @@ $("log").addEventListener("click", (ev) => {
   if (!e) return;
   const act = ev.target.closest("[data-act]");
   if (act) {
-    if (act.dataset.act === "show") { toPlugin({ t: "focus", nodeId: e.nodeId }); toast("Selected in canvas"); }
+    if (act.dataset.act === "cancel") cancelRequest(e);
+    else if (act.dataset.act === "show") { toPlugin({ t: "focus", nodeId: e.nodeId }); toast("Selected in canvas"); }
     else if (act.dataset.act === "copy") copy(e.error);
     else if (act.dataset.act === "copysum") copy(e.sum);
     return;
@@ -1134,6 +1185,8 @@ window.onmessage = (ev) => {
     send({ t: "info", fileName: session.fileName, page: session.page });
   } else if (msg.t === "res") {
     onResult(msg);
+  } else if (msg.t === "progress") {
+    onProgress(msg);
   } else if (msg.t === "wait") {
     waits.set(msg.id, msg);
     renderWait();
