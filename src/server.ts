@@ -1,15 +1,17 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { appendFileSync, mkdirSync, statSync, truncateSync } from "node:fs";
+import { appendFileSync, mkdirSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { Bridge, BridgeError } from "./bridge";
 import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
+import { generateCode, type IrNode } from "./codegen";
+import { normalizeTokens } from "./tokens";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const PORT = Number(process.env.FIGMA_BRIDGE_PORT) || 3055;
 const CHANNEL = process.env.FIGMA_BRIDGE_CHANNEL || "default";
 const OUT_DIR = process.env.FIGMA_BRIDGE_OUT || join(tmpdir(), "figma-bridge");
@@ -33,7 +35,7 @@ function log(line: string) {
   } catch {}
 }
 
-const bridge = new Bridge({ port: PORT, channel: CHANNEL, log });
+const bridge = new Bridge({ port: PORT, channel: CHANNEL, version: VERSION, log });
 bridge.start();
 
 // ─── Result helpers ─────────────────────────────────────────────────────────
@@ -126,6 +128,8 @@ async function prepareSpec(spec: unknown, defaultColor: string) {
       delete node.src;
     }
     if (Array.isArray(node.children)) node.children.forEach(walk);
+    if (Array.isArray(node.variants)) node.variants.forEach(walk);
+    if (node.base) walk(node.base);
   };
   walk(spec);
   await Promise.all(jobs);
@@ -142,16 +146,20 @@ const server = new McpServer(
     instructions: [
       "Figma Bridge drives the user's Figma desktop app through a local plugin. No rate limits: iterate freely.",
       "Workflow:",
-      "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values.",
-      "2. New UI → build (one call per screen or section, with auto-layout). Editing existing design → describe it first, then build into it (parentId) or run_script.",
-      "3. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again.",
-      "4. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
+      "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
+      "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
+      "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
+      "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again.",
+      "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
+      "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
+      "When the target is unclear, wait_for_selection asks the user to pick it in Figma. prototype links screens, annotate leaves Dev Mode notes, export_code turns a frame into HTML/React.",
       "run_script: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
       "Script helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?),",
       "utils.build(spec, {parentId}), utils.describe(nodeOrId, depth); lib.<name>(args) runs a saved snippet; console.log is returned as `logs`.",
       "Save helpers you will reuse with the snippets tool. Icons: search_icons, then insert_icon or {icon:'set:name'} in build.",
       "Rules: load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync); keep results small.",
-      "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it).",
+      "The user can cancel a command from the plugin (code CANCELLED): build stops, a script may still finish, so check the file before retrying.",
+      "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it). If list_sessions reports versionMismatch, ask them to reopen or update the plugin.",
     ].join("\n"),
   },
 );
@@ -164,7 +172,8 @@ server.registerTool(
       "Execute JavaScript in the Figma plugin main thread (full Plugin API via `figma`). The code is the body of an async " +
       "function: use top-level await and `return` the output (JSON-serialized; a single expression is returned automatically). " +
       "Helpers: utils.loadFonts, utils.node, utils.page, utils.hex, utils.solid, utils.build, utils.describe; lib.<snippet>(args); " +
-      "console.log is captured. On error returns {ok:false, error, line, stack}. Prefer build for creating new layouts.",
+      "console.log is captured. On error returns {ok:false, error, line, stack}. Prefer build for creating new layouts. " +
+      "If the user presses Cancel in the plugin you get code CANCELLED, but a script cannot be interrupted and may still finish: check the file before retrying.",
     inputSchema: {
       code: z.string().min(1).describe("Script body, e.g. `const f = figma.createFrame(); f.name = 'Card'; return f.id`"),
       timeoutMs: z.number().int().min(1_000).max(120_000).optional().describe("Default 30000, max 120000"),
@@ -184,15 +193,20 @@ server.registerTool(
   {
     title: "Build a layout from a JSON spec",
     description: `Create a whole layout in ONE call from a declarative spec. Fonts load automatically, icons are fetched, images loaded. Much faster and safer than run_script for new UI.
-Node: {type?, name?, ...props, children?: Node[]}. type is inferred (text→text, icon→icon, src→image, component→instance, else frame). Types: frame, component, text, rect, ellipse, line, icon, image, svg, instance.
-FRAME: layout "row"|"column" (auto-layout; omit for free positioning), gap (number|"auto"), padding (n | [v,h] | [t,r,b,l]), align (cross axis: start|center|end|baseline), justify (main axis: start|center|end|between), wrap, rowGap, clip. Frames have no fill unless set.
+Node: {type?, name?, ...props, children?: Node[]}. type is inferred (text/spans→text, icon→icon, src→image, component→instance, variants→componentSet, else frame). Types: frame, component, componentSet, text, rect, ellipse, line, icon, image, svg, instance.
+FRAME: layout "row"|"column"|"grid" (auto-layout; omit for free positioning), gap (number|"auto"), padding (n | [v,h] | [t,r,b,l]), align (cross axis: start|center|end|baseline), justify (main axis: start|center|end|between), wrap, rowGap, clip. Frames have no fill unless set.
+GRID: layout:"grid", columns (count | tracks like [200,"1fr","2fr","hug"]), rows (same; default: enough rows, hugging), columnGap, rowGap (or gap). Children: span:[rows,cols] or colSpan/rowSpan, cellAlign/cellValign. Give the grid a w for "fr" columns.
 SIZE: w / h: number (fixed) | "fill" (stretch inside an auto-layout parent) | "hug". Auto-layout frames hug by default. grow:true. absolute:true with x/y inside auto-layout; x/y for children of free frames.
 TEXT: text, font ("Inter" | "Inter:Bold"), weight (400|500|600|700 or style name), size, color, lineHeight (1.5 | 24 | "150%"), letterSpacing (px | "2%"), align (left|center|right|justify), case (upper|lower|title), decoration (underline|strike), maxLines, textStyle "style:Name". Give w:"fill" or a number to wrap text.
+RICH TEXT: spans:[{text:"Read the "},{text:"docs",weight:600,color:"#0D99FF",link:"https://…"}] instead of text; a span may set font, weight, size, color, decoration, case, link.
 PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color variable>", {gradient:["#a","#b"], angle:90, type?:"radial"}, null. stroke + strokeWidth + strokeAlign (inside|center|outside).
 EFFECTS: radius (n | [tl,tr,br,bl] | "var:x"), opacity, shadow (true | {x,y,blur,spread,color} | [...] | "style:Name"), blur, backgroundBlur, rotation, visible.
 ICON: {icon:"lucide:house", size:20, color:"#111"} (any Iconify set). IMAGE: {src:"C:/img.png" | "https://…", w, h, fit:"fill"|"fit"|"crop"|"tile"}. SVG: {svg:"<svg…>"}.
 INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary", Label:"Buy"}, text:{"Label layer name":"Buy"}}.
-gap/padding/radius accept "var:<number variable>".
+COMPONENT SET: {type:"componentSet", name:"Button", base:{shared frame spec}, variants:[{props:{Variant:"Primary",Size:"M"}, fill:"#0D99FF", children:[…]}, …], properties:{Label:"Button", "Show icon":{type:"boolean",default:true}, Icon:{type:"instance",default:"Icon/Star"}}}. One component per variant, combined as variants.
+On a layer inside a component: bind:"Label" links a text to a text property (created if missing); bind:{visible:"Show icon"} or {mainComponent:"Icon"} for the others. type:"component" takes properties too.
+PROTOTYPE: reactions:[{trigger:"click", action:"navigate", to:"Details", transition:"smart", duration:300}] on any layer (see the prototype tool).
+gap/padding/radius accept "var:<number variable>". MODES: modes:{"Theme":"Dark"} sets a collection's variable mode on a frame and its children.
 Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
 Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`,
     inputSchema: {
@@ -236,6 +250,29 @@ server.registerTool(
 );
 
 server.registerTool(
+  "find",
+  {
+    title: "Find layers",
+    description:
+      "Search layers across all pages (or one page / subtree) by name, text content, type, style name or component. " +
+      'Strings match as case-insensitive substrings, or as a regex when written "/pattern/flags". Filters combine (AND). ' +
+      "Returns {total, matches:[{id, name, type, page, path, text?}], truncated}. Use it to locate layers before describe, build into them or run_script.",
+    inputSchema: {
+      name: z.string().optional().describe('Layer name, e.g. "button" or "/^Card \\d+$/"'),
+      text: z.string().optional().describe("Text content of TEXT layers"),
+      type: z.array(z.string()).optional().describe('Node types, e.g. ["FRAME","INSTANCE","TEXT","COMPONENT","COMPONENT_SET","SECTION"]'),
+      style: z.string().optional().describe("Name of a paint, text or effect style the layer uses"),
+      component: z.string().optional().describe("Instances of this component or component set (name, id or key)"),
+      pageId: z.string().optional().describe("Only this page"),
+      parentId: z.string().optional().describe("Only inside this layer"),
+      limit: z.number().int().min(1).max(500).optional().describe("Max matches returned, default 50"),
+    },
+  },
+  (args) =>
+    track("find", oneLine(JSON.stringify(args)), async () => ok(await bridge.request("find", args, 60_000))),
+);
+
+server.registerTool(
   "get_design_system",
   {
     title: "List styles, variables and components",
@@ -248,6 +285,32 @@ server.registerTool(
     },
   },
   (args) => track("get_design_system", (args.include ?? ["all"]).join(","), async () => ok(await bridge.request("get_design_system", args, 60_000))),
+);
+
+server.registerTool(
+  "design_tokens",
+  {
+    title: "Write the design system",
+    description: `Create or update variable collections (with modes such as Light/Dark) and paint, text and effect styles. Idempotent: matched by name, so re-run it to change values. Returns counts of created and updated items.
+Accepted formats (auto-detected, or set format):
+SIMPLE: {"collections":[{"name":"Theme","modes":["Light","Dark"],"variables":{"color/primary":{"Light":"#0D99FF","Dark":"#2AA5FF"},"space/md":16,"radius/card":12,"color/link":"{color/primary}","flag/beta":true,"font/body":"Inter"}}],
+ "styles":{"colors":{"Brand/Primary":"var:color/primary","Brand/Hero":{"gradient":["#0D99FF","#7C3AED"]}},"text":{"Heading/H1":{"font":"Inter","weight":700,"size":32,"lineHeight":1.2,"letterSpacing":"-1%"}},"effects":{"Shadow/Card":{"y":4,"blur":16,"color":"#0000001F"}}}}
+ A scalar applies to every mode; an object keys values by mode. "{name}" or "var:name" is an alias. Detailed form: {"type":"color|number|string|boolean","values":{...},"description","scopes":["FRAME_FILL",...]}.
+W3C: design tokens with $value/$type (color, dimension, number, fontFamily, fontWeight, duration, typography → text style, shadow → effect style, gradient → paint style). Values go to \`mode\`; $extensions.modes {"Dark": value} adds other modes.
+TAILWIND: {theme:{colors, spacing, borderRadius, fontSize, extend}} → color/*, spacing/*, radius/*, font-size/* variables and text/* styles.
+Use them in build with "var:color/primary", "style:Heading/H1", and modes:{"Theme":"Dark"} on a frame.`,
+    inputSchema: {
+      tokens: z.object({}).passthrough().describe("Tokens in one of the formats above"),
+      format: z.enum(["auto", "simple", "w3c", "tailwind"]).optional().describe("Default auto"),
+      collection: z.string().optional().describe('Collection for W3C/Tailwind tokens (default "Tokens" / "Tailwind")'),
+      mode: z.string().optional().describe('Mode that receives W3C/Tailwind values (default "Default")'),
+    },
+  },
+  (args) =>
+    track("design_tokens", args.format ?? "auto", async () => {
+      const set = normalizeTokens(args.tokens as Record<string, unknown>, args);
+      return ok(await bridge.request("design_tokens", { collections: set.collections, styles: set.styles, warnings: set.warnings }, 120_000));
+    }),
 );
 
 server.registerTool(
@@ -300,6 +363,182 @@ server.registerTool(
       const content: Content[] = [{ type: "text", text: json(meta) }];
       if (returnImage) content.push({ type: "image", data: r.bytesB64, mimeType: ext === "jpg" ? "image/jpeg" : "image/png" });
       return { content };
+    }),
+);
+
+server.registerTool(
+  "compare",
+  {
+    title: "Compare a layer with a reference image",
+    description:
+      "Pixel-diff a layer against a reference image (mockup, screenshot) from a local path or URL. The layer is exported at the " +
+      "reference's resolution (or scale), the reference is resized to match, and differing pixels are counted. Returns " +
+      "{mismatchPercent, regions:[{x, y, width, height, mismatchPercent}] in layer coordinates (largest first), heatmapPath}. " +
+      "returnImage:true also shows reference and result side by side. Use it to reproduce a mockup: build → compare → fix the largest regions → compare again.",
+    inputSchema: {
+      nodeId: z.string().optional().describe("Layer to compare (default: the first selected layer)"),
+      reference: z.string().min(1).describe("Reference image: local path or http(s) URL (PNG, JPG, WEBP, GIF)"),
+      scale: z.number().min(0.05).max(4).optional().describe("Export scale; default: match the reference width"),
+      threshold: z.number().min(0).max(1).optional().describe("Per-pixel color distance that counts as different, default 0.1"),
+      returnImage: z.boolean().optional().describe("Also return reference and result side by side"),
+    },
+  },
+  (args) =>
+    track("compare", `${args.nodeId ?? "(selection)"} vs ${oneLine(args.reference, 80)}`, async () => {
+      const refBytes = await readImageSource(args.reference);
+      const info = imageInfo(refBytes);
+      if (!info) throw new BridgeError(`Unsupported reference image (expected PNG, JPG, WEBP or GIF): ${args.reference}`, "BAD_IMAGE");
+      const shot = await bridge.request<{ bytesB64: string; scale: number; offset: { x: number; y: number }; name: string; nodeId: string }>(
+        "screenshot",
+        { nodeId: args.nodeId, scale: args.scale, width: Math.min(info.width, 2400), format: "PNG", maxDimension: 4096 },
+        60_000,
+      );
+      const diff = await bridge.request<{
+        width: number;
+        height: number;
+        mismatch: number;
+        regions: { x: number; y: number; width: number; height: number; mismatch: number }[];
+        totalRegions: number;
+        reference: { width: number; height: number };
+        heatmap: string;
+        sideBySide?: string;
+      }>(
+        "compare_images",
+        { actual: shot.bytesB64, reference: Buffer.from(refBytes).toString("base64"), referenceMime: info.mime, threshold: args.threshold, sideBySide: !!args.returnImage },
+        90_000,
+      );
+      const pct = (v: number) => Math.round(v * 10_000) / 100;
+      const toLayer = (v: number, axis: "x" | "y") => Math.round((v / shot.scale + shot.offset[axis]) * 10) / 10;
+      const heatmapPath = join(OUT_DIR, `compare-${safeName(shot.name)}-${Date.now()}.png`);
+      await Bun.write(heatmapPath, Buffer.from(diff.heatmap, "base64"));
+      const refRatio = diff.reference.width / diff.reference.height;
+      const ratio = diff.width / diff.height;
+      const result: Record<string, unknown> = {
+        nodeId: shot.nodeId,
+        mismatchPercent: pct(diff.mismatch),
+        regions: diff.regions.map((r) => ({
+          x: toLayer(r.x, "x"),
+          y: toLayer(r.y, "y"),
+          width: Math.round((r.width / shot.scale) * 10) / 10,
+          height: Math.round((r.height / shot.scale) * 10) / 10,
+          mismatchPercent: pct(r.mismatch),
+        })),
+        totalRegions: diff.totalRegions,
+        compared: { width: diff.width, height: diff.height, scale: Math.round(shot.scale * 1000) / 1000 },
+        reference: diff.reference,
+        heatmapPath,
+      };
+      if (Math.abs(refRatio - ratio) / ratio > 0.03) {
+        result.warning = `Aspect ratios differ (reference ${refRatio.toFixed(3)}, layer ${ratio.toFixed(3)}): the reference was stretched. Match the layer size to the mockup first.`;
+      }
+      if (diff.sideBySide) {
+        result.sideBySidePath = heatmapPath.replace(/\.png$/, "-side.png");
+        await Bun.write(result.sideBySidePath as string, Buffer.from(diff.sideBySide, "base64"));
+      }
+      const content: Content[] = [{ type: "text", text: json(result) }];
+      if (diff.sideBySide) content.push({ type: "image", data: diff.sideBySide, mimeType: "image/png" });
+      return { content };
+    }),
+);
+
+server.registerTool(
+  "prototype",
+  {
+    title: "Prototype links and flows",
+    description: `Wire prototype interactions between frames, set flow starting points, or list them (no arguments → list for the current page).
+links: [{from, to?, trigger?, action?, transition?, duration?, easing?, direction?, delay?, url?}]
+ from: layer id or name; to: id or name of a top-level frame (a screen). trigger: click (default) | hover | press | drag | after (delay ms) | mouse-enter | mouse-leave.
+ action: navigate (default with to) | overlay | swap | scroll-to | change-to (variants) | back | close | url.
+ transition: instant (default) | dissolve | smart | move-in | move-out | push | slide-in | slide-out (+ direction left|right|top|bottom, or "push-left"); duration ms (default 300); easing: ease-out (default) | ease-in | ease-in-out | linear | gentle | quick | bouncy | slow.
+flows: [{nodeId (top-level frame id or name), name?}] start points of the prototype on the current page.
+Links are added to existing interactions unless replace:true; clear:[ids] removes all interactions of those layers. Inside build, use reactions:[{trigger, action, to:"<layer name in the spec>", …}] on any layer.`,
+    inputSchema: {
+      links: z.array(z.object({}).passthrough()).optional(),
+      flows: z.array(z.object({}).passthrough()).optional(),
+      clear: z.array(z.string()).optional().describe("Layer ids whose interactions are removed first"),
+      replace: z.boolean().optional().describe("Replace the interactions of each linked layer instead of adding"),
+      list: z.boolean().optional().describe("Also return the interactions after the change"),
+      nodeId: z.string().optional().describe("Limit the listing to this layer and its children"),
+    },
+  },
+  (args) =>
+    track("prototype", `${args.links?.length ?? 0} links, ${args.flows?.length ?? 0} flows`, async () => ok(await bridge.request("prototype", args, 60_000))),
+);
+
+server.registerTool(
+  "annotate",
+  {
+    title: "Dev Mode annotations",
+    description:
+      "Add, list or clear Dev Mode annotations, the notes developers see on layers. " +
+      'add: {nodeId, label (markdown), properties?: ["width","height","fills","cornerRadius","padding","itemSpacing","fontSize","textStyleId",…] pinned as live values, category? (e.g. "Interaction", created if missing), color?}. ' +
+      "list: {nodeId? | pageId?} returns the annotations of a layer and its children, or of a page (default: current page). clear: {nodeId}.",
+    inputSchema: {
+      action: z.enum(["add", "list", "clear"]).optional().describe("Default: add when label/properties are given, else list"),
+      nodeId: z.string().optional(),
+      pageId: z.string().optional().describe("list only"),
+      label: z.string().max(5000).optional().describe("Markdown text of the note"),
+      properties: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "width, height, maxWidth, minWidth, maxHeight, minHeight, fills, strokes, effects, strokeWeight, cornerRadius, textStyleId, textAlignHorizontal, fontFamily, fontStyle, fontSize, fontWeight, lineHeight, letterSpacing, itemSpacing, padding, layoutMode, alignItems, opacity, mainComponent",
+        ),
+      category: z.string().optional().describe("Category label, e.g. Development, Interaction, Accessibility"),
+      color: z.enum(["yellow", "orange", "red", "pink", "violet", "blue", "teal", "green"]).optional().describe("Color of a new category"),
+      replace: z.boolean().optional().describe("Replace the layer's annotations instead of adding one"),
+    },
+  },
+  (args) => track("annotate", `${args.action ?? (args.label ? "add" : "list")} ${args.nodeId ?? ""}`, async () => ok(await bridge.request("annotate", args, 30_000))),
+);
+
+server.registerTool(
+  "export_code",
+  {
+    title: "Export a layer to code",
+    description:
+      "Generate front-end code from a frame or component (default: selection). framework html (a standalone page) or react (a component); " +
+      "styling css (classes named after the layers) or tailwind. Auto-layout becomes flexbox, grid auto-layout CSS grid, fill/hug sizing flex rules, " +
+      "text semantic tags (h1–h3, p, a), layers named button/nav/header/footer/section… the matching tags; colors, borders, radii and shadows " +
+      "come from Figma's own CSS (variables stay var(--…)). Images and icons are saved as files in an assets folder. " +
+      "Returns the code as text plus the folder where everything was written. Name layers well before exporting: names become class names.",
+    inputSchema: {
+      nodeId: z.string().optional(),
+      framework: z.enum(["html", "react"]).optional().describe("Default html"),
+      styling: z.enum(["css", "tailwind"]).optional().describe("Default css"),
+    },
+  },
+  ({ nodeId, framework = "html", styling = "css" }) =>
+    track("export_code", `${nodeId ?? "(selection)"} ${framework}/${styling}`, async () => {
+      const r = await bridge.request<{ tree: IrNode; assets: Record<string, { b64?: string; svg?: string }>; nodes: number; truncated: boolean; warnings: string[] }>(
+        "export_tree",
+        { nodeId },
+        120_000,
+      );
+      const dir = join(OUT_DIR, `export-${safeName(r.tree.name)}-${Date.now()}`);
+      mkdirSync(join(dir, "assets"), { recursive: true });
+      const finalName: Record<string, string> = {};
+      for (const [file, a] of Object.entries(r.assets)) {
+        const bytes = a.svg !== undefined ? Buffer.from(a.svg) : Buffer.from(a.b64 ?? "", "base64");
+        const ext = a.svg !== undefined ? "svg" : imageInfo(bytes)?.format.replace("jpeg", "jpg") ?? "png";
+        finalName[file] = file.replace(/\.[a-z]+$/, `.${ext}`);
+        writeFileSync(join(dir, "assets", finalName[file]!), bytes);
+      }
+      const code = generateCode(r.tree, { framework, styling, assetPath: (f) => `assets/${finalName[f] ?? f}` });
+      for (const f of code.files) writeFileSync(join(dir, f.path), f.content);
+      const warnings = [...r.warnings, ...code.warnings];
+      if (r.truncated) warnings.push(`Stopped after ${r.nodes} layers: export a smaller frame for the rest.`);
+      const meta = {
+        dir,
+        files: code.files.map((f) => f.path),
+        assets: Object.values(finalName).map((f) => `assets/${f}`),
+        fonts: code.fonts,
+        layers: r.nodes,
+        ...(warnings.length ? { warnings } : {}),
+      };
+      let text = code.files.map((f) => `=== ${f.path} ===\n${f.content}`).join("\n");
+      if (text.length > MAX_OUTPUT_CHARS) text = text.slice(0, MAX_OUTPUT_CHARS) + `\n… truncated: the full code is in ${dir}`;
+      return { content: [{ type: "text", text: json(meta) }, { type: "text", text }] };
     }),
 );
 
@@ -410,10 +649,31 @@ server.registerTool(
     title: "Current Figma context",
     description:
       "Start here. File name, pages (id/name), current page, selection (ids, names, bounds) and viewport of the connected file. " +
-      "Workflow: get_design_system → build (new UI) or describe + run_script (edits) → screenshot returnImage:true + audit → fix.",
+      "Workflow: get_design_system (or design_tokens to create one) → build (new UI) or find/describe + run_script (edits) → " +
+      "screenshot returnImage:true + audit, or compare against a mockup → fix. Unsure what the user means? wait_for_selection.",
     inputSchema: {},
   },
   () => track("get_context", "", async () => ok(await bridge.request("get_context", {}, 15_000))),
+);
+
+server.registerTool(
+  "wait_for_selection",
+  {
+    title: "Wait for the user to select layers",
+    description:
+      "Ask the user to select something in Figma and wait for it. The plugin shows a banner \"Your agent is waiting: <message>\" " +
+      "with a Cancel button. Resolves as soon as the selection changes to a non-empty one, with {page, count, selection:[{id, name, type, bounds}], timedOut}. " +
+      "Use it when the target is ambiguous (\"which card should I restyle?\") instead of guessing.",
+    inputSchema: {
+      message: z.string().max(200).optional().describe('Shown to the user, e.g. "Select the card to restyle"'),
+      timeoutMs: z.number().int().min(1_000).max(120_000).optional().describe("Default 60000, max 120000"),
+    },
+  },
+  ({ message, timeoutMs }) =>
+    track("wait_for_selection", message ?? "", async () => {
+      const ms = timeoutMs ?? 60_000;
+      return ok(await bridge.request("wait_for_selection", { message, timeoutMs: ms }, ms));
+    }),
 );
 
 server.registerTool(
@@ -503,6 +763,9 @@ server.registerTool(
           fileName: s.fileName,
           page: s.page,
           pluginVersion: s.version,
+          ...(s.version && s.version !== VERSION
+            ? { versionMismatch: `Plugin v${s.version}, server v${VERSION}: ask the user to reopen the plugin in Figma, or update it.` }
+            : {}),
           connectedSeconds: Math.round((Date.now() - s.connectedAt) / 1000),
           selected: s.id === selected || undefined,
         })),

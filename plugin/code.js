@@ -8,6 +8,17 @@
     e.code = code;
     return e;
   }
+  var cancelled = {};
+  function markCancelled(id) {
+    cancelled[id] = true;
+  }
+  function clearCancelled(id) {
+    delete cancelled[id];
+  }
+  function checkCancelled(id) {
+    if (id && cancelled[id])
+      throw codeError("Cancelled from the Figma plugin", "CANCELLED");
+  }
   function parseHex(hex) {
     let h = String(hex).trim().replace(/^#/, "");
     if (h.length === 3 || h.length === 4) {
@@ -245,6 +256,107 @@
     return p;
   }
 
+  // plugin/lib/annotate.ts
+  var COLORS = ["yellow", "orange", "red", "pink", "violet", "blue", "teal", "green"];
+  async function categoryId(label, color, created) {
+    const api = figma.annotations;
+    if (!api || typeof api.getAnnotationCategoriesAsync !== "function")
+      return;
+    const list = await api.getAnnotationCategoriesAsync();
+    for (let i = 0;i < list.length; i++)
+      if (list[i].label.toLowerCase() === label.toLowerCase())
+        return list[i].id;
+    const c = COLORS.indexOf(String(color)) !== -1 ? color : "blue";
+    const cat = await api.addAnnotationCategoryAsync({ label, color: c });
+    created.push(label);
+    return cat.id;
+  }
+  function supports(node) {
+    return "annotations" in node;
+  }
+  async function annotate(p) {
+    const action = String(p.action || (p.label || p.properties ? "add" : "list"));
+    if (action === "list")
+      return list(p);
+    if (!p.nodeId)
+      throw codeError("`nodeId` is required to " + action + " annotations", "BAD_ARGS");
+    const node = await getNode(p.nodeId);
+    if (!supports(node))
+      throw codeError("A " + node.type + " node cannot have annotations", "BAD_ARGS");
+    if (action === "clear") {
+      const n = node.annotations.length;
+      node.annotations = [];
+      return { nodeId: node.id, removed: n };
+    }
+    if (action !== "add")
+      throw codeError('Unknown action "' + action + '" (add, list, clear)', "BAD_ARGS");
+    if (!p.label && !(p.properties && p.properties.length))
+      throw codeError("Give a label and/or properties", "BAD_ARGS");
+    const annotation = {};
+    if (p.label)
+      annotation.labelMarkdown = String(p.label);
+    if (Array.isArray(p.properties) && p.properties.length) {
+      annotation.properties = p.properties.map(function(t) {
+        return { type: String(t) };
+      });
+    }
+    const createdCategories = [];
+    if (p.category) {
+      const id = await categoryId(String(p.category), p.color, createdCategories);
+      if (id)
+        annotation.categoryId = id;
+    }
+    const current = p.replace ? [] : node.annotations.slice();
+    try {
+      node.annotations = current.concat([annotation]);
+    } catch (e) {
+      throw codeError("Figma rejected the annotation: " + (e.message || e) + " (check the property names)", "BAD_ARGS");
+    }
+    const out = { nodeId: node.id, annotations: node.annotations.length };
+    if (createdCategories.length)
+      out.createdCategory = createdCategories[0];
+    return out;
+  }
+  async function list(p) {
+    const root = p.nodeId ? await getNode(p.nodeId) : p.pageId ? await getNode(p.pageId) : figma.currentPage;
+    if (root.type === "PAGE")
+      await root.loadAsync();
+    const nodes = (root.type === "PAGE" ? [] : [root]).concat("findAll" in root ? root.findAll(function(n) {
+      return supports(n) && n.annotations.length > 0;
+    }) : []);
+    const categories = {};
+    const api = figma.annotations;
+    if (api && typeof api.getAnnotationCategoriesAsync === "function") {
+      const cats = await api.getAnnotationCategoriesAsync();
+      for (let i = 0;i < cats.length; i++)
+        categories[cats[i].id] = cats[i].label;
+    }
+    const out = [];
+    for (let i = 0;i < nodes.length && out.length < 300; i++) {
+      const n = nodes[i];
+      if (!supports(n) || !n.annotations.length)
+        continue;
+      out.push({
+        nodeId: n.id,
+        name: n.name,
+        annotations: n.annotations.map(function(a) {
+          const item = {};
+          if (a.labelMarkdown || a.label)
+            item.label = a.labelMarkdown || a.label;
+          if (a.properties && a.properties.length) {
+            item.properties = a.properties.map(function(x) {
+              return x.type;
+            });
+          }
+          if (a.categoryId)
+            item.category = categories[a.categoryId] || a.categoryId;
+          return item;
+        })
+      });
+    }
+    return { count: out.length, nodes: out };
+  }
+
   // plugin/lib/audit.ts
   var MAX_NODES = 5000;
   var MAX_ISSUES = 120;
@@ -417,10 +529,589 @@
     return a.x >= b.x - 0.5 && a.y >= b.y - 0.5 && a.x + a.width <= b.x + b.width + 0.5 && a.y + a.height <= b.y + b.height + 0.5;
   }
 
+  // plugin/lib/prototype.ts
+  var TRIGGERS = {
+    click: "ON_CLICK",
+    tap: "ON_CLICK",
+    hover: "ON_HOVER",
+    press: "ON_PRESS",
+    drag: "ON_DRAG",
+    after: "AFTER_TIMEOUT",
+    timeout: "AFTER_TIMEOUT",
+    "mouse-enter": "MOUSE_ENTER",
+    "mouse-leave": "MOUSE_LEAVE",
+    "mouse-down": "MOUSE_DOWN",
+    "mouse-up": "MOUSE_UP"
+  };
+  var NAVIGATION = {
+    navigate: "NAVIGATE",
+    overlay: "OVERLAY",
+    swap: "SWAP",
+    "swap-overlay": "SWAP",
+    scroll: "SCROLL_TO",
+    "scroll-to": "SCROLL_TO",
+    "change-to": "CHANGE_TO"
+  };
+  var EASINGS = {
+    linear: "LINEAR",
+    "ease-in": "EASE_IN",
+    "ease-out": "EASE_OUT",
+    "ease-in-out": "EASE_IN_AND_OUT",
+    "ease-in-back": "EASE_IN_BACK",
+    "ease-out-back": "EASE_OUT_BACK",
+    "ease-in-out-back": "EASE_IN_AND_OUT_BACK",
+    gentle: "GENTLE",
+    quick: "QUICK",
+    bouncy: "BOUNCY",
+    slow: "SLOW"
+  };
+  var DIRECTIONAL = {
+    "move-in": "MOVE_IN",
+    "move-out": "MOVE_OUT",
+    push: "PUSH",
+    slide: "SLIDE_IN",
+    "slide-in": "SLIDE_IN",
+    "slide-out": "SLIDE_OUT"
+  };
+  var key = function(v) {
+    return String(v || "").toLowerCase().replace(/[_\s]+/g, "-");
+  };
+  function transition(spec) {
+    let t = key(spec.transition || "instant");
+    if (t === "instant" || t === "none")
+      return null;
+    let direction = key(spec.direction || "left");
+    const m = /^(.*)-(left|right|top|bottom|up|down)$/.exec(t);
+    if (m && DIRECTIONAL[m[1]]) {
+      t = m[1];
+      direction = m[2];
+    }
+    direction = direction === "up" ? "top" : direction === "down" ? "bottom" : direction;
+    let ms = typeof spec.duration === "number" ? spec.duration : 300;
+    if (ms <= 10)
+      ms = ms * 1000;
+    const easing = { type: EASINGS[key(spec.easing || "ease-out")] || "EASE_OUT" };
+    const duration = ms / 1000;
+    if (t === "dissolve" || t === "fade")
+      return { type: "DISSOLVE", easing, duration };
+    if (t === "smart" || t === "smart-animate")
+      return { type: "SMART_ANIMATE", easing, duration };
+    if (DIRECTIONAL[t]) {
+      return {
+        type: DIRECTIONAL[t],
+        direction: direction.toUpperCase(),
+        matchLayers: !!spec.matchLayers,
+        easing,
+        duration
+      };
+    }
+    throw codeError('Unknown transition "' + spec.transition + '" (instant, dissolve, smart, move-in, move-out, push, slide-in, slide-out)', "BAD_ARGS");
+  }
+  function trigger(spec) {
+    const t = TRIGGERS[key(spec.trigger || "click")];
+    if (!t)
+      throw codeError('Unknown trigger "' + spec.trigger + '" (click, hover, press, drag, after, mouse-enter, mouse-leave)', "BAD_ARGS");
+    if (t === "AFTER_TIMEOUT")
+      return { type: t, timeout: (typeof spec.delay === "number" ? spec.delay : 800) / 1000 };
+    if (t === "MOUSE_ENTER" || t === "MOUSE_LEAVE")
+      return { type: t, delay: (spec.delay || 0) / 1000, deprecatedVersion: false };
+    if (t === "MOUSE_DOWN" || t === "MOUSE_UP")
+      return { type: t, delay: (spec.delay || 0) / 1000 };
+    return { type: t };
+  }
+  async function toReaction(spec, resolve) {
+    const action = key(spec.action || (spec.url ? "url" : spec.to ? "navigate" : "back"));
+    let act;
+    if (action === "back")
+      act = { type: "BACK" };
+    else if (action === "close")
+      act = { type: "CLOSE" };
+    else if (action === "url" || action === "open-url")
+      act = { type: "URL", url: String(spec.url) };
+    else if (NAVIGATION[action]) {
+      if (!spec.to)
+        throw codeError('Action "' + action + '" needs `to` (a frame name or id)', "BAD_ARGS");
+      act = { type: "NODE", destinationId: await resolve(String(spec.to)), navigation: NAVIGATION[action], transition: transition(spec), preserveScrollPosition: !!spec.preserveScroll };
+    } else {
+      throw codeError('Unknown action "' + spec.action + '" (navigate, overlay, swap, scroll-to, change-to, back, close, url)', "BAD_ARGS");
+    }
+    return { trigger: trigger(spec), actions: [act] };
+  }
+  async function resolveFrame(ref) {
+    if (/^[\dI;:]+$/.test(ref))
+      return (await getNode(ref)).id;
+    const top = figma.currentPage.children;
+    for (let i = 0;i < top.length; i++)
+      if (top[i].name === ref)
+        return top[i].id;
+    const any = figma.currentPage.findOne(function(n) {
+      return n.name === ref;
+    });
+    if (!any)
+      throw codeError('No frame named "' + ref + '" on this page', "NOT_FOUND");
+    return any.id;
+  }
+  async function setReactions(node, reactions, replace) {
+    if (typeof node.setReactionsAsync !== "function")
+      throw codeError("A " + node.type + " node cannot have prototype interactions", "BAD_ARGS");
+    const current = replace ? [] : (node.reactions || []).slice();
+    await node.setReactionsAsync(current.concat(reactions));
+  }
+  async function applyBuildReactions(pending, ids, warnings) {
+    const resolve = function(ref) {
+      return ids[ref] ? Promise.resolve(ids[ref]) : resolveFrame(ref);
+    };
+    for (let i = 0;i < pending.length; i++) {
+      const item = pending[i];
+      const list2 = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
+      const out = [];
+      for (let k = 0;k < list2.length; k++) {
+        try {
+          out.push(await toReaction(list2[k] || {}, resolve));
+        } catch (e) {
+          warnings.push(item.path + ".reactions[" + k + "]: " + (e.message || e));
+        }
+      }
+      try {
+        if (out.length)
+          await setReactions(item.node, out, false);
+      } catch (e) {
+        warnings.push(item.path + ".reactions: " + (e.message || e));
+      }
+    }
+  }
+  async function prototype(p) {
+    const links = Array.isArray(p.links) ? p.links : [];
+    const flows = Array.isArray(p.flows) ? p.flows : [];
+    const clear = Array.isArray(p.clear) ? p.clear : [];
+    const out = {};
+    for (let i = 0;i < clear.length; i++)
+      await setReactions(await getNode(clear[i]), [], true);
+    if (clear.length)
+      out.cleared = clear.length;
+    const bySource = {};
+    const order = [];
+    for (let i = 0;i < links.length; i++) {
+      const l = links[i] || {};
+      if (!l.from)
+        throw codeError("links[" + i + "]: `from` is required (the layer that reacts)", "BAD_ARGS");
+      const from = await resolveFrame(String(l.from));
+      let r;
+      try {
+        r = await toReaction(l, resolveFrame);
+      } catch (e) {
+        throw codeError("links[" + i + "]: " + (e.message || e), e.code || "BAD_ARGS");
+      }
+      if (!bySource[from]) {
+        bySource[from] = [];
+        order.push(from);
+      }
+      bySource[from].push(r);
+    }
+    for (let i = 0;i < order.length; i++)
+      await setReactions(await getNode(order[i]), bySource[order[i]], !!p.replace);
+    if (links.length)
+      out.linked = links.length;
+    if (flows.length) {
+      const page = figma.currentPage;
+      const points = page.flowStartingPoints.slice();
+      for (let i = 0;i < flows.length; i++) {
+        const f = flows[i] || {};
+        const id = await resolveFrame(String(f.nodeId || f.frame || f.start || ""));
+        const node = await getNode(id);
+        if (!node.parent || node.parent.type !== "PAGE")
+          throw codeError('Flow start "' + node.name + '" must be a top-level frame', "BAD_ARGS");
+        const name = String(f.name || node.name);
+        let found = false;
+        for (let k = 0;k < points.length; k++) {
+          if (points[k].nodeId === id) {
+            points[k] = { nodeId: id, name };
+            found = true;
+          }
+        }
+        if (!found)
+          points.push({ nodeId: id, name });
+      }
+      page.flowStartingPoints = points;
+      out.flows = points;
+    }
+    if (p.list || !links.length && !flows.length && !clear.length)
+      out.interactions = await listReactions(p.nodeId);
+    return out;
+  }
+  async function listReactions(nodeId) {
+    const root = nodeId ? await getNode(nodeId) : figma.currentPage;
+    const nodes = (root.type === "PAGE" ? [] : [root]).concat("findAll" in root ? root.findAll(function(n) {
+      return n.reactions && n.reactions.length > 0;
+    }) : []);
+    const names = {};
+    const out = [];
+    for (let i = 0;i < nodes.length && out.length < 300; i++) {
+      const n = nodes[i];
+      const reactions = n.reactions || [];
+      for (let k = 0;k < reactions.length; k++) {
+        const r = reactions[k];
+        const actions = r.actions || (r.action ? [r.action] : []);
+        for (let a = 0;a < actions.length; a++) {
+          const act = actions[a];
+          const item = { from: n.id, fromName: n.name, trigger: r.trigger ? r.trigger.type : null, action: act.type };
+          if (act.type === "NODE") {
+            item.navigation = act.navigation;
+            item.to = act.destinationId;
+            if (act.destinationId && names[act.destinationId] === undefined) {
+              const dest = await figma.getNodeByIdAsync(act.destinationId);
+              names[act.destinationId] = dest ? dest.name : "";
+            }
+            item.toName = names[act.destinationId] || undefined;
+            if (act.transition)
+              item.transition = act.transition.type + (act.transition.direction ? " " + act.transition.direction : "") + " " + Math.round(act.transition.duration * 1000) + "ms";
+          }
+          if (act.type === "URL")
+            item.url = act.url;
+          out.push(item);
+        }
+      }
+    }
+    return { flows: figma.currentPage.flowStartingPoints, links: out };
+  }
+
+  // plugin/lib/tokens.ts
+  var TYPES = { color: "COLOR", number: "FLOAT", string: "STRING", boolean: "BOOLEAN" };
+  function counter() {
+    return { created: 0, updated: 0 };
+  }
+  async function designTokens(p) {
+    const warnings = (p.warnings || []).slice();
+    const counts = {
+      collections: counter(),
+      modes: counter(),
+      variables: counter(),
+      paintStyles: counter(),
+      textStyles: counter(),
+      effectStyles: counter()
+    };
+    const collections = Array.isArray(p.collections) ? p.collections : [];
+    const styles = p.styles || {};
+    if (!collections.length && !(styles.colors || []).length && !(styles.text || []).length && !(styles.effects || []).length) {
+      throw codeError("No tokens found: give collections and/or styles (see the tool description for the accepted formats)", "BAD_ARGS");
+    }
+    if (collections.length)
+      await writeVariables(collections, counts, warnings);
+    invalidateCaches();
+    await writeStyles(styles, counts, warnings);
+    invalidateCaches();
+    const out = { counts };
+    if (warnings.length)
+      out.warnings = warnings.slice(0, 60);
+    return out;
+  }
+  async function writeVariables(specs, counts, warnings) {
+    const allCollections = await figma.variables.getLocalVariableCollectionsAsync();
+    const allVars = await figma.variables.getLocalVariablesAsync();
+    const byName = {};
+    const collName = {};
+    for (let i = 0;i < allCollections.length; i++)
+      collName[allCollections[i].id] = allCollections[i].name;
+    const index = function(v, collectionName) {
+      byName[collectionName + "/" + v.name] = v;
+      if (!byName[v.name])
+        byName[v.name] = v;
+    };
+    for (let i = 0;i < allVars.length; i++)
+      index(allVars[i], collName[allVars[i].variableCollectionId]);
+    const pending = [];
+    for (let c = 0;c < specs.length; c++) {
+      const spec = specs[c];
+      let collection = null;
+      for (let i = 0;i < allCollections.length; i++)
+        if (allCollections[i].name === spec.name)
+          collection = allCollections[i];
+      const fresh = !collection;
+      if (!collection) {
+        collection = figma.variables.createVariableCollection(String(spec.name));
+        counts.collections.created++;
+      } else {
+        counts.collections.updated++;
+      }
+      const modeIds = ensureModes(collection, spec.modes || [], fresh, counts, warnings);
+      const existing = {};
+      for (let i = 0;i < allVars.length; i++)
+        if (allVars[i].variableCollectionId === collection.id)
+          existing[allVars[i].name] = allVars[i];
+      const vars = spec.variables || [];
+      for (let i = 0;i < vars.length; i++) {
+        const v = vars[i];
+        const item = { variable: existing[v.name] || null, spec: v, collection, modeIds };
+        if (item.variable && v.type && TYPES[v.type] && item.variable.resolvedType !== TYPES[v.type]) {
+          warnings.push('"' + v.name + '" exists as ' + item.variable.resolvedType + ", cannot change it to " + TYPES[v.type] + ": skipped");
+          continue;
+        }
+        pending.push(item);
+      }
+    }
+    for (let pass = 0;pass < 4; pass++) {
+      for (let i = 0;i < pending.length; i++) {
+        const item = pending[i];
+        if (item.variable)
+          continue;
+        const type = item.spec.type ? TYPES[item.spec.type] : aliasTargetType(item.spec, item.collection.name, byName);
+        if (!type)
+          continue;
+        item.variable = figma.variables.createVariable(String(item.spec.name), item.collection, type);
+        index(item.variable, item.collection.name);
+        counts.variables.created++;
+        item.spec.created = true;
+      }
+    }
+    for (let i = 0;i < pending.length; i++) {
+      const item = pending[i];
+      const v = item.variable;
+      if (!v) {
+        warnings.push('"' + item.spec.name + '": alias target not found, skipped');
+        continue;
+      }
+      if (!item.spec.created)
+        counts.variables.updated++;
+      if (item.spec.description !== undefined)
+        v.description = String(item.spec.description);
+      if (Array.isArray(item.spec.scopes)) {
+        try {
+          v.scopes = item.spec.scopes;
+        } catch (e) {
+          warnings.push('"' + v.name + '": invalid scopes (' + (e.message || e) + ")");
+        }
+      }
+      const values = item.spec.values || {};
+      const modes = Object.keys(values);
+      for (let m = 0;m < modes.length; m++) {
+        const targets = [];
+        if (modes[m] === "*") {
+          for (let k = 0;k < item.collection.modes.length; k++)
+            targets.push(item.collection.modes[k].modeId);
+        } else if (item.modeIds[modes[m]]) {
+          targets.push(item.modeIds[modes[m]]);
+        } else {
+          warnings.push('"' + v.name + '": unknown mode "' + modes[m] + '"');
+          continue;
+        }
+        let value;
+        try {
+          value = toVariableValue(values[modes[m]], v, item.collection.name, byName);
+        } catch (e) {
+          warnings.push('"' + v.name + '": ' + (e.message || e));
+          continue;
+        }
+        for (let k = 0;k < targets.length; k++) {
+          try {
+            v.setValueForMode(targets[k], value);
+          } catch (e) {
+            warnings.push('"' + v.name + '": ' + (e.message || e));
+          }
+        }
+      }
+    }
+  }
+  function ensureModes(collection, names, fresh, counts, warnings) {
+    const ids = {};
+    if (fresh && names.length) {
+      collection.renameMode(collection.modes[0].modeId, String(names[0]));
+      counts.modes.created++;
+    }
+    for (let i = 0;i < collection.modes.length; i++)
+      ids[collection.modes[i].name] = collection.modes[i].modeId;
+    for (let i = 0;i < names.length; i++) {
+      const name = String(names[i]);
+      if (ids[name])
+        continue;
+      try {
+        ids[name] = collection.addMode(name);
+        counts.modes.created++;
+      } catch (e) {
+        warnings.push('Cannot add mode "' + name + '" to "' + collection.name + '": ' + (e.message || e) + " (the Figma plan may limit modes)");
+      }
+    }
+    return ids;
+  }
+  function findAlias(ref, collectionName, byName) {
+    return byName[collectionName + "/" + ref] || byName[ref] || null;
+  }
+  function aliasTargetType(spec, collectionName, byName) {
+    const values = spec.values || {};
+    const keys = Object.keys(values);
+    for (let i = 0;i < keys.length; i++) {
+      const v = values[keys[i]];
+      if (v && typeof v === "object" && v.alias) {
+        const target = findAlias(String(v.alias), collectionName, byName);
+        if (target)
+          return target.resolvedType;
+      }
+    }
+    return null;
+  }
+  function toVariableValue(raw, v, collectionName, byName) {
+    if (raw && typeof raw === "object" && raw.alias) {
+      const target = findAlias(String(raw.alias), collectionName, byName);
+      if (!target)
+        throw new Error('alias target "' + raw.alias + '" not found');
+      if (target.id === v.id)
+        throw new Error("a variable cannot alias itself");
+      return figma.variables.createVariableAlias(target);
+    }
+    switch (v.resolvedType) {
+      case "COLOR":
+        return parseHex(String(raw));
+      case "FLOAT":
+        if (typeof raw !== "number" && isNaN(Number(raw)))
+          throw new Error("expected a number, got " + JSON.stringify(raw));
+        return Number(raw);
+      case "BOOLEAN":
+        return raw === true || raw === "true";
+      default:
+        return String(raw);
+    }
+  }
+  async function writeStyles(styles, counts, warnings) {
+    const local = await localStyles();
+    const find = function(list2, name) {
+      for (let i = 0;i < list2.length; i++)
+        if (list2[i].name === name)
+          return list2[i];
+      return null;
+    };
+    const colors = styles.colors || [];
+    for (let i = 0;i < colors.length; i++) {
+      const s = colors[i];
+      try {
+        const value = s.value !== undefined ? s.value : s.color;
+        const list2 = Array.isArray(value) ? value : [value];
+        const paints = [];
+        for (let k = 0;k < list2.length; k++)
+          paints.push(await toPaint(list2[k]));
+        let style = find(local.paint, s.name);
+        if (style)
+          counts.paintStyles.updated++;
+        else {
+          style = figma.createPaintStyle();
+          style.name = String(s.name);
+          counts.paintStyles.created++;
+        }
+        style.paints = paints;
+        if (s.description !== undefined)
+          style.description = String(s.description);
+      } catch (e) {
+        warnings.push('Color style "' + s.name + '": ' + (e.message || e));
+      }
+    }
+    const texts = styles.text || [];
+    for (let i = 0;i < texts.length; i++) {
+      const s = texts[i];
+      try {
+        const font = await loadWithFallback(parseFont(s.font || "Inter", s.weight), warnings);
+        let style = find(local.text, s.name);
+        if (style)
+          counts.textStyles.updated++;
+        else {
+          style = figma.createTextStyle();
+          style.name = String(s.name);
+          counts.textStyles.created++;
+        }
+        style.fontName = font;
+        if (typeof s.size === "number")
+          style.fontSize = s.size;
+        if (s.lineHeight !== undefined && s.lineHeight !== null)
+          style.lineHeight = lineHeight(s.lineHeight);
+        if (s.letterSpacing !== undefined && s.letterSpacing !== null) {
+          const ls = String(s.letterSpacing);
+          style.letterSpacing = /%$/.test(ls) ? { value: parseFloat(ls), unit: "PERCENT" } : { value: Number(s.letterSpacing), unit: "PIXELS" };
+        }
+        if (typeof s.paragraphSpacing === "number")
+          style.paragraphSpacing = s.paragraphSpacing;
+        const cases = { upper: "UPPER", lower: "LOWER", title: "TITLE", none: "ORIGINAL" };
+        if (s.case && cases[s.case])
+          style.textCase = cases[s.case];
+        const deco = { underline: "UNDERLINE", strike: "STRIKETHROUGH", strikethrough: "STRIKETHROUGH", none: "NONE" };
+        if (s.decoration && deco[s.decoration])
+          style.textDecoration = deco[s.decoration];
+        if (s.description !== undefined)
+          style.description = String(s.description);
+      } catch (e) {
+        warnings.push('Text style "' + s.name + '": ' + (e.message || e));
+      }
+    }
+    const effects = styles.effects || [];
+    for (let i = 0;i < effects.length; i++) {
+      const s = effects[i];
+      try {
+        const value = s.value !== undefined ? s.value : s;
+        const list2 = Array.isArray(value) ? value : [value];
+        const out = [];
+        for (let k = 0;k < list2.length; k++) {
+          const e = list2[k];
+          if (e && typeof e.blur === "number" && e.type === "layer")
+            out.push({ type: "LAYER_BLUR", radius: e.blur, visible: true });
+          else if (e && typeof e.blur === "number" && e.type === "background")
+            out.push({ type: "BACKGROUND_BLUR", radius: e.blur, visible: true });
+          else
+            out.push(shadowEffect(e || {}));
+        }
+        let style = find(local.effect, s.name);
+        if (style)
+          counts.effectStyles.updated++;
+        else {
+          style = figma.createEffectStyle();
+          style.name = String(s.name);
+          counts.effectStyles.created++;
+        }
+        style.effects = out;
+        if (s.description !== undefined)
+          style.description = String(s.description);
+      } catch (e) {
+        warnings.push('Effect style "' + s.name + '": ' + (e.message || e));
+      }
+    }
+  }
+  async function loadWithFallback(f, warnings) {
+    const candidates = [f, { family: f.family, style: "Regular" }, { family: "Inter", style: "Regular" }];
+    for (let i = 0;i < candidates.length; i++) {
+      try {
+        await loadFont(candidates[i]);
+        if (i > 0)
+          warnings.push('Font "' + f.family + " " + f.style + '" unavailable, used "' + candidates[i].family + " " + candidates[i].style + '"');
+        return candidates[i];
+      } catch (e) {}
+    }
+    throw codeError('No usable font for "' + f.family + " " + f.style + '"', "FONT");
+  }
+  async function applyModes(node, modes, warnings, path) {
+    if (!modes || typeof modes !== "object" || typeof node.setExplicitVariableModeForCollection !== "function")
+      return;
+    const collections = await figma.variables.getLocalVariableCollectionsAsync();
+    const names = Object.keys(modes);
+    for (let i = 0;i < names.length; i++) {
+      let collection = null;
+      for (let k = 0;k < collections.length; k++)
+        if (collections[k].name === names[i] || collections[k].id === names[i])
+          collection = collections[k];
+      if (!collection) {
+        warnings.push(path + ': no variable collection named "' + names[i] + '"');
+        continue;
+      }
+      let modeId = "";
+      for (let k = 0;k < collection.modes.length; k++)
+        if (collection.modes[k].name === modes[names[i]])
+          modeId = collection.modes[k].modeId;
+      if (!modeId) {
+        warnings.push(path + ': collection "' + collection.name + '" has no mode "' + modes[names[i]] + '"');
+        continue;
+      }
+      node.setExplicitVariableModeForCollection(collection, modeId);
+    }
+  }
+
   // plugin/lib/build.ts
   var MAX_NODES2 = 3000;
   var SHADOW_DEFAULT = { x: 0, y: 4, blur: 16, spread: 0, color: "#0000001F" };
-  async function build(p) {
+  async function build(p, _timeoutMs, requestId) {
     const spec = p.spec;
     if (!spec || typeof spec !== "object")
       throw codeError("`spec` must be a node object or an array of node objects", "BAD_ARGS");
@@ -432,7 +1123,12 @@
       count: 0,
       images: p.imageBytes || {},
       fonts: {},
-      defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 }
+      defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 },
+      binds: [],
+      reactions: [],
+      requestId,
+      total: countNodes(roots),
+      lastProgress: 0
     };
     await preloadFonts(roots, ctx);
     const parent = await parentFor(p.parentId);
@@ -453,6 +1149,10 @@
       }
       made.push(node);
     }
+    if (ctx.reactions.length)
+      await applyBuildReactions(ctx.reactions, ctx.ids, ctx.warnings);
+    for (let i = 0;i < ctx.binds.length; i++)
+      ctx.warnings.push(ctx.binds[i].path + ": bind needs a component or componentSet ancestor, ignored");
     if (p.select !== false && made.length && parent.type === "PAGE" && parent === figma.currentPage) {
       figma.currentPage.selection = made;
       figma.viewport.scrollAndZoomIntoView(made);
@@ -469,8 +1169,38 @@
       out.warnings = ctx.warnings.slice(0, 50);
     return out;
   }
+  function countNodes(list2) {
+    let n = 0;
+    for (let i = 0;i < list2.length; i++) {
+      const s = list2[i];
+      if (!s || typeof s !== "object")
+        continue;
+      n++;
+      if (Array.isArray(s.children))
+        n += countNodes(s.children);
+      if (Array.isArray(s.variants)) {
+        for (let k = 0;k < s.variants.length; k++)
+          n += countNodes([Object.assign({}, s.base || {}, s.variants[k])]);
+      }
+    }
+    return n;
+  }
+  function progress(ctx) {
+    if (!ctx.requestId)
+      return;
+    const now = Date.now();
+    if (now - ctx.lastProgress < 150 && ctx.count < ctx.total)
+      return;
+    ctx.lastProgress = now;
+    figma.ui.postMessage({ t: "progress", id: ctx.requestId, text: Math.min(ctx.count, ctx.total) + " / " + ctx.total + " layers" });
+  }
   function fontKey(s, ctx) {
     return parseFont(s.font || ctx.defaults.font, s.weight, ctx.defaults.font);
+  }
+  function spanFont(s, span, ctx) {
+    if (!span.font && span.weight === undefined)
+      return null;
+    return parseFont(span.font || s.font || ctx.defaults.font, span.weight !== undefined ? span.weight : span.font ? undefined : s.weight, ctx.defaults.font);
   }
   async function preloadFonts(roots, ctx) {
     const wanted = {};
@@ -480,19 +1210,29 @@
       if (nodeType(s) === "text") {
         const f = fontKey(s, ctx);
         wanted[f.family + ":" + f.style] = f;
+        const spans = Array.isArray(s.spans) ? s.spans : [];
+        for (let i = 0;i < spans.length; i++) {
+          const sf = spanFont(s, spans[i] || {}, ctx);
+          if (sf)
+            wanted[sf.family + ":" + sf.style] = sf;
+        }
       }
       if (Array.isArray(s.children))
         s.children.forEach(walk);
+      if (Array.isArray(s.variants)) {
+        for (let i = 0;i < s.variants.length; i++)
+          walk(Object.assign({}, s.base || {}, s.variants[i], { type: "component" }));
+      }
     };
     roots.forEach(walk);
     const keys = Object.keys(wanted);
-    await Promise.all(keys.map(async function(key) {
-      const f = wanted[key];
+    await Promise.all(keys.map(async function(key2) {
+      const f = wanted[key2];
       const candidates = [f, { family: f.family, style: "Regular" }, { family: "Inter", style: f.style }, { family: "Inter", style: "Regular" }];
       for (let i = 0;i < candidates.length; i++) {
         try {
           await loadFont(candidates[i]);
-          ctx.fonts[key] = candidates[i];
+          ctx.fonts[key2] = candidates[i];
           if (i > 0)
             ctx.warnings.push('Font "' + f.family + " " + f.style + '" unavailable, used "' + candidates[i].family + " " + candidates[i].style + '"');
           return;
@@ -502,10 +1242,12 @@
   }
   function nodeType(s) {
     if (s.type) {
-      const t = String(s.type).toLowerCase();
-      return t === "rectangle" ? "rect" : t === "circle" ? "ellipse" : t;
+      const t = String(s.type).toLowerCase().replace(/[_\s-]/g, "");
+      return t === "rectangle" ? "rect" : t === "circle" ? "ellipse" : t === "variants" ? "componentset" : t;
     }
-    if (s.text !== undefined)
+    if (Array.isArray(s.variants))
+      return "componentset";
+    if (s.text !== undefined || Array.isArray(s.spans))
       return "text";
     if (s.svg)
       return "svg";
@@ -524,6 +1266,7 @@
     }
     if (ctx.count >= MAX_NODES2)
       throw codeError("Spec is too large (max " + MAX_NODES2 + " nodes). Split it into several build calls.", "TOO_LARGE");
+    checkCancelled(ctx.requestId);
     const type = nodeType(s);
     let node;
     switch (type) {
@@ -555,18 +1298,27 @@
       case "instance":
         node = await createInstance(s, path);
         break;
+      case "componentset":
+        node = await createComponentSet(s, parent, ctx, path);
+        break;
       default:
         throw codeError(path + ': unknown type "' + s.type + '"', "BAD_ARGS");
     }
     ctx.count++;
+    progress(ctx);
     parent.appendChild(node);
     const parentAuto = isAutoLayout(parent);
+    if (s.bind)
+      ctx.binds.push({ node, bind: s.bind, path });
+    const bindStart = ctx.binds.length;
     if (s.name)
       node.name = String(s.name);
     else if (type === "icon")
       node.name = "icon/" + s.icon;
     if (type === "frame" || type === "component")
       await setupFrame(node, s, ctx, path);
+    else if (type === "componentset")
+      await setupLayout(node, Object.assign({ layout: "row", wrap: true, gap: 16, padding: 16 }, s), ctx, path);
     else if (type === "text")
       await setupText(node, s, ctx);
     else if (type === "image")
@@ -580,8 +1332,20 @@
     }
     if (type === "instance" && s.text && typeof s.text === "object")
       await overrideTexts(node, s.text, ctx);
+    if (type === "componentset" && s.stroke === undefined) {
+      const set = node;
+      set.strokes = [solid("#9747FF")];
+      set.dashPattern = [10, 5];
+      set.cornerRadius = 5;
+    }
     await applyVisuals(node, s, ctx, type);
+    if (type === "text" && Array.isArray(s.spans))
+      await applySpans(node, s, ctx, path);
     applySize(node, s, parentAuto, type, ctx, path);
+    if (type === "component" && !s.variantOf)
+      await addProperties(node, s.properties, ctx.binds.splice(bindStart), ctx, path);
+    if (parent.layoutMode === "GRID")
+      placeInGrid(node, s, ctx, path);
     if (s.absolute && parentAuto)
       node.layoutPositioning = "ABSOLUTE";
     if (!parentAuto || s.absolute) {
@@ -598,20 +1362,43 @@
       node.visible = false;
     if (s.locked)
       node.locked = true;
+    if (s.modes)
+      await applyModes(node, s.modes, ctx.warnings, path);
+    if (s.reactions)
+      ctx.reactions.push({ node, reactions: s.reactions, path });
     if (s.name) {
-      let key = String(s.name);
-      for (let n = 2;ctx.ids[key]; n++)
-        key = s.name + " #" + n;
+      let key2 = String(s.name);
+      for (let n = 2;ctx.ids[key2]; n++)
+        key2 = s.name + " #" + n;
       if (Object.keys(ctx.ids).length < 300)
-        ctx.ids[key] = node.id;
+        ctx.ids[key2] = node.id;
     }
     return node;
   }
   async function setupFrame(f, s, ctx, path) {
     f.fills = [];
+    await setupLayout(f, s, ctx, path);
+    const children = Array.isArray(s.children) ? s.children : [];
+    for (let i = 0;i < children.length; i++) {
+      try {
+        await createNode(children[i], f, ctx, path + ".children[" + i + "]");
+      } catch (e) {
+        if (e.code === "TOO_LARGE" || e.code === "CANCELLED")
+          throw e;
+        ctx.warnings.push(path + ".children[" + i + "]: " + (e.message || e));
+      }
+    }
+  }
+  async function setupLayout(f, s, ctx, path) {
     const layout = String(s.layout || s.direction || "").toLowerCase();
-    const mode = layout === "row" || layout === "horizontal" ? "HORIZONTAL" : layout === "column" || layout === "col" || layout === "vertical" ? "VERTICAL" : "NONE";
+    let mode = layout === "row" || layout === "horizontal" ? "HORIZONTAL" : layout === "column" || layout === "col" || layout === "vertical" ? "VERTICAL" : layout === "grid" ? "GRID" : "NONE";
     f.clipsContent = !!s.clip;
+    if (mode === "GRID") {
+      if (await setupGrid(f, s, ctx, path))
+        return;
+      mode = "HORIZONTAL";
+      s = Object.assign({}, s, { wrap: true, rowGap: s.rowGap !== undefined ? s.rowGap : s.gap, gap: s.columnGap !== undefined ? s.columnGap : s.gap });
+    }
     if (mode !== "NONE") {
       f.layoutMode = mode;
       f.primaryAxisSizingMode = "AUTO";
@@ -638,21 +1425,118 @@
     } else if (s.w === undefined && s.width === undefined && s.size === undefined) {
       f.resize(100, 100);
     }
-    const children = Array.isArray(s.children) ? s.children : [];
-    for (let i = 0;i < children.length; i++) {
+  }
+  function track(v, fallback) {
+    if (typeof v === "number")
+      return { type: "FIXED", value: v };
+    const str = String(v === undefined ? "" : v).toLowerCase();
+    if (str === "hug" || str === "auto")
+      return { type: "HUG" };
+    const fr = /^([\d.]+)fr$/.exec(str);
+    if (fr)
+      return { type: "FLEX", value: parseFloat(fr[1]) };
+    const px = /^([\d.]+)(px)?$/.exec(str);
+    if (px)
+      return { type: "FIXED", value: parseFloat(px[1]) };
+    return fallback === "FLEX" ? { type: "FLEX", value: 1 } : { type: "HUG" };
+  }
+  async function setupGrid(f, s, ctx, path) {
+    try {
+      f.layoutMode = "GRID";
+    } catch (e) {
+      ctx.warnings.push(path + ": grid auto-layout is not available in this Figma version, used a wrapping row");
+      return false;
+    }
+    const kids = Array.isArray(s.children) ? s.children : [];
+    const cols = Array.isArray(s.columns) ? s.columns : null;
+    const rows = Array.isArray(s.rows) ? s.rows : null;
+    const colCount = Math.max(1, cols ? cols.length : Number(s.columns) || 2);
+    let cells = 0;
+    for (let i = 0;i < kids.length; i++)
+      cells += spanOf(kids[i], "col") * spanOf(kids[i], "row");
+    const rowCount = Math.max(1, rows ? rows.length : Number(s.rows) || Math.ceil(cells / colCount));
+    const fixedW = typeof s.w === "number" || typeof s.width === "number" || s.w === "fill";
+    const fixedH = typeof s.h === "number" || typeof s.height === "number" || s.h === "fill";
+    const set = function(what, fn) {
       try {
-        await createNode(children[i], f, ctx, path + ".children[" + i + "]");
+        fn();
       } catch (e) {
-        if (e.code === "TOO_LARGE")
-          throw e;
-        ctx.warnings.push(path + ".children[" + i + "]: " + (e.message || e));
+        ctx.warnings.push(path + ": grid " + what + ": " + (e.message || e));
       }
+    };
+    set("columns", function() {
+      f.gridColumnCount = colCount;
+    });
+    set("rows", function() {
+      f.gridRowCount = rowCount;
+    });
+    set("column sizes", function() {
+      for (let i = 0;i < colCount; i++)
+        applyTrack(f.gridColumnSizes[i], track(cols ? cols[i] : undefined, fixedW ? "FLEX" : "HUG"));
+    });
+    set("row sizes", function() {
+      for (let i = 0;i < rowCount; i++)
+        applyTrack(f.gridRowSizes[i], track(rows ? rows[i] : undefined, fixedH ? "FLEX" : "HUG"));
+    });
+    if (!fixedW)
+      set("sizing", function() {
+        f.layoutSizingHorizontal = "HUG";
+      });
+    if (!fixedH)
+      set("sizing", function() {
+        f.layoutSizingVertical = "HUG";
+      });
+    if ("gridItemsPositioning" in f)
+      set("auto flow", function() {
+        f.gridItemsPositioning = "ROW_AUTO_FLOW";
+      });
+    const colGap = s.columnGap !== undefined ? s.columnGap : s.gap;
+    const rowGap = s.rowGap !== undefined ? s.rowGap : s.gap;
+    if (colGap !== undefined && colGap !== "auto")
+      await setNumber(f, "gridColumnGap", colGap);
+    if (rowGap !== undefined && rowGap !== "auto")
+      await setNumber(f, "gridRowGap", rowGap);
+    if (s.padding !== undefined)
+      await setPadding(f, s.padding);
+    return true;
+  }
+  function applyTrack(t, spec) {
+    if (!t)
+      return;
+    t.type = spec.type;
+    if (spec.value !== undefined && spec.type !== "HUG")
+      t.value = spec.value;
+  }
+  function spanOf(s, axis) {
+    if (!s || typeof s !== "object")
+      return 1;
+    if (Array.isArray(s.span))
+      return Math.max(1, Number(axis === "row" ? s.span[0] : s.span[1]) || 1);
+    const v = axis === "col" ? s.colSpan !== undefined ? s.colSpan : s.span : s.rowSpan;
+    return Math.max(1, Number(v) || 1);
+  }
+  function placeInGrid(node, s, ctx, path) {
+    try {
+      if (spanOf(s, "col") > 1)
+        node.gridColumnSpan = spanOf(s, "col");
+      if (spanOf(s, "row") > 1)
+        node.gridRowSpan = spanOf(s, "row");
+      const align = { start: "MIN", center: "CENTER", end: "MAX" };
+      if (s.cellAlign && align[s.cellAlign])
+        node.gridChildHorizontalAlign = align[s.cellAlign];
+      if (s.cellValign && align[s.cellValign])
+        node.gridChildVerticalAlign = align[s.cellValign];
+    } catch (e) {
+      ctx.warnings.push(path + ": grid span: " + (e.message || e));
     }
   }
   async function setupText(t, s, ctx) {
     const wanted = fontKey(s, ctx);
     t.fontName = ctx.fonts[wanted.family + ":" + wanted.style] || { family: "Inter", style: "Regular" };
-    t.characters = String(s.text === undefined ? "" : s.text);
+    const spans = Array.isArray(s.spans) ? s.spans : [];
+    t.characters = spans.length ? spans.map(function(sp) {
+      return sp && sp.text !== undefined ? String(sp.text) : "";
+    }).join("") : String(s.text === undefined ? "" : s.text);
     t.fontSize = typeof s.size === "number" ? s.size : ctx.defaults.size;
     if (s.lineHeight !== undefined)
       t.lineHeight = lineHeight(s.lineHeight);
@@ -685,6 +1569,42 @@
       await t.setTextStyleIdAsync(style.id);
     }
   }
+  async function applySpans(t, s, ctx, path) {
+    let at = 0;
+    for (let i = 0;i < s.spans.length; i++) {
+      const sp = s.spans[i] || {};
+      const end = at + String(sp.text === undefined ? "" : sp.text).length;
+      if (end === at)
+        continue;
+      try {
+        const f = spanFont(s, sp, ctx);
+        if (f)
+          t.setRangeFontName(at, end, ctx.fonts[f.family + ":" + f.style] || f);
+        if (typeof sp.size === "number")
+          t.setRangeFontSize(at, end, sp.size);
+        const color = sp.color !== undefined ? sp.color : sp.fill;
+        if (typeof color === "string" && color.indexOf("style:") === 0) {
+          await t.setRangeFillStyleIdAsync(at, end, (await findStyle("paint", stripPrefix(color))).id);
+        } else if (color !== undefined) {
+          t.setRangeFills(at, end, [await toPaint(color)]);
+        }
+        const deco = { underline: "UNDERLINE", strike: "STRIKETHROUGH", strikethrough: "STRIKETHROUGH", none: "NONE" };
+        if (sp.link) {
+          t.setRangeHyperlink(at, end, { type: "URL", value: String(sp.link) });
+          if (sp.decoration === undefined)
+            t.setRangeTextDecoration(at, end, "UNDERLINE");
+        }
+        if (sp.decoration && deco[sp.decoration])
+          t.setRangeTextDecoration(at, end, deco[sp.decoration]);
+        const cases = { upper: "UPPER", lower: "LOWER", title: "TITLE" };
+        if (sp.case && cases[sp.case])
+          t.setRangeTextCase(at, end, cases[sp.case]);
+      } catch (e) {
+        ctx.warnings.push(path + ".spans[" + i + "]: " + (e.message || e));
+      }
+      at = end;
+    }
+  }
   async function setupImage(r, s, ctx, path) {
     const bytes = ctx.images[s.imageKey];
     if (!bytes)
@@ -706,8 +1626,7 @@
     if (!s.name)
       r.name = "Image";
   }
-  async function createInstance(s, path) {
-    const ref = String(s.component);
+  async function findComponent(ref, path) {
     let comp = null;
     if (/^[\dI;:]+$/.test(ref)) {
       const n = await figma.getNodeByIdAsync(ref);
@@ -716,16 +1635,20 @@
     } else if (/^[0-9a-f]{40}$/i.test(ref)) {
       comp = await figma.importComponentByKeyAsync(ref);
     } else {
-      const list = await localComponents();
-      for (let i = 0;i < list.length && !comp; i++)
-        if (list[i].name === ref)
-          comp = list[i];
-      for (let i = 0;i < list.length && !comp; i++)
-        if (list[i].name.toLowerCase() === ref.toLowerCase())
-          comp = list[i];
+      const list2 = await localComponents();
+      for (let i = 0;i < list2.length && !comp; i++)
+        if (list2[i].name === ref)
+          comp = list2[i];
+      for (let i = 0;i < list2.length && !comp; i++)
+        if (list2[i].name.toLowerCase() === ref.toLowerCase())
+          comp = list2[i];
     }
     if (!comp)
       throw codeError(path + ': component "' + ref + '" not found. Use get_design_system to list components.', "NOT_FOUND");
+    return comp;
+  }
+  async function createInstance(s, path) {
+    const comp = await findComponent(String(s.component), path);
     const main = comp.type === "COMPONENT_SET" ? comp.defaultVariant : comp;
     const inst = main.createInstance();
     if (s.props && typeof s.props === "object") {
@@ -748,6 +1671,98 @@
         inst.setProperties(out);
     }
     return inst;
+  }
+  async function createComponentSet(s, parent, ctx, path) {
+    const variants = Array.isArray(s.variants) ? s.variants : [];
+    if (!variants.length)
+      throw codeError(path + ': a componentSet needs variants:[{props:{Variant:"Primary"}, ...}]', "BAD_ARGS");
+    const start = ctx.binds.length;
+    const comps = [];
+    for (let i = 0;i < variants.length; i++) {
+      const v = Object.assign({}, s.base || {}, variants[i] || {});
+      const props = v.props || {};
+      const keys = Object.keys(props);
+      if (!keys.length)
+        throw codeError(path + ".variants[" + i + ']: props:{Name:"value"} is required', "BAD_ARGS");
+      const spec = Object.assign({}, v, {
+        type: "component",
+        variantOf: true,
+        name: keys.map(function(k) {
+          return k + "=" + props[k];
+        }).join(", ")
+      });
+      delete spec.props;
+      comps.push(await createNode(spec, parent, ctx, path + ".variants[" + i + "]"));
+    }
+    const set = figma.combineAsVariants(comps, parent);
+    set.name = String(s.name || "Component");
+    await addProperties(set, s.properties, ctx.binds.splice(start), ctx, path);
+    return set;
+  }
+  async function addProperties(owner, properties, binds, ctx, path) {
+    const keys = {};
+    const types = {};
+    const props = properties && typeof properties === "object" ? properties : {};
+    const names = Object.keys(props);
+    for (let i = 0;i < names.length; i++) {
+      const name = names[i];
+      let def = props[name];
+      if (typeof def === "string")
+        def = { type: "text", default: def };
+      else if (typeof def === "boolean")
+        def = { type: "boolean", default: def };
+      const t = String(def.type || "text").toLowerCase();
+      try {
+        if (t === "boolean" || t === "bool") {
+          keys[name] = owner.addComponentProperty(name, "BOOLEAN", def.default !== false);
+          types[name] = "BOOLEAN";
+        } else if (t === "instance" || t === "instance_swap" || t === "swap") {
+          const comp = await findComponent(String(def.default), path + ".properties." + name);
+          const main = comp.type === "COMPONENT_SET" ? comp.defaultVariant : comp;
+          const preferred = [];
+          const list2 = Array.isArray(def.preferred) ? def.preferred : [];
+          for (let k = 0;k < list2.length; k++) {
+            const p = await findComponent(String(list2[k]), path + ".properties." + name);
+            preferred.push({ type: p.type === "COMPONENT_SET" ? "COMPONENT_SET" : "COMPONENT", key: p.key });
+          }
+          keys[name] = owner.addComponentProperty(name, "INSTANCE_SWAP", main.id, preferred.length ? { preferredValues: preferred } : undefined);
+          types[name] = "INSTANCE_SWAP";
+        } else {
+          keys[name] = owner.addComponentProperty(name, "TEXT", String(def.default === undefined ? "" : def.default));
+          types[name] = "TEXT";
+        }
+      } catch (e) {
+        ctx.warnings.push(path + ".properties." + name + ": " + (e.message || e));
+      }
+    }
+    for (let i = 0;i < binds.length; i++) {
+      const b = binds[i];
+      const map = typeof b.bind === "string" ? { auto: b.bind } : b.bind;
+      const refs = {};
+      const fields = Object.keys(map || {});
+      for (let k = 0;k < fields.length; k++) {
+        const prop = String(map[fields[k]]);
+        let field = fields[k];
+        if (!keys[prop] && b.node.type === "TEXT" && (field === "auto" || field === "characters")) {
+          keys[prop] = owner.addComponentProperty(prop, "TEXT", b.node.characters);
+          types[prop] = "TEXT";
+        }
+        if (!keys[prop]) {
+          ctx.warnings.push(b.path + ': no component property "' + prop + '" (declare it in properties)');
+          continue;
+        }
+        if (field === "auto")
+          field = types[prop] === "TEXT" ? "characters" : types[prop] === "BOOLEAN" ? "visible" : "mainComponent";
+        refs[field] = keys[prop];
+      }
+      if (!Object.keys(refs).length)
+        continue;
+      try {
+        b.node.componentPropertyReferences = Object.assign({}, b.node.componentPropertyReferences || {}, refs);
+      } catch (e) {
+        ctx.warnings.push(b.path + ": bind: " + (e.message || e));
+      }
+    }
   }
   async function overrideTexts(inst, texts, ctx) {
     const names = Object.keys(texts);
@@ -837,10 +1852,10 @@
         await node.setStrokeStyleIdAsync(style.id);
       return;
     }
-    const list = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
+    const list2 = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
     const paints = [];
-    for (let i = 0;i < list.length; i++)
-      paints.push(await toPaint(list[i]));
+    for (let i = 0;i < list2.length; i++)
+      paints.push(await toPaint(list2[i]));
     node[field] = paints;
   }
   async function toPaint(v) {
@@ -996,7 +2011,7 @@
     if (action === "save")
       return save(p);
     if (action === "list")
-      return list();
+      return list2();
     if (action === "restore")
       return restore(p);
     if (action === "delete")
@@ -1033,7 +2048,7 @@
     }
     return { checkpointId: meta.id, label: meta.label, saved: nodes.length };
   }
-  async function list() {
+  async function list2() {
     const page = await checkpointPage(false);
     if (!page)
       return { checkpoints: [] };
@@ -1245,6 +2260,10 @@
     return parts.join(" ");
   }
   function layoutText(n) {
+    if (n.layoutMode === "GRID") {
+      const gaps = n.gridColumnGap === n.gridRowGap ? "gap:" + round(n.gridColumnGap) : "gap:" + round(n.gridColumnGap) + "/" + round(n.gridRowGap);
+      return "grid " + n.gridColumnCount + "×" + n.gridRowCount + (n.gridColumnGap || n.gridRowGap ? " " + gaps : "");
+    }
     const out = [n.layoutMode === "HORIZONTAL" ? "row" : "column"];
     if (n.primaryAxisAlignItems === "SPACE_BETWEEN")
       out.push("gap:auto");
@@ -1291,6 +2310,225 @@
       }
       return p.type.toLowerCase();
     }).join("+");
+  }
+
+  // plugin/lib/export.ts
+  var MAX_NODES3 = 1500;
+  var MAX_ASSET_BYTES = 40 << 20;
+  var VECTOR_TYPES = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "ELLIPSE", "LINE"];
+  var VISUAL_CSS = [
+    "background",
+    "border",
+    "border-top",
+    "border-right",
+    "border-bottom",
+    "border-left",
+    "border-radius",
+    "box-shadow",
+    "opacity",
+    "filter",
+    "backdrop-filter",
+    "mix-blend-mode",
+    "outline",
+    "outline-offset"
+  ];
+  async function exportTree(p) {
+    const node = p.nodeId ? await getNode(p.nodeId) : figma.currentPage.selection[0];
+    if (!node)
+      throw codeError("No nodeId given and nothing is selected", "BAD_ARGS");
+    if (node.type === "PAGE" || node.type === "DOCUMENT")
+      throw codeError("Export a frame or layer, not a page", "BAD_ARGS");
+    const ctx = { count: 0, truncated: false, assets: {}, assetBytes: 0, imageFiles: {}, names: {}, warnings: [] };
+    const tree = await walk(node, null, ctx);
+    return { tree, assets: ctx.assets, nodes: ctx.count, truncated: ctx.truncated, warnings: ctx.warnings.slice(0, 40) };
+  }
+  function fileName(base, ext, ctx) {
+    const clean = String(base).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "asset";
+    const n = ctx.names[clean + ext] = (ctx.names[clean + ext] || 0) + 1;
+    return clean + (n > 1 ? "-" + n : "") + "." + ext;
+  }
+  function sizing2(n, axis) {
+    const v = n["layoutSizing" + (axis === "H" ? "Horizontal" : "Vertical")];
+    return v === "FILL" ? "fill" : v === "HUG" ? "hug" : "fixed";
+  }
+  function isVectorOnly(n) {
+    if (VECTOR_TYPES.indexOf(n.type) !== -1)
+      return !hasImageFill(n);
+    if (n.type === "TEXT" || hasImageFill(n))
+      return false;
+    if (!("children" in n) || !n.children.length)
+      return false;
+    for (let i = 0;i < n.children.length; i++)
+      if (n.children[i].visible && !isVectorOnly(n.children[i]))
+        return false;
+    return true;
+  }
+  function hasImageFill(n) {
+    return "fills" in n && n.fills !== figma.mixed && n.fills.some(function(f) {
+      return f.type === "IMAGE" && f.visible !== false;
+    });
+  }
+  async function imageAsset(n, ctx) {
+    const paint = n.fills.filter(function(f) {
+      return f.type === "IMAGE" && f.visible !== false;
+    })[0];
+    if (!paint || !paint.imageHash)
+      return null;
+    let file = ctx.imageFiles[paint.imageHash];
+    if (!file) {
+      const image = figma.getImageByHash(paint.imageHash);
+      if (!image)
+        return null;
+      const bytes = await image.getBytesAsync();
+      if (ctx.assetBytes + bytes.length > MAX_ASSET_BYTES) {
+        ctx.warnings.push(n.name + ": image skipped (assets over " + (MAX_ASSET_BYTES >> 20) + " MB)");
+        return null;
+      }
+      ctx.assetBytes += bytes.length;
+      file = fileName(n.name, "img", ctx);
+      ctx.assets[file] = { b64: figma.base64Encode(bytes) };
+      ctx.imageFiles[paint.imageHash] = file;
+    }
+    return { file, fit: paint.scaleMode === "FIT" ? "contain" : paint.scaleMode === "TILE" ? "tile" : "cover" };
+  }
+  function tracks(list3) {
+    return (list3 || []).map(function(t) {
+      return t.type === "FIXED" ? round(t.value) + "px" : t.type === "HUG" ? "auto" : (t.value || 1) + "fr";
+    });
+  }
+  async function walk(n, parent, ctx) {
+    ctx.count++;
+    const box = n.absoluteBoundingBox || { x: 0, y: 0, width: n.width || 0, height: n.height || 0 };
+    const pbox = parent && parent.absoluteBoundingBox;
+    const out = {
+      id: n.id,
+      name: n.name,
+      type: n.type,
+      x: pbox ? round(box.x - pbox.x) : 0,
+      y: pbox ? round(box.y - pbox.y) : 0,
+      w: round(box.width),
+      h: round(box.height),
+      sizeH: sizing2(n, "H"),
+      sizeV: sizing2(n, "V")
+    };
+    if (n.layoutPositioning === "ABSOLUTE")
+      out.absolute = true;
+    if (n.layoutGrow === 1)
+      out.grow = true;
+    if (parent && parent.layoutMode === "GRID") {
+      if (n.gridColumnSpan > 1)
+        out.colSpan = n.gridColumnSpan;
+      if (n.gridRowSpan > 1)
+        out.rowSpan = n.gridRowSpan;
+    }
+    if (n.rotation && Math.abs(n.rotation) > 0.01 && n.type !== "TEXT")
+      out.rotation = round(n.rotation);
+    let css = {};
+    try {
+      css = await n.getCSSAsync();
+    } catch (e) {}
+    const visual = {};
+    for (let i = 0;i < VISUAL_CSS.length; i++)
+      if (css[VISUAL_CSS[i]] !== undefined)
+        visual[VISUAL_CSS[i]] = css[VISUAL_CSS[i]];
+    out.css = visual;
+    if (n.type !== "TEXT" && isVectorOnly(n)) {
+      try {
+        const svg = await n.exportAsync({ format: "SVG_STRING" });
+        const file = fileName(n.name, "svg", ctx);
+        ctx.assets[file] = { svg };
+        out.asset = { file, kind: "svg" };
+        out.css = {};
+        return out;
+      } catch (e) {
+        ctx.warnings.push(n.name + ": SVG export failed, kept as a box");
+      }
+    }
+    if (hasImageFill(n)) {
+      const img = await imageAsset(n, ctx);
+      if (img) {
+        delete out.css.background;
+        if ("children" in n && n.children.length)
+          out.bgImage = img;
+        else
+          out.asset = { file: img.file, kind: "image", fit: img.fit };
+      }
+    }
+    if (n.type === "TEXT") {
+      out.text = textOf(n);
+      return out;
+    }
+    if ("layoutMode" in n && n.layoutMode && n.layoutMode !== "NONE") {
+      const l = {
+        mode: n.layoutMode === "HORIZONTAL" ? "row" : n.layoutMode === "VERTICAL" ? "column" : "grid",
+        padding: [n.paddingTop, n.paddingRight, n.paddingBottom, n.paddingLeft].map(round)
+      };
+      if (l.mode === "grid") {
+        l.columns = tracks(n.gridColumnSizes);
+        l.rows = tracks(n.gridRowSizes);
+        l.columnGap = round(n.gridColumnGap || 0);
+        l.rowGap = round(n.gridRowGap || 0);
+      } else {
+        l.gap = n.primaryAxisAlignItems === "SPACE_BETWEEN" ? 0 : round(n.itemSpacing || 0);
+        l.justify = n.primaryAxisAlignItems;
+        l.align = n.counterAxisAlignItems;
+        if (n.layoutWrap === "WRAP") {
+          l.wrap = true;
+          l.rowGap = round(n.counterAxisSpacing || 0);
+        }
+      }
+      out.layout = l;
+    }
+    if (n.clipsContent)
+      out.clip = true;
+    if ("children" in n && n.children.length && !out.asset) {
+      out.children = [];
+      for (let i = 0;i < n.children.length; i++) {
+        const c = n.children[i];
+        if (!c.visible)
+          continue;
+        if (ctx.count >= MAX_NODES3) {
+          ctx.truncated = true;
+          break;
+        }
+        out.children.push(await walk(c, n, ctx));
+      }
+    }
+    return out;
+  }
+  function textOf(t) {
+    const segments = t.getStyledTextSegments(["fontName", "fontSize", "fontWeight", "fills", "textDecoration", "hyperlink", "letterSpacing", "lineHeight", "textCase"]);
+    return {
+      autoResize: t.textAutoResize,
+      align: t.textAlignHorizontal,
+      valign: t.textAlignVertical,
+      truncate: t.textTruncation === "ENDING" ? t.maxLines || 1 : 0,
+      segments: segments.map(function(s) {
+        const fill = s.fills.filter(function(f) {
+          return f.visible !== false;
+        })[0];
+        const seg = {
+          text: s.characters,
+          family: s.fontName.family,
+          style: s.fontName.style,
+          weight: s.fontWeight,
+          size: round(s.fontSize)
+        };
+        if (fill && fill.type === "SOLID")
+          seg.color = toHex(fill.color, fill.opacity);
+        if (s.textDecoration !== "NONE")
+          seg.decoration = s.textDecoration === "UNDERLINE" ? "underline" : "line-through";
+        if (s.hyperlink && s.hyperlink.type === "URL")
+          seg.link = s.hyperlink.value;
+        if (s.letterSpacing && s.letterSpacing.value)
+          seg.letterSpacing = s.letterSpacing.unit === "PERCENT" ? round(s.letterSpacing.value / 100) + "em" : round(s.letterSpacing.value) + "px";
+        if (s.lineHeight && s.lineHeight.unit !== "AUTO")
+          seg.lineHeight = s.lineHeight.unit === "PERCENT" ? String(round(s.lineHeight.value / 100)) : round(s.lineHeight.value) + "px";
+        if (s.textCase && s.textCase !== "ORIGINAL")
+          seg.textCase = s.textCase === "UPPER" ? "uppercase" : s.textCase === "LOWER" ? "lowercase" : "capitalize";
+        return seg;
+      })
+    };
   }
 
   // plugin/lib/design-system.ts
@@ -1356,9 +2594,9 @@
       });
     }
     if (include.indexOf("components") !== -1) {
-      const list = await localComponents();
-      counts.components = list.length;
-      out.components = list.slice(0, limit).map(function(c) {
+      const list3 = await localComponents();
+      counts.components = list3.length;
+      out.components = list3.slice(0, limit).map(function(c) {
         const item = { name: c.name, id: c.id, page: (pageOf(c) || { name: "?" }).name };
         if (c.type === "COMPONENT_SET") {
           const defs = c.componentPropertyDefinitions;
@@ -1412,8 +2650,189 @@
     return v;
   }
 
+  // plugin/lib/find.ts
+  var MAX_LIMIT = 500;
+  function matcher(q) {
+    if (q === undefined || q === null || q === "")
+      return null;
+    const str = String(q);
+    const m = /^\/(.+)\/([gimsuy]*)$/.exec(str);
+    if (m) {
+      let re;
+      try {
+        re = new RegExp(m[1], m[2].replace("g", ""));
+      } catch (e) {
+        throw codeError("Invalid regex " + str + ": " + (e.message || e), "BAD_ARGS");
+      }
+      return function(s) {
+        return re.test(s);
+      };
+    }
+    const needle = str.toLowerCase();
+    return function(s) {
+      return s.toLowerCase().indexOf(needle) !== -1;
+    };
+  }
+  async function find2(p) {
+    const byName = matcher(p.name);
+    const byText = matcher(p.text);
+    const byStyle = matcher(p.style);
+    const byComponent = matcher(p.component);
+    const types = (Array.isArray(p.type) ? p.type : p.type ? [p.type] : []).map(function(t) {
+      return String(t).toUpperCase().replace(/[\s-]/g, "_");
+    });
+    if (!byName && !byText && !byStyle && !byComponent && !types.length) {
+      throw codeError("Give at least one filter: name, text, type, style or component", "BAD_ARGS");
+    }
+    const limit = Math.max(1, Math.min(MAX_LIMIT, p.limit || 50));
+    let roots;
+    if (p.parentId)
+      roots = [await getNode(p.parentId)];
+    else if (p.pageId)
+      roots = [await getNode(p.pageId)];
+    else
+      roots = figma.root.children.slice();
+    for (let i = 0;i < roots.length; i++)
+      if (roots[i].type === "PAGE")
+        await roots[i].loadAsync();
+    const test = function(n) {
+      if (types.length && types.indexOf(n.type) === -1)
+        return false;
+      if (byName && !byName(n.name))
+        return false;
+      if (byText && !(n.type === "TEXT" && byText(n.characters)))
+        return false;
+      if (byComponent && n.type !== "INSTANCE")
+        return false;
+      if (byStyle && !(n.fillStyleId || n.strokeStyleId || n.textStyleId || n.effectStyleId))
+        return false;
+      return true;
+    };
+    let candidates = [];
+    for (let i = 0;i < roots.length; i++) {
+      const r = roots[i];
+      if (r.type !== "PAGE" && test(r))
+        candidates.push(r);
+      if ("findAll" in r)
+        candidates = candidates.concat(r.findAll(test));
+    }
+    const matches = [];
+    let total = 0;
+    for (let i = 0;i < candidates.length; i++) {
+      const n = candidates[i];
+      if (byStyle && !await usesStyle(n, byStyle))
+        continue;
+      if (byComponent && !await isInstanceOf(n, byComponent, String(p.component)))
+        continue;
+      total++;
+      if (matches.length < limit)
+        matches.push(describeMatch(n));
+    }
+    return { total, matches, truncated: total > matches.length };
+  }
+  async function usesStyle(n, test) {
+    const fields = ["fillStyleId", "strokeStyleId", "textStyleId", "effectStyleId"];
+    for (let i = 0;i < fields.length; i++) {
+      const name = await styleName(n[fields[i]]);
+      if (name && test(name))
+        return true;
+    }
+    return false;
+  }
+  async function isInstanceOf(n, test, ref) {
+    const main = await n.getMainComponentAsync();
+    if (!main)
+      return false;
+    if (main.id === ref || main.key === ref || test(main.name))
+      return true;
+    const set = main.parent && main.parent.type === "COMPONENT_SET" ? main.parent : null;
+    return !!set && (set.id === ref || set.key === ref || test(set.name));
+  }
+  function describeMatch(n) {
+    const names = [];
+    let p = n.parent;
+    while (p && p.type !== "PAGE" && p.type !== "DOCUMENT") {
+      names.unshift(p.name);
+      p = p.parent;
+    }
+    const page = pageOf(n);
+    const out = { id: n.id, name: n.name, type: n.type, page: page ? page.name : null, path: names.join(" / ") };
+    if (n.type === "TEXT")
+      out.text = n.characters.length > 80 ? n.characters.slice(0, 77) + "…" : n.characters;
+    return out;
+  }
+
+  // plugin/lib/selection.ts
+  var MAX_WAIT_MS = 120000;
+  var waiters = {};
+  var listening = false;
+  function selectionSummary() {
+    const sel = figma.currentPage.selection;
+    return {
+      page: { id: figma.currentPage.id, name: figma.currentPage.name },
+      count: sel.length,
+      selection: sel.slice(0, 100).map(function(n) {
+        const b = n.absoluteBoundingBox;
+        return {
+          id: n.id,
+          name: n.name,
+          type: n.type,
+          bounds: b ? { x: round(b.x), y: round(b.y), width: round(b.width), height: round(b.height) } : null
+        };
+      })
+    };
+  }
+  function onSelectionChange() {
+    if (!figma.currentPage.selection.length)
+      return;
+    const ids = Object.keys(waiters);
+    for (let i = 0;i < ids.length; i++)
+      finish(ids[i], null);
+  }
+  function finish(id, error, timedOut) {
+    const w = waiters[id];
+    if (!w)
+      return;
+    delete waiters[id];
+    clearTimeout(w.timer);
+    figma.ui.postMessage({ t: "waitDone", id });
+    if (!Object.keys(waiters).length && listening) {
+      figma.off("selectionchange", onSelectionChange);
+      listening = false;
+    }
+    if (error)
+      w.reject(error);
+    else {
+      const out = selectionSummary();
+      out.timedOut = !!timedOut;
+      w.resolve(out);
+    }
+  }
+  function waitForSelection(p, timeoutMs, requestId) {
+    const ms = Math.max(1000, Math.min(MAX_WAIT_MS, Number(p.timeoutMs) || timeoutMs || 60000));
+    const message = String(p.message || "Select one or more layers");
+    return new Promise(function(resolve, reject) {
+      waiters[requestId] = {
+        resolve,
+        reject,
+        timer: setTimeout(function() {
+          finish(requestId, null, true);
+        }, ms)
+      };
+      if (!listening) {
+        figma.on("selectionchange", onSelectionChange);
+        listening = true;
+      }
+      figma.ui.postMessage({ t: "wait", id: requestId, message, until: Date.now() + ms });
+      figma.notify("Your agent is waiting: " + message, { timeout: 4000 });
+    });
+  }
+  function cancelWait(id) {
+    finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
+  }
+
   // plugin/code.ts
-  var VERSION = "1.3.0";
+  var VERSION = "1.4.0";
   var DEFAULT_SIZE = { width: 340, height: 540 };
   var MIN_SIZE = { width: 280, height: 260 };
   var MAX_SIZE = { width: 900, height: 1200 };
@@ -1494,6 +2913,12 @@
       figma.notify(String(msg.text), { timeout: 2500 });
     else if (msg.t === "focus")
       focusNode(String(msg.nodeId));
+    else if (msg.t === "cancelWait")
+      cancelWait(String(msg.id));
+    else if (msg.t === "cancel") {
+      markCancelled(String(msg.id));
+      cancelWait(String(msg.id));
+    }
   };
   async function focusNode(id) {
     const node = await figma.getNodeByIdAsync(id);
@@ -1513,7 +2938,9 @@
     run_script: runScript,
     build,
     describe,
+    find: find2,
     get_design_system: getDesignSystem,
+    design_tokens: designTokens,
     audit,
     get_css: getCss,
     checkpoint,
@@ -1522,18 +2949,25 @@
     import_svg: importSvg,
     get_context: getContext,
     list_fonts: listFonts,
+    wait_for_selection: waitForSelection,
+    prototype,
+    annotate,
+    export_tree: exportTree,
     ping: function() {
       return Promise.resolve({ pong: true, session: sessionInfo() });
     }
   };
   var READ_ONLY = {
     describe: true,
+    find: true,
     get_design_system: true,
     audit: true,
     get_css: true,
     screenshot: true,
     get_context: true,
     list_fonts: true,
+    wait_for_selection: true,
+    export_tree: true,
     ping: true
   };
   async function handleRequest(msg) {
@@ -1546,7 +2980,7 @@
       const handler = HANDLERS[msg.method];
       if (!handler)
         throw codeError("Unknown method: " + msg.method + " (reopen the plugin after updating it)", "UNKNOWN_METHOD");
-      const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000));
+      const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000), String(msg.id));
       reply = { t: "res", id: msg.id, ok: true, result };
     } catch (e) {
       reply = Object.assign({ t: "res", id: msg.id, ok: false }, describeError(e));
@@ -1555,6 +2989,7 @@
       commitUndo();
       invalidateCaches();
     }
+    clearCancelled(String(msg.id));
     reply.ms = Date.now() - started;
     post(reply);
   }
@@ -1649,8 +3084,8 @@
       const m = /line (\d+)/i.exec(String(e && e.message));
       return m ? Number(m[1]) : undefined;
     }
-    const line = raw - lineBase - offset;
-    return line >= 1 ? line : undefined;
+    const line2 = raw - lineBase - offset;
+    return line2 >= 1 ? line2 : undefined;
   }
   async function runScript(p, timeoutMs) {
     const logs = [];
@@ -1759,11 +3194,15 @@
       throw codeError("A " + node.type + " node cannot be exported", "BAD_ARGS");
     const box = node.absoluteRenderBounds || node.absoluteBoundingBox || { width: node.width || 1, height: node.height || 1 };
     let scale = p.scale || 1;
+    if (!p.scale && p.width)
+      scale = Math.max(0.05, Math.min(4, p.width / Math.max(box.width, 1)));
     if (p.maxDimension)
       scale = Math.min(scale, p.maxDimension / Math.max(box.width, box.height, 1));
     const format = p.format === "JPG" ? "JPG" : "PNG";
     const bytes = await node.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
-    return { bytes, format, scale, name: node.name, nodeId: node.id };
+    const bb = node.absoluteBoundingBox;
+    const offset = node.absoluteRenderBounds && bb ? { x: round(node.absoluteRenderBounds.x - bb.x), y: round(node.absoluteRenderBounds.y - bb.y) } : { x: 0, y: 0 };
+    return { bytes, format, scale, offset, name: node.name, nodeId: node.id };
   }
   async function placeImage(p) {
     if (!(p.bytes instanceof Uint8Array))

@@ -1,16 +1,24 @@
 // Figma Bridge — plugin main thread.
 // Syntax stays ES2017 (no ?. ?? object spread or optional catch binding): the sandbox parser is conservative.
+import { annotate } from "./lib/annotate";
 import { audit } from "./lib/audit";
 import { build } from "./lib/build";
 import { checkpoint } from "./lib/checkpoint";
 import { describe } from "./lib/describe";
+import { exportTree } from "./lib/export";
 import { getDesignSystem } from "./lib/design-system";
+import { designTokens } from "./lib/tokens";
+import { find } from "./lib/find";
+import { prototype } from "./lib/prototype";
+import { cancelWait, waitForSelection } from "./lib/selection";
 import {
+  clearCancelled,
   codeError,
   fontNamesOf,
   getNode,
   invalidateCaches,
   loadFont,
+  markCancelled,
   pageOf,
   parentFor,
   parseHex,
@@ -20,7 +28,7 @@ import {
   toSafe,
 } from "./lib/util";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const DEFAULT_SIZE = { width: 340, height: 540 };
 const MIN_SIZE = { width: 280, height: 260 };
 const MAX_SIZE = { width: 900, height: 1200 };
@@ -104,6 +112,12 @@ figma.ui.onmessage = function (msg: any) {
     void figma.clientStorage.setAsync("size", size);
   } else if (msg.t === "notify") figma.notify(String(msg.text), { timeout: 2500 });
   else if (msg.t === "focus") void focusNode(String(msg.nodeId));
+  else if (msg.t === "cancelWait") cancelWait(String(msg.id));
+  else if (msg.t === "cancel") {
+    // The UI already answered the agent; long commands stop at their next checkpoint.
+    markCancelled(String(msg.id));
+    cancelWait(String(msg.id));
+  }
 };
 
 /** Selects a node and zooms to it, switching page if needed ("Show" in the activity log). */
@@ -122,13 +136,15 @@ async function focusNode(id: string) {
 
 // ─── Request dispatch ───────────────────────────────────────────────────────
 
-type Handler = (params: any, timeoutMs: number) => Promise<any>;
+type Handler = (params: any, timeoutMs: number, requestId: string) => Promise<any>;
 
 const HANDLERS: { [method: string]: Handler } = {
   run_script: runScript,
   build: build,
   describe: describe,
+  find: find,
   get_design_system: getDesignSystem,
+  design_tokens: designTokens,
   audit: audit,
   get_css: getCss,
   checkpoint: checkpoint,
@@ -137,6 +153,10 @@ const HANDLERS: { [method: string]: Handler } = {
   import_svg: importSvg,
   get_context: getContext,
   list_fonts: listFonts,
+  wait_for_selection: waitForSelection,
+  prototype: prototype,
+  annotate: annotate,
+  export_tree: exportTree,
   ping: function () {
     return Promise.resolve({ pong: true, session: sessionInfo() });
   },
@@ -145,12 +165,15 @@ const HANDLERS: { [method: string]: Handler } = {
 // Read-only commands don't need their own undo step.
 const READ_ONLY: { [method: string]: boolean } = {
   describe: true,
+  find: true,
   get_design_system: true,
   audit: true,
   get_css: true,
   screenshot: true,
   get_context: true,
   list_fonts: true,
+  wait_for_selection: true,
+  export_tree: true,
   ping: true,
 };
 
@@ -163,7 +186,7 @@ async function handleRequest(msg: any) {
   try {
     const handler = HANDLERS[msg.method];
     if (!handler) throw codeError("Unknown method: " + msg.method + " (reopen the plugin after updating it)", "UNKNOWN_METHOD");
-    const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000));
+    const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000), String(msg.id));
     reply = { t: "res", id: msg.id, ok: true, result: result };
   } catch (e) {
     reply = Object.assign({ t: "res", id: msg.id, ok: false }, describeError(e));
@@ -172,6 +195,7 @@ async function handleRequest(msg: any) {
     commitUndo();
     invalidateCaches();
   }
+  clearCancelled(String(msg.id));
   reply.ms = Date.now() - started;
   post(reply);
 }
@@ -377,10 +401,15 @@ async function screenshot(p: any) {
   if (typeof node.exportAsync !== "function") throw codeError("A " + node.type + " node cannot be exported", "BAD_ARGS");
   const box = node.absoluteRenderBounds || node.absoluteBoundingBox || { width: node.width || 1, height: node.height || 1 };
   let scale = p.scale || 1;
+  // `width` (used by compare) exports at the reference image's resolution.
+  if (!p.scale && p.width) scale = Math.max(0.05, Math.min(4, p.width / Math.max(box.width, 1)));
   if (p.maxDimension) scale = Math.min(scale, p.maxDimension / Math.max(box.width, box.height, 1));
   const format = p.format === "JPG" ? "JPG" : "PNG";
   const bytes = await node.exportAsync({ format: format, constraint: { type: "SCALE", value: scale } });
-  return { bytes: bytes, format: format, scale: scale, name: node.name, nodeId: node.id };
+  // The export covers the render bounds (shadows included): offset maps image pixels back to the layer box.
+  const bb = node.absoluteBoundingBox;
+  const offset = node.absoluteRenderBounds && bb ? { x: round(node.absoluteRenderBounds.x - bb.x), y: round(node.absoluteRenderBounds.y - bb.y) } : { x: 0, y: 0 };
+  return { bytes: bytes, format: format, scale: scale, offset: offset, name: node.name, nodeId: node.id };
 }
 
 async function placeImage(p: any) {

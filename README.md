@@ -12,11 +12,13 @@ and any other MCP client.
 
 ## Features
 
-- **Build whole layouts in one call** from a JSON spec: auto-layout, text, icons, images, components, styles and variables.
-- **Read existing designs** compactly, and reuse the file's design system.
-- **Check its own work** with screenshots and a design audit (contrast, overflow, fonts, spacing, naming).
+- **Build whole layouts in one call** from a JSON spec: auto-layout and grid, rich text, icons, images, component sets with variants and properties, prototype links.
+- **Write the design system**: variables with Light/Dark modes and styles, from simple JSON, W3C design tokens or a Tailwind theme.
+- **Read existing designs** compactly, search every page, and reuse the file's design system.
+- **Check its own work** with screenshots, a design audit, and a pixel diff against a mockup.
+- **Hand off**: Dev Mode annotations and export to HTML or React (CSS or Tailwind).
 - **200 000+ icons** through Iconify, checkpoints to roll back, and a library of reusable scripts.
-- **Zero-friction connection**: the plugin connects and reconnects on its own. Each AI command is one Ctrl+Z step.
+- **Zero-friction connection**: the plugin connects and reconnects on its own. Each AI command is one Ctrl+Z step, and you can cancel it from the plugin.
 
 ## Installation
 
@@ -80,9 +82,15 @@ args = ['run', 'C:\Users\you\figma-bridge\src\server.ts']
 
 Keep the plugin open (the **—** button collapses it to a thin bar) and ask your agent, for example:
 
-> Build a pricing section with three plans on a new page, using the file's colour styles.
+> Design a mobile sign-in screen from scratch on a new page: logo, email and password fields, a primary button and a "Forgot password?" link.
 
-> Audit the selected screen and fix the contrast issues.
+> Create our design system from `tokens.json` (Light and Dark modes), then rebuild the selected screen with those variables and show it in Dark mode.
+
+> Reproduce `C:\mockups\dashboard.png` as an editable frame with auto-layout, compare it with the screenshot and fix the differences.
+
+When your agent needs you to point at something, the plugin shows **Your agent is waiting** until you select it.
+A running command has a **Cancel** button: `build` stops at the next layer, but a script cannot be interrupted and
+finishes in the background.
 
 To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in the right panel.
 
@@ -90,12 +98,19 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 
 | Tool | Purpose |
 |---|---|
-| `build` | Create a layout from a JSON spec in one call |
+| `build` | Create a layout from a JSON spec in one call: grid, rich text, variants, reactions |
 | `run_script` | Run any Figma Plugin API code |
 | `describe` | Compact outline of existing layers |
+| `find` | Search layers on every page by name, text, type, style or component |
 | `get_design_system` | Local styles, variables and components |
+| `design_tokens` | Create or update variables (with modes) and styles from JSON, W3C tokens or Tailwind |
 | `audit` | Lint for contrast, overflow, fonts, spacing and naming |
 | `screenshot` | Export a layer to an image (optionally shown to the agent) |
+| `compare` | Pixel-diff a layer against a reference image, with a heatmap |
+| `wait_for_selection` | Ask the user to select layers and wait for it |
+| `prototype` | Link frames (click, hover, transitions) and set flow starting points |
+| `annotate` | Add, list or clear Dev Mode annotations |
+| `export_code` | Export a frame to HTML or React, with CSS or Tailwind |
 | `insert_icon` · `search_icons` | Iconify icons as editable vectors |
 | `place_image` · `import_svg` | Images from disk or URL, SVG as vectors |
 | `checkpoint` | Save layers and restore them later |
@@ -111,14 +126,15 @@ Each tool describes its parameters to the agent, which needs no extra instructio
 |---|---|
 | **Offline** | The MCP server isn't running: start or restart your AI client and check that `FigmaBridge` is enabled. |
 | **Port busy** | Another program uses port 3055. Close it; the plugin reconnects. |
+| **Version mismatch** | The plugin and the server come from different releases: reopen the plugin, or update both. |
 
-Logs and screenshots are written to `%TEMP%\figma-bridge`.
+Logs, screenshots, comparison heatmaps and exported code are written to `%TEMP%\figma-bridge`.
 
 ## Development
 
 ```bash
 bun run build     # compile the plugin (plugin/code.ts → plugin/code.js)
-bun run check     # type-check server and plugin
+bun run check     # type-check server and plugin, reject syntax Figma cannot run
 bun run test      # end-to-end test against an open Figma file
 ```
 

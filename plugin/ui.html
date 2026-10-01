@@ -134,6 +134,20 @@
   .lbl b { font-weight: 600; font-size: 12px; }
   .lbl span { color: var(--text-3); font-size: 11px; }
 
+  /* ── Banners (agent waiting, version mismatch) ──────────────────────────── */
+  .banner {
+    display: none; align-items: center; gap: 10px; margin: 12px 12px 0; padding: 9px 8px 9px 10px; border-radius: var(--r); flex: none;
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .banner .bico { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; flex: none; color: var(--accent); background: var(--bg); }
+  .banner .main b { display: block; font-weight: 600; }
+  .banner .main span { display: block; color: var(--text-2); }
+  .waiting #waitBar { display: flex; }
+  .banner.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+  .banner.warn .bico { color: var(--warn); }
+  .mismatch #verBar { display: flex; }
+  .waiting #bar { background: var(--accent-soft); }
+
   /* ── Setup checklist ────────────────────────────────────────────────────── */
   .setup { margin: 0 12px 12px; padding: 12px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--border); display: none; flex: none; }
   .s-offline .setup, .s-foreign .setup { display: block; }
@@ -213,8 +227,11 @@
   .dur { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
   .row.slow .dur { color: var(--warn); }
   .row .quick { display: none; }
-  .row:hover .quick { display: inline-block; }
+  .row:hover .quick, .row.run .quick { display: inline-block; }
   .row:hover .dur { display: none; }
+  .mini.danger:hover { color: var(--err); box-shadow: inset 0 0 0 1px var(--err); }
+  .row.cancelled .l2 { color: var(--text-3); }
+  .row.open.cancelled .l2 { display: none; }
   .detail { display: none; margin-top: 8px; }
   .row.open .detail { display: block; }
   .row.open .l2 { white-space: normal; word-break: break-word; }
@@ -314,6 +331,12 @@
       <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19.5 6v5.5c0 4.5-3.2 7.7-7.5 9-4.3-1.3-7.5-4.5-7.5-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
       <symbol id="i-braces" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H7a2 2 0 0 0-2 2v3.5a2 2 0 0 1-2 2 2 2 0 0 1 2 2V18a2 2 0 0 0 2 2h1M16 4h1a2 2 0 0 1 2 2v3.5a2 2 0 0 0 2 2 2 2 0 0 0-2 2V18a2 2 0 0 1-2 2h-1"/></symbol>
       <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5"/><path d="M3.5 4v4.5H8M12 8v4.5l3 2"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></symbol>
+      <symbol id="i-diff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="10" height="14" rx="2"/><path d="M17 5h1.5A2 2 0 0 1 20.5 7v10a2 2 0 0 1-2 2H17" stroke-dasharray="2 2.5"/><path d="M8.5 9.5v5M6 12h5"/></symbol>
+      <symbol id="i-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 3.5 13.5 6-5.8 1.9-2 5.9z"/><path d="m13 13 5.5 5.5"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.8v6.4l5-3.2z"/></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v9.5a1.5 1.5 0 0 1-1.5 1.5H12l-4.5 3.5V17H5A1.5 1.5 0 0 1 3.5 15.5V6A1.5 1.5 0 0 1 5 4.5z"/><path d="M8 9h8M8 12.5h5"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 21 19.5H3z"/><path d="M12 10v4.5M12 17.3v.2"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5.5 12.5 4 4 9-9"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     </defs>
@@ -331,6 +354,18 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
       </button>
     </header>
+
+    <section class="banner warn" id="verBar">
+      <span class="bico"><svg width="14" height="14"><use href="#i-alert"/></svg></span>
+      <div class="main"><b>Version mismatch</b><span id="verMsg">Reopen the plugin or update.</span></div>
+    </section>
+
+    <section class="banner" id="waitBar">
+      <span class="bico"><svg width="14" height="14"><use href="#i-pointer"/></svg></span>
+      <div class="main"><b>Your agent is waiting</b><span id="waitMsg">Select one or more layers</span></div>
+      <span class="countdown" id="waitLeft"></span>
+      <button class="mini" id="btnWaitCancel">Cancel</button>
+    </section>
 
     <section class="bridge">
       <div class="bridge-row">
@@ -435,15 +470,22 @@ const METHODS = {
   run_script: { label: "Script", color: "#8b5cf6", icon: "i-script" },
   build: { label: "Build", color: "#0d99ff", icon: "i-build" },
   describe: { label: "Describe", color: "#64748b", icon: "i-tree" },
+  find: { label: "Find", color: "#64748b", icon: "i-search" },
   get_design_system: { label: "Design system", color: "#64748b", icon: "i-swatch" },
+  design_tokens: { label: "Design tokens", color: "#0d99ff", icon: "i-swatch" },
   audit: { label: "Audit", color: "#16a34a", icon: "i-shield" },
   get_css: { label: "CSS", color: "#64748b", icon: "i-braces" },
   checkpoint: { label: "Checkpoint", color: "#64748b", icon: "i-history" },
   screenshot: { label: "Screenshot", color: "#0ea5e9", icon: "i-shot" },
+  compare_images: { label: "Compare", color: "#0ea5e9", icon: "i-diff" },
   place_image: { label: "Image", color: "#10b981", icon: "i-image" },
   import_svg: { label: "SVG", color: "#f59e0b", icon: "i-pen" },
   get_context: { label: "Context", color: "#64748b", icon: "i-layers" },
   list_fonts: { label: "Fonts", color: "#ec4899", icon: "i-type" },
+  wait_for_selection: { label: "Wait for selection", color: "#0d99ff", icon: "i-pointer" },
+  prototype: { label: "Prototype", color: "#8b5cf6", icon: "i-play" },
+  annotate: { label: "Annotate", color: "#f59e0b", icon: "i-note" },
+  export_tree: { label: "Export code", color: "#64748b", icon: "i-braces" },
   ping: { label: "Ping", color: "#64748b", icon: "i-pulse" },
 };
 const methodOf = (m) => METHODS[m] || { label: m, color: "#64748b", icon: "i-pulse" };
@@ -462,9 +504,13 @@ let retryAt = 0;
 let retryTimer = 0;
 let handshakeTimer = 0;
 let filter = "all";
+const waits = new Map();
 let openId = null;
 const entries = [];
 const running = new Map();
+// Requests answered with CANCELLED: the plugin's late reply must not reach the agent twice.
+const cancelled = new Set();
+let serverVersion = "";
 const stats = { count: 0, errors: 0, totalMs: 0 };
 
 // ─── Framing (mirror of src/bridge.ts) ──────────────────────────────────────
@@ -521,6 +567,134 @@ async function transcode(bytes, mime, maxDim) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+// ─── Image comparison (compare tool) ────────────────────────────────────────
+// Runs here because the plugin main thread has no canvas.
+const VIEW_MAX = 1568;
+
+function canvasOf(w, h) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  return c;
+}
+async function pngB64(canvas) {
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+  return bytesToB64(new Uint8Array(await blob.arrayBuffer()));
+}
+// Pixels drawn on white at w×h, so transparent areas compare as white.
+function pixelsOf(bmp, w, h) {
+  const ctx = canvasOf(w, h).getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bmp, 0, 0, w, h);
+  return ctx.getImageData(0, 0, w, h);
+}
+
+async function compareImages(p) {
+  const actual = await createImageBitmap(new Blob([b64ToBytes(p.actual)], { type: "image/png" }));
+  const ref = await createImageBitmap(new Blob([b64ToBytes(p.reference)], { type: p.referenceMime || "image/png" }));
+  const w = actual.width, h = actual.height;
+  const a = pixelsOf(actual, w, h).data;
+  const refImg = pixelsOf(ref, w, h);
+  const b = refImg.data;
+  const threshold = typeof p.threshold === "number" ? p.threshold : 0.1;
+  const cell = Math.max(4, Math.round(Math.max(w, h) / 160));
+  const cols = Math.ceil(w / cell), rows = Math.ceil(h / cell);
+  const cellDiff = new Uint32Array(cols * rows);
+  const heat = new ImageData(w, h);
+  const hd = heat.data;
+  let diffCount = 0;
+  for (let i = 0, px = 0; i < a.length; i += 4, px++) {
+    const dr = a[i] - b[i], dg = a[i + 1] - b[i + 1], db = a[i + 2] - b[i + 2];
+    const d = Math.sqrt(0.299 * dr * dr + 0.587 * dg * dg + 0.114 * db * db) / 255;
+    if (d > threshold) {
+      diffCount++;
+      const x = px % w, y = (px - x) / w;
+      cellDiff[Math.floor(y / cell) * cols + Math.floor(x / cell)]++;
+      const k = Math.min(1, 0.5 + d);
+      hd[i] = 255;
+      hd[i + 1] = hd[i + 2] = Math.round(90 * (1 - k));
+    } else {
+      // The design itself, faded, gives context around the red areas.
+      const luma = 0.299 * a[i] + 0.587 * a[i + 1] + 0.114 * a[i + 2];
+      hd[i] = hd[i + 1] = hd[i + 2] = Math.round(255 - (255 - luma) * 0.22);
+    }
+    hd[i + 3] = 255;
+  }
+
+  // Regions: connected groups of differing cells (gaps of one cell are bridged).
+  const minCell = Math.max(1, Math.round(cell * cell * 0.02));
+  const seen = new Uint8Array(cols * rows);
+  const regions = [];
+  for (let start = 0; start < cellDiff.length; start++) {
+    if (seen[start] || cellDiff[start] < minCell) continue;
+    const stack = [start];
+    seen[start] = 1;
+    let x0 = cols, y0 = rows, x1 = 0, y1 = 0, count = 0;
+    while (stack.length) {
+      const c = stack.pop();
+      const cx = c % cols, cy = (c - cx) / cols;
+      x0 = Math.min(x0, cx); y0 = Math.min(y0, cy); x1 = Math.max(x1, cx); y1 = Math.max(y1, cy);
+      count += cellDiff[c];
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+        const n = ny * cols + nx;
+        if (!seen[n] && cellDiff[n] >= minCell) { seen[n] = 1; stack.push(n); }
+      }
+    }
+    const rx = x0 * cell, ry = y0 * cell;
+    const rw = Math.min(w, (x1 + 1) * cell) - rx, rh = Math.min(h, (y1 + 1) * cell) - ry;
+    regions.push({ x: rx, y: ry, width: rw, height: rh, pixels: count, mismatch: count / (rw * rh) });
+  }
+  regions.sort((r1, r2) => r2.pixels - r1.pixels);
+
+  const heatCanvas = canvasOf(w, h);
+  const hctx = heatCanvas.getContext("2d");
+  hctx.putImageData(heat, 0, 0);
+  hctx.strokeStyle = "#e5484d";
+  hctx.lineWidth = Math.max(1, Math.round(Math.max(w, h) / 600));
+  for (const r of regions.slice(0, 12)) hctx.strokeRect(r.x + 0.5, r.y + 0.5, r.width - 1, r.height - 1);
+
+  const out = {
+    width: w,
+    height: h,
+    mismatch: diffCount / (w * h),
+    regions: regions.slice(0, 12),
+    totalRegions: regions.length,
+    reference: { width: ref.width, height: ref.height },
+    heatmap: await pngB64(heatCanvas),
+  };
+  if (p.sideBySide) {
+    // Reference | Figma, with a label bar, downscaled to what a model can read.
+    const gap = 16, bar = 28;
+    const k = Math.min(1, VIEW_MAX / (2 * w + gap), (VIEW_MAX - bar) / h);
+    const pw = Math.max(1, Math.round(w * k)), ph = Math.max(1, Math.round(h * k));
+    const c = canvasOf(2 * pw + gap, ph + bar);
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#f3f3f5";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = "#111113";
+    ctx.font = "600 13px Inter, system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Reference", 4, bar / 2);
+    ctx.fillText("Figma", pw + gap + 4, bar / 2);
+    ctx.imageSmoothingQuality = "high";
+    const refCanvas = canvasOf(w, h);
+    refCanvas.getContext("2d").putImageData(refImg, 0, 0);
+    ctx.drawImage(refCanvas, 0, bar, pw, ph);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(pw + gap, bar, pw, ph);
+    ctx.drawImage(actual, pw + gap, bar, pw, ph);
+    out.sideBySide = await pngB64(c);
+  }
+  return out;
+}
+
+// Commands answered by this iframe instead of the plugin main thread.
+const UI_HANDLERS = { compare_images: compareImages };
+
 // ─── Connection ─────────────────────────────────────────────────────────────
 function connect() {
   clearTimeout(retryTimer);
@@ -542,6 +716,8 @@ function connect() {
       clearTimeout(handshakeTimer);
       if (msg.bridge !== "figma-bridge") { sock.onclose = null; sock.close(); ws = null; return scheduleRetry("foreign"); }
       retryDelay = 400;
+      serverVersion = msg.version || "";
+      renderVersion();
       setState("connected");
       if (!everConnected) { everConnected = true; toPlugin({ t: "notify", text: "✦ Figma Bridge connected to your AI" }); }
     } else if (msg.t === "req") {
@@ -562,6 +738,7 @@ function scheduleRetry(nextState) {
 
 setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('{"t":"ping"}'); }, 20000);
 setInterval(() => {
+  if (waits.size) renderWait();
   if (state !== "offline" && state !== "foreign") return;
   const s = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
   $("countdown").textContent = s > 0 ? "Retrying in " + s + " s" : "Trying…";
@@ -580,17 +757,47 @@ function summarize(msg) {
     case "screenshot": return (p.nodeId ? "Node " + p.nodeId : "Selection") + (p.scale ? " · " + p.scale + "×" : "") + (p.format === "JPG" ? " · JPG" : "");
     case "place_image": return p.name || (p.nodeId ? "Fill on " + p.nodeId : "New image layer");
     case "import_svg": return p.name ? p.name.replace(/^icon\//, "Icon · ") : (p.svg ? (Math.round(p.svg.length / 102.4) / 10) + " KB of SVG" : "SVG");
+    case "compare_images": return "Design vs reference" + (p.sideBySide ? " · side by side" : "");
     case "list_fonts": return p.filter ? "Matching “" + p.filter + "”" : "All fonts";
     case "get_context": return "File, pages and selection";
+    case "prototype": {
+      const parts = [];
+      if (p.links && p.links.length) parts.push(p.links.length + " link" + (p.links.length === 1 ? "" : "s"));
+      if (p.flows && p.flows.length) parts.push(p.flows.length + " flow" + (p.flows.length === 1 ? "" : "s"));
+      if (p.clear && p.clear.length) parts.push("clear " + p.clear.length);
+      return parts.join(" · ") || "List interactions";
+    }
+    case "annotate": {
+      const action = p.action || (p.label || p.properties ? "add" : "list");
+      if (action === "add") return (p.label ? "“" + p.label.split("\n")[0] + "”" : (p.properties || []).join(", ")) + (p.nodeId ? " on " + p.nodeId : "");
+      return action.charAt(0).toUpperCase() + action.slice(1) + (p.nodeId ? " · " + p.nodeId : "");
+    }
+    case "export_tree": return p.nodeId ? "Node " + p.nodeId : "Selection";
+    case "wait_for_selection": return p.message || "Select layers";
     case "build": {
       let count = 0;
-      const walk = (n) => { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(walk); count++; if (Array.isArray(n.children)) n.children.forEach(walk); };
+      const walk = (n) => { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(walk); count++; if (Array.isArray(n.children)) n.children.forEach(walk); if (Array.isArray(n.variants)) n.variants.forEach(walk); };
       walk(p.spec);
       const root = Array.isArray(p.spec) ? p.spec[0] : p.spec;
       return ((root && root.name) || "Layout") + " · " + count + " layer" + (count === 1 ? "" : "s");
     }
+    case "find": {
+      const parts = [];
+      if (p.name) parts.push("name “" + p.name + "”");
+      if (p.text) parts.push("text “" + p.text + "”");
+      if (p.type) parts.push([].concat(p.type).join("|").toLowerCase());
+      if (p.style) parts.push("style “" + p.style + "”");
+      if (p.component) parts.push("instances of “" + p.component + "”");
+      return parts.join(" · ") || "Layers";
+    }
     case "describe": return (p.nodeId ? "Node " + p.nodeId : "Selection") + (p.depth !== undefined ? " · depth " + p.depth : "");
     case "get_design_system": return p.include ? p.include.join(", ") : "Styles, variables and components";
+    case "design_tokens": {
+      const vars = (p.collections || []).reduce((n, c) => n + (c.variables || []).length, 0);
+      const st = p.styles || {};
+      const styles = (st.colors || []).length + (st.text || []).length + (st.effects || []).length;
+      return vars + " variable" + (vars === 1 ? "" : "s") + " · " + styles + " style" + (styles === 1 ? "" : "s");
+    }
     case "audit": return p.nodeId ? "Node " + p.nodeId : "Selection";
     case "get_css": return p.nodeId ? "Node " + p.nodeId : "Selection";
     case "checkpoint": return p.action.charAt(0).toUpperCase() + p.action.slice(1) + (p.label ? " · " + p.label : p.id ? " · " + p.id : "");
@@ -618,6 +825,14 @@ async function onRequest(msg) {
   packet("out");
   render();
   let params = msg.params || {};
+  if (UI_HANDLERS[msg.method]) {
+    try {
+      onResult({ t: "res", id: msg.id, ok: true, result: await UI_HANDLERS[msg.method](params) });
+    } catch (e) {
+      onResult({ t: "res", id: msg.id, ok: false, code: (e && e.code) || "UI_ERROR", error: String((e && e.message) || e) });
+    }
+    return;
+  }
   try {
     if (params.images) {
       const bytes = {};
@@ -643,17 +858,23 @@ async function onRequest(msg) {
 }
 
 function onResult(res) {
+  if (cancelled.has(res.id)) {
+    cancelled.delete(res.id);
+    const late = entries.find((e) => e.id === res.id);
+    if (late) { late.lateNote = res.ok ? "Finished in the background after the cancel" : ""; renderLog(); }
+    return;
+  }
   const entry = running.get(res.id);
   if (entry) {
     running.delete(res.id);
     entry.ms = Math.round(performance.now() - entry.start);
-    entry.status = res.ok ? "ok" : "err";
+    entry.status = res.ok ? "ok" : res.code === "CANCELLED" ? "cancelled" : "err";
     entry.error = res.ok ? "" : (res.line ? "Line " + res.line + ": " : "") + res.error;
     entry.code = res.code;
     entry.nodeId = res.ok ? resultNode(entry.method, res.result) : null;
     stats.count++;
     stats.totalMs += entry.ms;
-    if (!res.ok) stats.errors++;
+    if (!res.ok && res.code !== "CANCELLED") stats.errors++;
     packet(res.ok ? "ok" : "err");
     render();
   }
@@ -681,6 +902,32 @@ function packet(kind) {
     void tile.offsetWidth;
     tile.classList.add("hit");
   };
+}
+
+// Answers the agent right away; the plugin stops long commands (build) at their next step,
+// but a running script cannot be interrupted and finishes in the background.
+function cancelRequest(e) {
+  if (!running.has(e.id)) return;
+  onResult({ t: "res", id: e.id, ok: false, code: "CANCELLED", error: "Cancelled by the user in Figma. A running script may still finish in the background: check the file before retrying." });
+  cancelled.add(e.id);
+  toPlugin({ t: "cancel", id: e.id });
+  toast("Cancelled");
+}
+
+// Updates the row text in place: re-rendering the log would replace the Cancel button mid-click.
+function onProgress(msg) {
+  const entry = running.get(msg.id);
+  if (!entry) return;
+  entry.progress = msg.text;
+  const l2 = document.querySelector('.row[data-id="' + msg.id + '"] .l2');
+  if (l2) l2.textContent = entry.progress + " · " + entry.sum;
+  renderBar();
+}
+
+function renderVersion() {
+  const mismatch = !!(serverVersion && version && serverVersion !== version);
+  document.body.classList.toggle("mismatch", mismatch);
+  if (mismatch) $("verMsg").textContent = "Plugin v" + version + ", server v" + serverVersion + ": reopen the plugin or update.";
 }
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
@@ -753,29 +1000,50 @@ function renderLog() {
     const m = methodOf(e.method);
     const cls = "row " + e.status + (e.id === openId ? " open" : "") + (e.isNew ? " new" : "") + (e.ms > SLOW_MS ? " slow" : "");
     e.isNew = false;
-    const quick = e.nodeId ? '<button class="mini quick" data-act="show">Show</button>' : e.status === "err" ? '<button class="mini quick" data-act="copy">Copy</button>' : "";
+    const quick = e.status === "run"
+      ? '<button class="mini quick danger" data-act="cancel">Cancel</button>'
+      : e.nodeId ? '<button class="mini quick" data-act="show">Show</button>' : e.status === "err" ? '<button class="mini quick" data-act="copy">Copy</button>' : "";
     const facts = '<div class="facts"><span>Took <b>' + (e.status === "run" ? "…" : fmtMs(e.ms)) + "</b></span>"
       + "<span>At <b>" + new Date(e.at).toTimeString().slice(0, 8) + "</b></span>"
       + (e.nodeId ? '<span>Layer <b class="mono">' + esc(e.nodeId) + "</b></span>" : "")
-      + (e.code && e.status === "err" ? '<span>Code <b class="mono">' + esc(e.code) + "</b></span>" : "") + "</div>";
-    const actions = (e.nodeId ? '<button class="mini" data-act="show">Show in canvas</button>' : "")
-      + (e.status === "err" ? '<button class="mini" data-act="copy">Copy error</button>' : "")
+      + (e.code && e.status !== "ok" && e.status !== "run" ? '<span>Code <b class="mono">' + esc(e.code) + "</b></span>" : "")
+      + (e.lateNote ? "<span>" + esc(e.lateNote) + "</span>" : "") + "</div>";
+    const actions = (e.status === "run" ? '<button class="mini danger" data-act="cancel">Cancel</button>' : "")
+      + (e.nodeId ? '<button class="mini" data-act="show">Show in canvas</button>' : "")
+      + (e.status !== "ok" && e.status !== "run" ? '<button class="mini" data-act="copy">Copy error</button>' : "")
       + '<button class="mini" data-act="copysum">Copy command</button>';
     return '<li class="' + cls + '" data-id="' + e.id + '">'
       + '<div class="ic" style="--c:' + m.color + '">' + icon(m.icon, 14) + "</div>"
       + '<div class="main"><div class="l1"><span class="m">' + esc(m.label) + '</span><span class="t">' + (e.status === "run" ? "running…" : ago(e.at)) + "</span></div>"
-      + '<div class="l2 mono trunc">' + esc(e.status === "err" ? e.error.split("\n")[0] : e.sum) + "</div>"
-      + '<div class="detail">' + (e.status === "err" ? '<div class="errbox mono">' + esc(e.error) + "</div>" : "") + facts
+      + '<div class="l2 mono trunc">' + esc(e.status !== "ok" && e.status !== "run" ? e.error.split("\n")[0] : e.progress && e.status === "run" ? e.progress + " · " + e.sum : e.sum) + "</div>"
+      + '<div class="detail">' + (e.status !== "ok" && e.status !== "run" ? '<div class="errbox mono">' + esc(e.error) + "</div>" : "") + facts
       + '<div class="detail-actions">' + actions + "</div></div></div>"
       + '<div class="side"><span class="dur">' + (e.status === "run" ? "" : fmtMs(e.ms)) + "</span>" + quick + "</div></li>";
   }).join("");
 }
 
+function renderWait() {
+  const w = [...waits.values()].pop();
+  document.body.classList.toggle("waiting", !!w);
+  if (w) {
+    $("waitMsg").textContent = w.message;
+    const s = Math.max(0, Math.ceil((w.until - Date.now()) / 1000));
+    $("waitLeft").textContent = s + " s";
+  }
+  renderBar();
+}
+
 function renderBar() {
+  const w = [...waits.values()].pop();
+  if (w) {
+    $("barTitle").textContent = "Your agent is waiting";
+    $("barSub").textContent = w.message;
+    return;
+  }
   $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connected") : PILL[state] + (state === "offline" ? ": waiting for your agent" : "");
   const last = entries[0];
   $("barSub").textContent = last
-    ? methodOf(last.method).label + " · " + (last.status === "run" ? "running…" : last.status === "ok" ? fmtMs(last.ms) : "error")
+    ? methodOf(last.method).label + " · " + (last.status === "run" ? last.progress || "running…" : last.status === "ok" ? fmtMs(last.ms) : last.code === "CANCELLED" ? "cancelled" : "error")
     : state === "connected" ? "Ready" : "Keep this plugin open";
 }
 
@@ -819,7 +1087,8 @@ $("log").addEventListener("click", (ev) => {
   if (!e) return;
   const act = ev.target.closest("[data-act]");
   if (act) {
-    if (act.dataset.act === "show") { toPlugin({ t: "focus", nodeId: e.nodeId }); toast("Selected in canvas"); }
+    if (act.dataset.act === "cancel") cancelRequest(e);
+    else if (act.dataset.act === "show") { toPlugin({ t: "focus", nodeId: e.nodeId }); toast("Selected in canvas"); }
     else if (act.dataset.act === "copy") copy(e.error);
     else if (act.dataset.act === "copysum") copy(e.sum);
     return;
@@ -837,6 +1106,10 @@ $("filter").addEventListener("click", (ev) => {
   renderLog();
 });
 
+$("btnWaitCancel").onclick = () => {
+  const w = [...waits.values()].pop();
+  if (w) toPlugin({ t: "cancelWait", id: w.id });
+};
 $("btnClear").onclick = () => { entries.length = 0; openId = null; render(); };
 $("btnRetry").onclick = () => { retryDelay = 400; connect(); };
 $("btnCopyCmd").onclick = () => copy("Get-NetTCPConnection -LocalPort 3055");
@@ -912,6 +1185,14 @@ window.onmessage = (ev) => {
     send({ t: "info", fileName: session.fileName, page: session.page });
   } else if (msg.t === "res") {
     onResult(msg);
+  } else if (msg.t === "progress") {
+    onProgress(msg);
+  } else if (msg.t === "wait") {
+    waits.set(msg.id, msg);
+    renderWait();
+  } else if (msg.t === "waitDone") {
+    waits.delete(msg.id);
+    renderWait();
   }
 };
 
