@@ -1,0 +1,6 @@
+{
+  "components": {
+    "Tag": { "name": "UserBadge", "props": { "Text": "label", "Tone": { "prop": "tone", "values": { "Positive": "success", "Negative": "error" } } } },
+    "Icon/Legacy": { "ignore": true }
+  }
+}

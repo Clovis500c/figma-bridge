@@ -1,0 +1,6 @@
+{
+  "name": "vue-modules-fixture",
+  "private": true,
+  "dependencies": { "vue": "^3.5.0" },
+  "devDependencies": { "vite": "^7.0.0", "@vitejs/plugin-vue": "^6.0.0", "typescript": "^5.9.0" }
+}

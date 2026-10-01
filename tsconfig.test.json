@@ -1,5 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "types": ["bun"] },
-  "include": ["test", "scripts"]
+  "include": ["test", "scripts"],
+  "exclude": ["test/fixtures"]
 }

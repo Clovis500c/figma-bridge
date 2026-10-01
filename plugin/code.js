@@ -3091,6 +3091,11 @@
     }
     if (n.rotation && Math.abs(n.rotation) > 0.01 && n.type !== "TEXT")
       out.rotation = round(n.rotation);
+    if (n.type === "INSTANCE") {
+      const info = await instanceInfo(n);
+      if (info)
+        out.component = info;
+    }
     let css = {};
     try {
       css = await n.getCSSAsync();
@@ -3197,6 +3202,33 @@
         return seg;
       })
     };
+  }
+  async function instanceInfo(n) {
+    let main = null;
+    try {
+      main = await n.getMainComponentAsync();
+    } catch (e) {}
+    if (!main)
+      return null;
+    const set = main.parent && main.parent.type === "COMPONENT_SET" ? main.parent.name : null;
+    const props = {};
+    const defs = n.componentProperties;
+    const keys = Object.keys(defs);
+    for (let i = 0;i < keys.length; i++) {
+      const d = defs[keys[i]];
+      if (d.type === "INSTANCE_SWAP")
+        continue;
+      props[keys[i].split("#")[0]] = d.value;
+    }
+    const info = { name: set || main.name, props };
+    if (set)
+      info.variant = main.name;
+    const text = n.findOne(function(t) {
+      return t.type === "TEXT" && t.visible;
+    });
+    if (text && text.characters.trim())
+      info.text = text.characters.trim().slice(0, 200);
+    return info;
   }
 
   // plugin/lib/design-system.ts
