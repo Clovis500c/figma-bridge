@@ -1,6 +1,6 @@
 {
   "name": "figma-bridge",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "Local MCP bridge that lets any AI agent design in the Figma desktop app, with no rate limits.",

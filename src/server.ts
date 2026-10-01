@@ -11,7 +11,7 @@ import { generateCode, type IrNode } from "./codegen";
 import { normalizeTokens } from "./tokens";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const PORT = Number(process.env.FIGMA_BRIDGE_PORT) || 3055;
 const CHANNEL = process.env.FIGMA_BRIDGE_CHANNEL || "default";
 const OUT_DIR = process.env.FIGMA_BRIDGE_OUT || join(tmpdir(), "figma-bridge");
@@ -146,17 +146,20 @@ const server = new McpServer(
     instructions: [
       "Figma Bridge drives the user's Figma desktop app through a local plugin. No rate limits: iterate freely.",
       "Workflow:",
-      "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values.",
-      "2. New UI → build (one call per screen or section, with auto-layout). Editing existing design → describe it first, then build into it (parentId) or run_script.",
-      "3. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again.",
+      "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
+      "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
+      "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
+      "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again.",
       "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
-      "4. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
+      "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
+      "When the target is unclear, wait_for_selection asks the user to pick it in Figma. prototype links screens, annotate leaves Dev Mode notes, export_code turns a frame into HTML/React.",
       "run_script: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
       "Script helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?),",
       "utils.build(spec, {parentId}), utils.describe(nodeOrId, depth); lib.<name>(args) runs a saved snippet; console.log is returned as `logs`.",
       "Save helpers you will reuse with the snippets tool. Icons: search_icons, then insert_icon or {icon:'set:name'} in build.",
       "Rules: load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync); keep results small.",
-      "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it).",
+      "The user can cancel a command from the plugin (code CANCELLED): build stops, a script may still finish, so check the file before retrying.",
+      "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it). If list_sessions reports versionMismatch, ask them to reopen or update the plugin.",
     ].join("\n"),
   },
 );
@@ -646,7 +649,8 @@ server.registerTool(
     title: "Current Figma context",
     description:
       "Start here. File name, pages (id/name), current page, selection (ids, names, bounds) and viewport of the connected file. " +
-      "Workflow: get_design_system → build (new UI) or describe + run_script (edits) → screenshot returnImage:true + audit → fix.",
+      "Workflow: get_design_system (or design_tokens to create one) → build (new UI) or find/describe + run_script (edits) → " +
+      "screenshot returnImage:true + audit, or compare against a mockup → fix. Unsure what the user means? wait_for_selection.",
     inputSchema: {},
   },
   () => track("get_context", "", async () => ok(await bridge.request("get_context", {}, 15_000))),
