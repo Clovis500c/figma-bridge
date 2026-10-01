@@ -4,12 +4,14 @@ import { appendFileSync, mkdirSync, statSync, truncateSync, writeFileSync } from
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Bridge, BridgeError } from "./bridge";
 import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { generateCode, type IrNode } from "./codegen";
 import { normalizeTokens } from "./tokens";
+import { importWeb } from "./web/import";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 import { version as VERSION } from "../package.json";
 
@@ -83,6 +85,9 @@ async function track(name: string, summary: string, fn: () => Promise<ToolResult
 const oneLine = (s: string, max = 120) => s.replace(/\s+/g, " ").trim().slice(0, max);
 
 async function readImageSource(source: string): Promise<Uint8Array> {
+  const data = /^data:[^,]*?(;base64)?,(.*)$/is.exec(source);
+  if (data) return new Uint8Array(data[1] ? Buffer.from(data[2]!, "base64") : Buffer.from(decodeURIComponent(data[2]!)));
+  if (/^file:\/\//i.test(source)) source = fileURLToPath(source);
   if (/^https?:\/\//i.test(source)) {
     const res = await fetch(source, { signal: AbortSignal.timeout(30_000), redirect: "follow" });
     if (!res.ok) throw new BridgeError(`Download failed: HTTP ${res.status} for ${source}`, "DOWNLOAD");
@@ -99,7 +104,10 @@ async function readImageSource(source: string): Promise<Uint8Array> {
 
 /** Image bytes as the bridge payload; the plugin UI converts WEBP and oversized images. */
 async function imagePayload(source: string) {
-  const bytes = await readImageSource(source);
+  return bytesPayload(await readImageSource(source), source);
+}
+
+function bytesPayload(bytes: Uint8Array, source: string) {
   const info = imageInfo(bytes);
   if (!info) throw new BridgeError(`Unsupported image (expected PNG, JPG, WEBP or GIF): ${source}`, "BAD_IMAGE");
   const needsTranscode = info.format === "webp" || Math.max(info.width, info.height) > FIGMA_MAX_IMAGE_DIM;
@@ -128,6 +136,16 @@ async function prepareSpec(spec: unknown, defaultColor: string) {
       node.imageKey = key;
       delete node.src;
     }
+    // Image paints: fill:{image:"https://…", fit:"cover"}.
+    for (const field of ["fill", "stroke"]) {
+      for (const paint of Array.isArray(node[field]) ? node[field] : [node[field]]) {
+        if (!paint || typeof paint !== "object" || typeof paint.image !== "string" || paint.imageKey) continue;
+        const key = `img${n++}`;
+        jobs.push(imagePayload(paint.image).then((img) => void (images[key] = img)));
+        paint.imageKey = key;
+        delete paint.image;
+      }
+    }
     if (Array.isArray(node.children)) node.children.forEach(walk);
     if (Array.isArray(node.variants)) node.variants.forEach(walk);
     if (node.base) walk(node.base);
@@ -153,6 +171,7 @@ const server = new McpServer(
       "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again.",
       "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
       "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
+      "Existing website or HTML → import_web turns it into editable auto-layout frames (one per viewport); then compare against the returned reference screenshot.",
       "When the target is unclear, wait_for_selection asks the user to pick it in Figma. prototype links screens, annotate leaves Dev Mode notes, export_code turns a frame into HTML/React.",
       "run_script: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
       "Script helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?),",
@@ -200,7 +219,7 @@ GRID: layout:"grid", columns (count | tracks like [200,"1fr","2fr","hug"]), rows
 SIZE: w / h: number (fixed) | "fill" (stretch inside an auto-layout parent) | "hug". Auto-layout frames hug by default. grow:true. absolute:true with x/y inside auto-layout; x/y for children of free frames.
 TEXT: text, font ("Inter" | "Inter:Bold"), weight (400|500|600|700 or style name), size, color, lineHeight (1.5 | 24 | "150%"), letterSpacing (px | "2%"), align (left|center|right|justify), case (upper|lower|title), decoration (underline|strike), maxLines, textStyle "style:Name". Give w:"fill" or a number to wrap text.
 RICH TEXT: spans:[{text:"Read the "},{text:"docs",weight:600,color:"#0D99FF",link:"https://…"}] instead of text; a span may set font, weight, size, color, decoration, case, link.
-PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color variable>", {gradient:["#a","#b"], angle:90, type?:"radial"}, null. stroke + strokeWidth + strokeAlign (inside|center|outside).
+PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color variable>", {gradient:["#a","#b"], angle:90, type?:"radial"}, {image:"https://…"|path, fit:"fill"|"fit"|"crop"|"tile"}, null, or an array (last on top). stroke + strokeWidth (n | [t,r,b,l]) + strokeAlign (inside|center|outside) + strokeDash [dash,gap].
 EFFECTS: radius (n | [tl,tr,br,bl] | "var:x"), opacity, shadow (true | {x,y,blur,spread,color} | [...] | "style:Name"), blur, backgroundBlur, rotation, visible.
 ICON: {icon:"lucide:house", size:20, color:"#111"} (any Iconify set). IMAGE: {src:"C:/img.png" | "https://…", w, h, fit:"fill"|"fit"|"crop"|"tile"}. SVG: {svg:"<svg…>"}.
 INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary", Label:"Buy"}, text:{"Label layer name":"Buy"}}.
@@ -439,6 +458,84 @@ server.registerTool(
       const content: Content[] = [{ type: "text", text: json(result) }];
       if (diff.sideBySide) content.push({ type: "image", data: diff.sideBySide, mimeType: "image/png" });
       return { content };
+    }),
+);
+
+server.registerTool(
+  "import_web",
+  {
+    title: "Import a website or HTML as editable layers",
+    description: `Render a web page in the user's Chrome or Edge and rebuild it as editable Figma layers: flex and grid become auto-layout (checked against the page, else free positioning), margins become spacing, text keeps font, weight, size, line height, letter spacing, color and links, plus borders, radii, shadows, gradients, opacity, images and inline SVG. Layers get semantic names (Header, Nav, Card, Button…).
+One frame per viewport width, side by side. Web fonts map to fonts installed in Figma (substitutions are reported). Canvas, video and native form controls are imported as pictures.
+Give exactly one of url, html (a full document or a fragment) or path (local .html file). selector imports one element only, e.g. "#pricing".
+Returns {frames:[{viewport, rootId, layers, reference}], fontSubstitutions, warnings}. reference is a screenshot of the page: run compare {nodeId: rootId, reference} to check the result and fix the differences.
+Example: {"url":"https://example.com","viewports":[1440,390]}`,
+    inputSchema: {
+      url: z.string().optional().describe("http(s) or file:// URL"),
+      html: z.string().optional().describe("HTML markup to render"),
+      path: z.string().optional().describe("Local .html file"),
+      viewports: z.array(z.number().int().min(240).max(3840)).max(4).optional().describe("Widths in px, default [1440, 390]"),
+      selector: z.string().optional().describe("CSS selector of the only element to import"),
+      parentId: z.string().optional().describe("Frame or section that receives the frames (default: current page)"),
+      name: z.string().optional().describe("Frame name prefix (default: the page title)"),
+      maxHeight: z.number().int().min(200).max(30000).optional().describe("Import at most this many px from the top, default 12000"),
+      waitMs: z.number().int().min(0).max(30000).optional().describe("Extra wait after load for slow pages, default 0"),
+    },
+  },
+  (args) =>
+    track("import_web", oneLine(args.url ?? args.path ?? `${args.html?.length ?? 0} chars of HTML`, 80), async () => {
+      const fonts = await bridge.request<{ families: { family: string; styles: string[] }[] }>("list_fonts", { limit: 100_000 }, 30_000);
+      const html = args.html !== undefined && !/<html[\s>]/i.test(args.html) ? `<!doctype html><html><head><meta charset="utf-8"></head><body>${args.html}</body></html>` : args.html;
+      const result = await importWeb(
+        { ...args, html },
+        { fonts: fonts.families, readLocal: readImageSource, imageFormat: (b) => imageInfo(b)?.format ?? null },
+      );
+      // Frames go side by side, starting at the viewport center (or the parent's origin).
+      let x = 0;
+      let y = 0;
+      if (!args.parentId) {
+        const ctx = await bridge.request<{ viewport: { center: { x: number; y: number } } }>("get_context", {}, 15_000);
+        x = Math.round(ctx.viewport.center.x - (result.viewports[0]?.width ?? 0) / 2);
+        y = Math.round(ctx.viewport.center.y - Math.min(result.viewports[0]?.height ?? 0, 900) / 2);
+      }
+      const frames: Record<string, unknown>[] = [];
+      const warnings = [...result.warnings];
+      for (const v of result.viewports) {
+        const images: Record<string, ReturnType<typeof bytesPayload>> = {};
+        for (const [key, bytes] of Object.entries(v.images)) {
+          try {
+            images[key] = bytesPayload(bytes, key);
+          } catch (e) {
+            warnings.push(`${key}: ${(e as Error).message}`);
+          }
+        }
+        const built = await bridge.request<{ rootId: string; created: number; warnings?: string[] }>(
+          "build",
+          { spec: v.spec, images, parentId: args.parentId, x, y, select: false, label: "Web import" },
+          120_000,
+        );
+        let reference: string | undefined;
+        if (v.screenshot) {
+          reference = join(OUT_DIR, `import-${safeName(v.title || "page")}-${v.viewport}-${Date.now()}.png`);
+          await writeFile(reference, v.screenshot);
+        }
+        frames.push({ viewport: v.viewport, rootId: built.rootId, name: v.spec.name, layers: built.created, size: { width: v.width, height: v.height }, reference });
+        for (const w of built.warnings ?? []) if (warnings.length < 60) warnings.push(w);
+        x += Math.ceil(v.width) + 120;
+      }
+      const ids = frames.map((f) => f.rootId).filter(Boolean);
+      if (!args.parentId && ids.length) {
+        await bridge
+          .request("run_script", {
+            code: `const ns = []; for (const id of ${JSON.stringify(ids)}) { const n = await figma.getNodeByIdAsync(id); if (n) ns.push(n); } figma.currentPage.selection = ns; figma.viewport.scrollAndZoomIntoView(ns); return ns.length`,
+          })
+          .catch(() => {});
+      }
+      return ok({
+        frames,
+        ...(Object.keys(result.substitutions).length ? { fontSubstitutions: result.substitutions } : {}),
+        ...(warnings.length ? { warnings: warnings.slice(0, 60) } : {}),
+      });
     }),
 );
 

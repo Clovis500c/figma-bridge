@@ -15,6 +15,7 @@ and any other MCP client.
 ## Features
 
 - **Build whole layouts in one call** from a JSON spec: auto-layout and grid, rich text, icons, images, component sets with variants and properties, prototype links.
+- **Import any website or HTML** as editable auto-layout frames, one per viewport ([details](docs/import-web.md)).
 - **Write the design system**: variables with Light/Dark modes and styles, from simple JSON, W3C design tokens or a Tailwind theme.
 - **Read existing designs** compactly, search every page, and reuse the file's design system.
 - **Check its own work** with screenshots, a design audit, and a pixel diff against a mockup.
@@ -104,6 +105,8 @@ Keep the plugin open (the **—** button collapses it to a thin bar) and ask you
 
 > Create our design system from `tokens.json` (Light and Dark modes), then rebuild the selected screen with those variables and show it in Dark mode.
 
+> Import https://example.com/pricing at desktop and mobile widths, then rename the layers and swap the fonts for ours.
+
 > Reproduce `C:\mockups\dashboard.png` as an editable frame with auto-layout, compare it with the screenshot and fix the differences.
 
 When your agent needs you to point at something, the plugin shows **Your agent is waiting** until you select it.
@@ -117,6 +120,7 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 | Tool | Purpose |
 |---|---|
 | `build` | Create a layout from a JSON spec in one call: grid, rich text, variants, reactions |
+| `import_web` | Rebuild a website or HTML as editable layers, one frame per viewport |
 | `run_script` | Run any Figma Plugin API code |
 | `describe` | Compact outline of existing layers |
 | `find` | Search layers on every page by name, text, type, style or component |
@@ -147,6 +151,7 @@ Each tool describes its parameters to the agent, which needs no extra instructio
 | **Version mismatch** | The plugin and the server come from different releases: reopen the plugin, or update both. |
 
 Logs, screenshots, comparison heatmaps and exported code are written to `%TEMP%\figma-bridge`.
+`import_web` uses your installed Chrome or Edge; set `FIGMA_BRIDGE_BROWSER` to use another Chromium-based browser.
 
 ## Development
 
@@ -154,12 +159,13 @@ Logs, screenshots, comparison heatmaps and exported code are written to `%TEMP%\
 bun install       # also builds the plugin and dist/server.js
 bun run build     # plugin/code.ts → plugin/code.js, src/cli.ts → dist/server.js (Node)
 bun run check     # type-check server and plugin, reject syntax Figma cannot run
-bun test          # unit tests (bridge, setup, schemas, tokens, code generation)
+bun test          # unit tests (bridge, setup, schemas, tokens, code generation, web import)
 bun run test      # end-to-end test against an open Figma file
 ```
 
 To release, change `version` in `package.json`, then run **Actions → Release → Run workflow** on `main`: it publishes to
 npm and creates the GitHub release.
 
-Options: `FIGMA_BRIDGE_PORT` (default `3055`), `FIGMA_BRIDGE_CHANNEL`, `FIGMA_BRIDGE_OUT`, `FIGMA_BRIDGE_SNIPPETS`.
+Options: `FIGMA_BRIDGE_PORT` (default `3055`), `FIGMA_BRIDGE_CHANNEL`, `FIGMA_BRIDGE_OUT`, `FIGMA_BRIDGE_SNIPPETS`,
+`FIGMA_BRIDGE_BROWSER`.
 The server listens on `127.0.0.1` only, and browsers can't send it commands.

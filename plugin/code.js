@@ -1586,7 +1586,7 @@
         if (typeof color === "string" && color.indexOf("style:") === 0) {
           await t.setRangeFillStyleIdAsync(at, end, (await findStyle("paint", stripPrefix(color))).id);
         } else if (color !== undefined) {
-          t.setRangeFills(at, end, [await toPaint(color)]);
+          t.setRangeFills(at, end, [await toPaint(color, ctx.images)]);
         }
         const deco = { underline: "UNDERLINE", strike: "STRIKETHROUGH", strikethrough: "STRIKETHROUGH", none: "NONE" };
         if (sp.link) {
@@ -1596,7 +1596,7 @@
         }
         if (sp.decoration && deco[sp.decoration])
           t.setRangeTextDecoration(at, end, deco[sp.decoration]);
-        const cases = { upper: "UPPER", lower: "LOWER", title: "TITLE" };
+        const cases = { upper: "UPPER", lower: "LOWER", title: "TITLE", none: "ORIGINAL" };
         if (sp.case && cases[sp.case])
           t.setRangeTextCase(at, end, cases[sp.case]);
       } catch (e) {
@@ -1782,10 +1782,20 @@
   async function applyVisuals(node, s, ctx, type) {
     const fill = s.fill !== undefined ? s.fill : type === "text" ? s.color : undefined;
     if (fill !== undefined && "fills" in node && type !== "image")
-      await setPaints(node, "fills", fill);
+      await setPaints(node, "fills", fill, ctx.images);
     if (s.stroke !== undefined && "strokes" in node) {
-      await setPaints(node, "strokes", s.stroke);
-      node.strokeWeight = typeof s.strokeWidth === "number" ? s.strokeWidth : 1;
+      await setPaints(node, "strokes", s.stroke, ctx.images);
+      if (Array.isArray(s.strokeWidth) && "strokeTopWeight" in node) {
+        const w = s.strokeWidth.map(Number);
+        node.strokeTopWeight = w[0] || 0;
+        node.strokeRightWeight = w[1] === undefined ? w[0] || 0 : w[1] || 0;
+        node.strokeBottomWeight = w[2] === undefined ? w[0] || 0 : w[2] || 0;
+        node.strokeLeftWeight = w[3] === undefined ? w[1] === undefined ? w[0] || 0 : w[1] || 0 : w[3] || 0;
+      } else {
+        node.strokeWeight = typeof s.strokeWidth === "number" ? s.strokeWidth : 1;
+      }
+      if (Array.isArray(s.strokeDash) && "dashPattern" in node)
+        node.dashPattern = s.strokeDash.map(Number);
       if ("strokeAlign" in node && type !== "line" && type !== "text") {
         node.strokeAlign = String(s.strokeAlign || "inside").toUpperCase();
       }
@@ -1843,7 +1853,7 @@
     const c = parseHex(hex);
     return { type: "SOLID", color: { r: c.r, g: c.g, b: c.b }, opacity: c.a };
   }
-  async function setPaints(node, field, value) {
+  async function setPaints(node, field, value, images) {
     if (typeof value === "string" && value.indexOf("style:") === 0) {
       const style = await findStyle("paint", stripPrefix(value));
       if (field === "fills")
@@ -1855,10 +1865,11 @@
     const list2 = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
     const paints = [];
     for (let i = 0;i < list2.length; i++)
-      paints.push(await toPaint(list2[i]));
+      paints.push(await toPaint(list2[i], images));
     node[field] = paints;
   }
-  async function toPaint(v) {
+  var FITS = { fill: "FILL", cover: "FILL", fit: "FIT", contain: "FIT", crop: "CROP", tile: "TILE" };
+  async function toPaint(v, images) {
     if (typeof v === "string") {
       if (v.indexOf("var:") === 0) {
         const variable = await findVariable(stripPrefix(v));
@@ -1885,6 +1896,15 @@
         [-sin, cos, 0.5 + 0.5 * sin - 0.5 * cos]
       ];
       return { type: radial ? "GRADIENT_RADIAL" : "GRADIENT_LINEAR", gradientTransform: transform, gradientStops: stops };
+    }
+    if (v && v.imageKey !== undefined) {
+      const bytes = images && images[v.imageKey];
+      if (!bytes)
+        throw codeError("Image fill data missing (use {image: src} with the build tool)", "BAD_ARGS");
+      const paint = { type: "IMAGE", imageHash: figma.createImage(bytes).hash, scaleMode: FITS[String(v.fit || "fill").toLowerCase()] || "FILL" };
+      if (typeof v.opacity === "number")
+        return Object.assign({}, paint, { opacity: v.opacity });
+      return paint;
     }
     if (v && typeof v.type === "string")
       return v;
@@ -2831,7 +2851,7 @@
     finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
   }
   // package.json
-  var version = "1.5.0";
+  var version = "1.6.0";
 
   // plugin/code.ts
   var DEFAULT_SIZE = { width: 340, height: 540 };

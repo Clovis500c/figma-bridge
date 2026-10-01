@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dashboard</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: oklch(0.98 0.01 260); color: oklch(0.25 0.03 260); }
+  .layout { display: flex; min-height: 600px; }
+  .sidebar { width: 220px; padding: 24px 16px; background: #0F172A; color: #CBD5E1; display: flex; flex-direction: column; gap: 4px; }
+  .sidebar a { display: block; padding: 8px 12px; border-radius: 6px; color: inherit; text-decoration: none; font-size: 14px; }
+  .sidebar a.active { background: rgb(255 255 255 / 0.08); color: #fff; }
+  .content { flex: 1; padding: 32px; }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 24px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+  .stat { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.1); }
+  .stat .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748B; }
+  .stat .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+  .badge { display: inline-block; margin-top: 8px; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: oklch(0.9 0.1 150); color: oklch(0.4 0.12 150); }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 16px; font-size: 14px; border-bottom: 1px solid #E2E8F0; }
+  th { background: #F8FAFC; font-weight: 600; }
+  .banner { margin-top: 32px; height: 120px; border-radius: 16px; background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><circle cx='5' cy='5' r='2' fill='%2394A3B8'/></svg>"), linear-gradient(135deg, #6366F1, #EC4899); }
+  canvas { display: block; margin-top: 16px; }
+</style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar"><a class="active" href="#">Overview</a><a href="#">Customers</a><a href="#">Settings</a></aside>
+    <main class="content">
+      <div class="container">
+        <h1>Overview</h1>
+        <div class="stats">
+          <div class="stat"><div class="label">Revenue</div><div class="value">$48,200</div><span class="badge">+12%</span></div>
+          <div class="stat"><div class="label">Customers</div><div class="value">1,284</div><span class="badge">+4%</span></div>
+          <div class="stat"><div class="label">Churn</div><div class="value">2.1%</div><span class="badge">-0.3%</span></div>
+          <div class="stat"><div class="label">NPS</div><div class="value">61</div><span class="badge">+2</span></div>
+        </div>
+        <table>
+          <thead><tr><th>Name</th><th>Plan</th><th>MRR</th></tr></thead>
+          <tbody><tr><td>Globex</td><td>Pro</td><td>$290</td></tr><tr><td>Initech</td><td>Team</td><td>$990</td></tr></tbody>
+        </table>
+        <div class="banner"></div>
+        <canvas id="chart" width="300" height="80"></canvas>
+      </div>
+    </main>
+  </div>
+  <script>const c = document.getElementById("chart").getContext("2d"); c.fillStyle = "#6366F1"; for (let i = 0; i < 10; i++) c.fillRect(i * 30, 80 - i * 7, 20, i * 7);</script>
+</body>
+</html>
