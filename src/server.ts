@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { appendFileSync, mkdirSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -18,6 +18,7 @@ import { planProjectExport, writePlan } from "./project/plan";
 import { normalizeTokens } from "./tokens";
 import { type ExportData, exportTokenFiles, type Format, FORMATS } from "./tokens-export";
 import { importWeb } from "./web/import";
+import { syncPlugin } from "./setup";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 import { version as VERSION } from "../package.json";
 
@@ -46,6 +47,18 @@ function log(line: string) {
 
 const bridge = new Bridge({ port: PORT, channel: CHANNEL, version: VERSION, log });
 bridge.start();
+
+// Restarting the AI client updates the Figma plugin too: keep ~/.figma-bridge/plugin in step with this server.
+// src/server.ts and dist/server.js both sit one level below the package root.
+if (process.env.FIGMA_BRIDGE_PLUGIN_SYNC !== "0") {
+  try {
+    const target = process.env.FIGMA_BRIDGE_PLUGIN_DIR || join(homedir(), ".figma-bridge", "plugin");
+    const status = syncPlugin(join(dirname(fileURLToPath(import.meta.url)), "..", "plugin"), target, VERSION);
+    if (status === "installed" || status === "updated") log(`Figma plugin ${status} to v${VERSION} in ${target}; reopen it in Figma`);
+  } catch (e) {
+    log(`Could not update the Figma plugin copy: ${(e as Error).message}`);
+  }
+}
 
 // ─── Result helpers ─────────────────────────────────────────────────────────
 

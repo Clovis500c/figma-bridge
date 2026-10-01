@@ -113,11 +113,45 @@ export function runSetup(opts: SetupOptions): SetupResult {
   return result;
 }
 
+const PLUGIN_FILES = ["manifest.json", "code.js", "ui.html"];
+
 /** Copies manifest.json, code.js and ui.html to a stable folder; returns the manifest path. */
-export function installPlugin(from: string, to: string): string {
+export function installPlugin(from: string, to: string, version?: string): string {
   mkdirSync(to, { recursive: true });
-  for (const f of ["manifest.json", "code.js", "ui.html"]) copyFileSync(join(from, f), join(to, f));
+  for (const f of PLUGIN_FILES) copyFileSync(join(from, f), join(to, f));
+  if (version) writeFileSync(join(to, "version.json"), JSON.stringify({ version }) + "\n");
   return join(to, "manifest.json");
+}
+
+/** Negative when a < b, for "1.12.0"-style versions. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  const pb = b.split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+/**
+ * Keeps the installed Figma plugin in step with this server: called at startup, so restarting the
+ * AI client is enough to update both. Never downgrades a copy installed by a newer server.
+ */
+export function syncPlugin(from: string, to: string, version: string): "installed" | "updated" | "current" | "newer" | "skipped" {
+  if (!PLUGIN_FILES.every((f) => existsSync(join(from, f)))) return "skipped";
+  const had = existsSync(join(to, "manifest.json"));
+  let installed = "";
+  try {
+    installed = JSON.parse(readFileSync(join(to, "version.json"), "utf8")).version || "";
+  } catch {}
+  if (installed) {
+    const order = compareVersions(installed, version);
+    if (order > 0) return "newer";
+    if (order === 0 && PLUGIN_FILES.every((f) => existsSync(join(to, f)))) return "current";
+  }
+  installPlugin(from, to, version);
+  return had ? "updated" : "installed";
 }
 
 // ─── Console output ─────────────────────────────────────────────────────────

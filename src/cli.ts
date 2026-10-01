@@ -15,10 +15,12 @@ const pluginSource = join(dirname(fileURLToPath(import.meta.url)), "..", "plugin
 const pluginTarget = join(home, ".figma-bridge", "plugin");
 
 // Windows clients spawn commands without a shell, and npx is a .cmd script there.
-const npx = process.platform === "win32" ? { command: "cmd", args: ["/c", "npx", "-y", PACKAGE] } : { command: "npx", args: ["-y", PACKAGE] };
+// @latest makes npx check for a new release each time the AI client starts the server.
+const spec = `${PACKAGE}@latest`;
+const npx = process.platform === "win32" ? { command: "cmd", args: ["/c", "npx", "-y", spec] } : { command: "npx", args: ["-y", spec] };
 
 function plugin(): string {
-  const manifest = installPlugin(pluginSource, pluginTarget);
+  const manifest = installPlugin(pluginSource, pluginTarget, VERSION);
   console.log(`${bold("Figma plugin")} copied to ${dim(pluginTarget)}`);
   return manifest;
 }
@@ -28,7 +30,7 @@ function next(manifest: string) {
 ${bold("Next")}
   1. Figma desktop → Plugins → Development → Import plugin from manifest…
      ${green(manifest)}
-     (once; after an update, run ${bold(`npx ${PACKAGE} plugin`)} again and reopen the plugin)
+     (once: updates install themselves when your AI client restarts; then reopen the plugin)
   2. Restart your AI client, then run Plugins → Development → Figma Bridge in a Figma file.
 `);
 }

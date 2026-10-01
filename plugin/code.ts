@@ -117,7 +117,12 @@ figma.ui.onmessage = function (msg: any) {
     size = { width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height };
     applySize();
     void figma.clientStorage.setAsync("size", size);
-  } else if (msg.t === "notify") figma.notify(String(msg.text), { timeout: 2500 });
+  } else if (msg.t === "reopen") {
+    // A plugin cannot reload its own code: close it and say how to start the new version.
+    figma.notify("Figma Bridge updated: run it again (Ctrl+Alt+P)", { timeout: 6000 });
+    figma.closePlugin();
+  }
+  else if (msg.t === "notify") figma.notify(String(msg.text), { timeout: 2500 });
   else if (msg.t === "focus") void focusNode(String(msg.nodeId));
   else if (msg.t === "cancelWait") cancelWait(String(msg.id));
   else if (msg.t === "cancel") {

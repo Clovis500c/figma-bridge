@@ -357,7 +357,8 @@
 
     <section class="banner warn" id="verBar">
       <span class="bico"><svg width="14" height="14"><use href="#i-alert"/></svg></span>
-      <div class="main"><b>Version mismatch</b><span id="verMsg">Reopen the plugin or update.</span></div>
+      <div class="main"><b id="verTitle">Version mismatch</b><span id="verMsg">Reopen the plugin or update.</span></div>
+      <button class="mini" id="btnReopen">Reopen</button>
     </section>
 
     <section class="banner" id="waitBar">
@@ -932,10 +933,23 @@ function onProgress(msg) {
   renderBar();
 }
 
+function newerThan(a, b) {
+  const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+}
+
 function renderVersion() {
   const mismatch = !!(serverVersion && version && serverVersion !== version);
   document.body.classList.toggle("mismatch", mismatch);
-  if (mismatch) $("verMsg").textContent = "Plugin v" + version + ", server v" + serverVersion + ": reopen the plugin or update.";
+  if (!mismatch) return;
+  // The server installs the matching plugin when it starts: a newer server means the update is already on disk.
+  const updateReady = newerThan(serverVersion, version);
+  $("verTitle").textContent = updateReady ? "Update installed: v" + serverVersion : "Older server: v" + serverVersion;
+  $("verMsg").textContent = updateReady
+    ? "Reopen the plugin to use it."
+    : "This plugin is v" + version + ". Restart your AI client to update its server.";
+  $("btnReopen").style.display = updateReady ? "" : "none";
 }
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
@@ -1118,6 +1132,7 @@ $("btnWaitCancel").onclick = () => {
   const w = [...waits.values()].pop();
   if (w) toPlugin({ t: "cancelWait", id: w.id });
 };
+$("btnReopen").onclick = () => toPlugin({ t: "reopen" });
 $("btnClear").onclick = () => { entries.length = 0; openId = null; render(); };
 $("btnRetry").onclick = () => { retryDelay = 400; connect(); };
 $("btnCopyCmd").onclick = () => copy("Get-NetTCPConnection -LocalPort 3055");

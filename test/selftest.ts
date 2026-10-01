@@ -15,7 +15,7 @@ const transport = new StdioClientTransport({
   args: ["run", serverPath],
   stderr: "ignore",
   // Snippets go to a throwaway folder so the test never touches the user's library.
-  env: { ...process.env, FIGMA_BRIDGE_SNIPPETS: join(tmpdir(), `figma-bridge-selftest-${process.pid}`) } as Record<string, string>,
+  env: { ...process.env, FIGMA_BRIDGE_PLUGIN_SYNC: "0", FIGMA_BRIDGE_SNIPPETS: join(tmpdir(), `figma-bridge-selftest-${process.pid}`) } as Record<string, string>,
 });
 
 let failures = 0;

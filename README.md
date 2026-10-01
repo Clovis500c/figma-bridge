@@ -68,7 +68,7 @@ Requires [Node.js](https://nodejs.org) 20+ and the Figma **desktop** app.
 
 3. Restart your AI client, open a Figma file and run **Plugins → Development → Figma Bridge**. A green **Live** badge means it's connected.
 
-To update the plugin later, run `npx @clovis500c/figma-bridge plugin` and reopen it in Figma.
+**Updates are automatic:** each time your AI client starts, it runs the latest release and refreshes the plugin. Reopen the plugin in Figma when it shows **Update installed**.
 
 <details>
 <summary>With Bun instead of npm</summary>
@@ -182,7 +182,8 @@ Each tool describes its parameters to the agent, which needs no extra instructio
 |---|---|
 | **Offline** | The MCP server isn't running: start or restart your AI client and check that `FigmaBridge` is enabled. |
 | **Port busy** | Another program uses port 3055. Close it; the plugin reconnects. |
-| **Version mismatch** | The plugin and the server come from different releases: reopen the plugin, or update both. |
+| **Update installed** | A newer version was installed: click **Reopen**, then run the plugin again (Ctrl+Alt+P). |
+| **Older server** | Your AI client still runs an older release: restart it. |
 
 Logs, screenshots, comparison heatmaps and exported code are written to `%TEMP%\figma-bridge`.
 `import_web` uses your installed Chrome or Edge; set `FIGMA_BRIDGE_BROWSER` to use another Chromium-based browser.
