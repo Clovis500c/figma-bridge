@@ -40,7 +40,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 22, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 23, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -174,6 +174,15 @@ check("get_css", !css.isError && !!css.data.css, Object.keys(css.data.css ?? {})
 
 const icon = await call("insert_icon", { name: "lucide:star", size: 32, color: "#F59E0B", x: made.data.result.x + 620, y: made.data.result.y });
 check("insert_icon", !icon.isError && icon.data.height === 32, icon.data);
+
+const note = await call("annotate", { nodeId: cardId, label: "Card: **hug** height", properties: ["width", "padding"] });
+const notes = await call("annotate", { action: "list", nodeId: cardId });
+const cleared = await call("annotate", { action: "clear", nodeId: cardId });
+check(
+  "annotate add/list/clear",
+  !note.isError && notes.data.nodes?.[0]?.annotations?.[0]?.properties?.length === 2 && cleared.data.removed === 1,
+  notes.data.nodes?.[0] ?? note.data,
+);
 
 const saved = await call("checkpoint", { action: "save", nodeIds: [cardId], label: "selftest" });
 await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(cardId)})).name = "changed"` });

@@ -245,6 +245,107 @@
     return p;
   }
 
+  // plugin/lib/annotate.ts
+  var COLORS = ["yellow", "orange", "red", "pink", "violet", "blue", "teal", "green"];
+  async function categoryId(label, color, created) {
+    const api = figma.annotations;
+    if (!api || typeof api.getAnnotationCategoriesAsync !== "function")
+      return;
+    const list = await api.getAnnotationCategoriesAsync();
+    for (let i = 0;i < list.length; i++)
+      if (list[i].label.toLowerCase() === label.toLowerCase())
+        return list[i].id;
+    const c = COLORS.indexOf(String(color)) !== -1 ? color : "blue";
+    const cat = await api.addAnnotationCategoryAsync({ label, color: c });
+    created.push(label);
+    return cat.id;
+  }
+  function supports(node) {
+    return "annotations" in node;
+  }
+  async function annotate(p) {
+    const action = String(p.action || (p.label || p.properties ? "add" : "list"));
+    if (action === "list")
+      return list(p);
+    if (!p.nodeId)
+      throw codeError("`nodeId` is required to " + action + " annotations", "BAD_ARGS");
+    const node = await getNode(p.nodeId);
+    if (!supports(node))
+      throw codeError("A " + node.type + " node cannot have annotations", "BAD_ARGS");
+    if (action === "clear") {
+      const n = node.annotations.length;
+      node.annotations = [];
+      return { nodeId: node.id, removed: n };
+    }
+    if (action !== "add")
+      throw codeError('Unknown action "' + action + '" (add, list, clear)', "BAD_ARGS");
+    if (!p.label && !(p.properties && p.properties.length))
+      throw codeError("Give a label and/or properties", "BAD_ARGS");
+    const annotation = {};
+    if (p.label)
+      annotation.labelMarkdown = String(p.label);
+    if (Array.isArray(p.properties) && p.properties.length) {
+      annotation.properties = p.properties.map(function(t) {
+        return { type: String(t) };
+      });
+    }
+    const createdCategories = [];
+    if (p.category) {
+      const id = await categoryId(String(p.category), p.color, createdCategories);
+      if (id)
+        annotation.categoryId = id;
+    }
+    const current = p.replace ? [] : node.annotations.slice();
+    try {
+      node.annotations = current.concat([annotation]);
+    } catch (e) {
+      throw codeError("Figma rejected the annotation: " + (e.message || e) + " (check the property names)", "BAD_ARGS");
+    }
+    const out = { nodeId: node.id, annotations: node.annotations.length };
+    if (createdCategories.length)
+      out.createdCategory = createdCategories[0];
+    return out;
+  }
+  async function list(p) {
+    const root = p.nodeId ? await getNode(p.nodeId) : p.pageId ? await getNode(p.pageId) : figma.currentPage;
+    if (root.type === "PAGE")
+      await root.loadAsync();
+    const nodes = (root.type === "PAGE" ? [] : [root]).concat("findAll" in root ? root.findAll(function(n) {
+      return supports(n) && n.annotations.length > 0;
+    }) : []);
+    const categories = {};
+    const api = figma.annotations;
+    if (api && typeof api.getAnnotationCategoriesAsync === "function") {
+      const cats = await api.getAnnotationCategoriesAsync();
+      for (let i = 0;i < cats.length; i++)
+        categories[cats[i].id] = cats[i].label;
+    }
+    const out = [];
+    for (let i = 0;i < nodes.length && out.length < 300; i++) {
+      const n = nodes[i];
+      if (!supports(n) || !n.annotations.length)
+        continue;
+      out.push({
+        nodeId: n.id,
+        name: n.name,
+        annotations: n.annotations.map(function(a) {
+          const item = {};
+          if (a.labelMarkdown || a.label)
+            item.label = a.labelMarkdown || a.label;
+          if (a.properties && a.properties.length) {
+            item.properties = a.properties.map(function(x) {
+              return x.type;
+            });
+          }
+          if (a.categoryId)
+            item.category = categories[a.categoryId] || a.categoryId;
+          return item;
+        })
+      });
+    }
+    return { count: out.length, nodes: out };
+  }
+
   // plugin/lib/audit.ts
   var MAX_NODES = 5000;
   var MAX_ISSUES = 120;
@@ -551,11 +652,11 @@
     };
     for (let i = 0;i < pending.length; i++) {
       const item = pending[i];
-      const list = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
+      const list2 = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
       const out = [];
-      for (let k = 0;k < list.length; k++) {
+      for (let k = 0;k < list2.length; k++) {
         try {
-          out.push(await toReaction(list[k] || {}, resolve));
+          out.push(await toReaction(list2[k] || {}, resolve));
         } catch (e) {
           warnings.push(item.path + ".reactions[" + k + "]: " + (e.message || e));
         }
@@ -860,10 +961,10 @@
   }
   async function writeStyles(styles, counts, warnings) {
     const local = await localStyles();
-    const find = function(list, name) {
-      for (let i = 0;i < list.length; i++)
-        if (list[i].name === name)
-          return list[i];
+    const find = function(list2, name) {
+      for (let i = 0;i < list2.length; i++)
+        if (list2[i].name === name)
+          return list2[i];
       return null;
     };
     const colors = styles.colors || [];
@@ -871,10 +972,10 @@
       const s = colors[i];
       try {
         const value = s.value !== undefined ? s.value : s.color;
-        const list = Array.isArray(value) ? value : [value];
+        const list2 = Array.isArray(value) ? value : [value];
         const paints = [];
-        for (let k = 0;k < list.length; k++)
-          paints.push(await toPaint(list[k]));
+        for (let k = 0;k < list2.length; k++)
+          paints.push(await toPaint(list2[k]));
         let style = find(local.paint, s.name);
         if (style)
           counts.paintStyles.updated++;
@@ -931,10 +1032,10 @@
       const s = effects[i];
       try {
         const value = s.value !== undefined ? s.value : s;
-        const list = Array.isArray(value) ? value : [value];
+        const list2 = Array.isArray(value) ? value : [value];
         const out = [];
-        for (let k = 0;k < list.length; k++) {
-          const e = list[k];
+        for (let k = 0;k < list2.length; k++) {
+          const e = list2[k];
           if (e && typeof e.blur === "number" && e.type === "layer")
             out.push({ type: "LAYER_BLUR", radius: e.blur, visible: true });
           else if (e && typeof e.blur === "number" && e.type === "background")
@@ -1493,13 +1594,13 @@
     } else if (/^[0-9a-f]{40}$/i.test(ref)) {
       comp = await figma.importComponentByKeyAsync(ref);
     } else {
-      const list = await localComponents();
-      for (let i = 0;i < list.length && !comp; i++)
-        if (list[i].name === ref)
-          comp = list[i];
-      for (let i = 0;i < list.length && !comp; i++)
-        if (list[i].name.toLowerCase() === ref.toLowerCase())
-          comp = list[i];
+      const list2 = await localComponents();
+      for (let i = 0;i < list2.length && !comp; i++)
+        if (list2[i].name === ref)
+          comp = list2[i];
+      for (let i = 0;i < list2.length && !comp; i++)
+        if (list2[i].name.toLowerCase() === ref.toLowerCase())
+          comp = list2[i];
     }
     if (!comp)
       throw codeError(path + ': component "' + ref + '" not found. Use get_design_system to list components.', "NOT_FOUND");
@@ -1578,9 +1679,9 @@
           const comp = await findComponent(String(def.default), path + ".properties." + name);
           const main = comp.type === "COMPONENT_SET" ? comp.defaultVariant : comp;
           const preferred = [];
-          const list = Array.isArray(def.preferred) ? def.preferred : [];
-          for (let k = 0;k < list.length; k++) {
-            const p = await findComponent(String(list[k]), path + ".properties." + name);
+          const list2 = Array.isArray(def.preferred) ? def.preferred : [];
+          for (let k = 0;k < list2.length; k++) {
+            const p = await findComponent(String(list2[k]), path + ".properties." + name);
             preferred.push({ type: p.type === "COMPONENT_SET" ? "COMPONENT_SET" : "COMPONENT", key: p.key });
           }
           keys[name] = owner.addComponentProperty(name, "INSTANCE_SWAP", main.id, preferred.length ? { preferredValues: preferred } : undefined);
@@ -1710,10 +1811,10 @@
         await node.setStrokeStyleIdAsync(style.id);
       return;
     }
-    const list = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
+    const list2 = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
     const paints = [];
-    for (let i = 0;i < list.length; i++)
-      paints.push(await toPaint(list[i]));
+    for (let i = 0;i < list2.length; i++)
+      paints.push(await toPaint(list2[i]));
     node[field] = paints;
   }
   async function toPaint(v) {
@@ -1869,7 +1970,7 @@
     if (action === "save")
       return save(p);
     if (action === "list")
-      return list();
+      return list2();
     if (action === "restore")
       return restore(p);
     if (action === "delete")
@@ -1906,7 +2007,7 @@
     }
     return { checkpointId: meta.id, label: meta.label, saved: nodes.length };
   }
-  async function list() {
+  async function list2() {
     const page = await checkpointPage(false);
     if (!page)
       return { checkpoints: [] };
@@ -2233,9 +2334,9 @@
       });
     }
     if (include.indexOf("components") !== -1) {
-      const list2 = await localComponents();
-      counts.components = list2.length;
-      out.components = list2.slice(0, limit).map(function(c) {
+      const list3 = await localComponents();
+      counts.components = list3.length;
+      out.components = list3.slice(0, limit).map(function(c) {
         const item = { name: c.name, id: c.id, page: (pageOf(c) || { name: "?" }).name };
         if (c.type === "COMPONENT_SET") {
           const defs = c.componentPropertyDefinitions;
@@ -2586,6 +2687,7 @@
     list_fonts: listFonts,
     wait_for_selection: waitForSelection,
     prototype,
+    annotate,
     ping: function() {
       return Promise.resolve({ pong: true, session: sessionInfo() });
     }

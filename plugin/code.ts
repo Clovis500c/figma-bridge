@@ -1,5 +1,6 @@
 // Figma Bridge — plugin main thread.
 // Syntax stays ES2017 (no ?. ?? object spread or optional catch binding): the sandbox parser is conservative.
+import { annotate } from "./lib/annotate";
 import { audit } from "./lib/audit";
 import { build } from "./lib/build";
 import { checkpoint } from "./lib/checkpoint";
@@ -146,6 +147,7 @@ const HANDLERS: { [method: string]: Handler } = {
   list_fonts: listFonts,
   wait_for_selection: waitForSelection,
   prototype: prototype,
+  annotate: annotate,
   ping: function () {
     return Promise.resolve({ pong: true, session: sessionInfo() });
   },

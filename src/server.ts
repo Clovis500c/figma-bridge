@@ -461,6 +461,33 @@ Links are added to existing interactions unless replace:true; clear:[ids] remove
 );
 
 server.registerTool(
+  "annotate",
+  {
+    title: "Dev Mode annotations",
+    description:
+      "Add, list or clear Dev Mode annotations, the notes developers see on layers. " +
+      'add: {nodeId, label (markdown), properties?: ["width","height","fills","cornerRadius","padding","itemSpacing","fontSize","textStyleId",…] pinned as live values, category? (e.g. "Interaction", created if missing), color?}. ' +
+      "list: {nodeId? | pageId?} returns the annotations of a layer and its children, or of a page (default: current page). clear: {nodeId}.",
+    inputSchema: {
+      action: z.enum(["add", "list", "clear"]).optional().describe("Default: add when label/properties are given, else list"),
+      nodeId: z.string().optional(),
+      pageId: z.string().optional().describe("list only"),
+      label: z.string().max(5000).optional().describe("Markdown text of the note"),
+      properties: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "width, height, maxWidth, minWidth, maxHeight, minHeight, fills, strokes, effects, strokeWeight, cornerRadius, textStyleId, textAlignHorizontal, fontFamily, fontStyle, fontSize, fontWeight, lineHeight, letterSpacing, itemSpacing, padding, layoutMode, alignItems, opacity, mainComponent",
+        ),
+      category: z.string().optional().describe("Category label, e.g. Development, Interaction, Accessibility"),
+      color: z.enum(["yellow", "orange", "red", "pink", "violet", "blue", "teal", "green"]).optional().describe("Color of a new category"),
+      replace: z.boolean().optional().describe("Replace the layer's annotations instead of adding one"),
+    },
+  },
+  (args) => track("annotate", `${args.action ?? (args.label ? "add" : "list")} ${args.nodeId ?? ""}`, async () => ok(await bridge.request("annotate", args, 30_000))),
+);
+
+server.registerTool(
   "get_css",
   {
     title: "CSS of a node",
