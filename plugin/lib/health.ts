@@ -2,6 +2,7 @@
 // which applies safe fixes (bind raw colors and numbers to matching variables, apply matching text styles,
 // rename default layer names). A fix run is one command, so one Ctrl+Z undoes it.
 import { DEFAULT_NAME, pageBackground, textContrast } from "./audit";
+import { roleNames } from "./roles";
 import { checkCancelled, codeError, deltaE, getNode, loadFont, localComponents, localStyles, localVariables, round, toHex } from "./util";
 
 const MAX_NODES = 20000;
@@ -404,6 +405,14 @@ export async function autoFix(p: any, requestId?: string) {
   }
   const changes: any[] = [];
   const counts: any = { colors: 0, numbers: 0, textStyles: 0, names: 0 };
+  // Role names (Card, Header, Row…) come from the whole top-level frame, computed once per frame.
+  const roleCache: { [rootId: string]: { [id: string]: string } } = {};
+  const roleFor = function (n: SceneNode): string | null {
+    let top: any = n;
+    while (top.parent && top.parent.type !== "PAGE" && top.parent.type !== "DOCUMENT" && top.parent.type !== "SECTION") top = top.parent;
+    if (!roleCache[top.id]) roleCache[top.id] = roleNames(top);
+    return roleCache[top.id][n.id] || null;
+  };
   const record = function (n: BaseNode, fix: string, from: string, to: string) {
     counts[fix]++;
     if (changes.length < 200) changes.push({ nodeId: n.id, name: n.name, fix: fix, from: from, to: to });
@@ -515,7 +524,7 @@ export async function autoFix(p: any, requestId?: string) {
     }
 
     if (fixes.indexOf("names") !== -1 && n.type !== "TEXT" && DEFAULT_NAME.test(n.name)) {
-      const name = nameFromContent(n);
+      const name = roleFor(n);
       if (name && name !== n.name) {
         const from = n.name;
         n.name = name;
@@ -524,44 +533,4 @@ export async function autoFix(p: any, requestId?: string) {
     }
   }
   return { scope: scope.label, fixed: counts, changes: changes, truncated: scope.truncated || changes.length >= 200 };
-}
-
-function firstText(n: any, depth: number): string {
-  if (n.type === "TEXT") return n.characters;
-  if (depth > 3 || !("children" in n)) return "";
-  for (let i = 0; i < n.children.length; i++) {
-    if (n.children[i].visible === false) continue;
-    const t = firstText(n.children[i], depth + 1);
-    if (t.trim()) return t;
-  }
-  return "";
-}
-
-function hasImage(n: any): boolean {
-  return (
-    "fills" in n &&
-    n.fills !== figma.mixed &&
-    n.fills.some(function (f: Paint) {
-      return f.type === "IMAGE" && f.visible !== false;
-    })
-  );
-}
-
-function vectorOnly(n: any): boolean {
-  if (n.type === "VECTOR" || n.type === "BOOLEAN_OPERATION" || n.type === "STAR" || n.type === "POLYGON") return true;
-  if (!("children" in n) || !n.children.length || n.type === "TEXT") return false;
-  for (let i = 0; i < n.children.length; i++) if (!vectorOnly(n.children[i])) return false;
-  return true;
-}
-
-/** A name that says what the layer shows: its text, "Image", "Icon", or its layout. */
-function nameFromContent(n: any): string | null {
-  if (hasImage(n)) return "Image";
-  if (n.type === "VECTOR" || ((n.type === "GROUP" || n.type === "FRAME") && vectorOnly(n))) return "Icon";
-  const text = firstText(n, 0).split("\n")[0].trim();
-  if (text) return text.length > 32 ? text.slice(0, 31) + "…" : text;
-  if (n.layoutMode === "HORIZONTAL") return "Row";
-  if (n.layoutMode === "VERTICAL") return "Column";
-  if (n.layoutMode === "GRID") return "Grid";
-  return null;
 }

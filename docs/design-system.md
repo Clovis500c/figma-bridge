@@ -58,6 +58,6 @@ after fixing. One fix run is one Ctrl+Z.
 | `colors` | Binds solid fills and strokes to the color variable with the same color (ΔE2000 below 2 and the same opacity), as the layer's own mode sees it. Variable scopes are respected (text fills, frame fills, strokes). Layers using a paint style are left alone. |
 | `numbers` | Binds gap, padding and corner radii to a number variable with exactly the same value and a fitting scope (`GAP`, `CORNER_RADIUS`). Zero is never bound. |
 | `textStyles` | Applies a local text style whose font, size, line height and letter spacing are exactly those of the text. |
-| `names` | Renames default layer names after their content: the first text inside, `Image`, `Icon`, or `Row` / `Column` / `Grid`. |
+| `names` | Renames default layer names after their role: `Card`, `Header`, `CardList`, `Actions`, `Button`, `Badge`, `Row`, `Container`, `Image`, `Icon`, `Divider`… ([rules](naming.md)). |
 
 `fixes: ["colors", "names"]` runs only some of them. Locked layers and instance contents are never changed.

@@ -39,7 +39,7 @@ const safe = (s: string) => s.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "").
 export async function exportRoblox(args: ExportRobloxArgs, deps: ExportRobloxDeps) {
   const env = deps.env ?? process.env;
   const opts: RobloxOptions = {
-    mode: args.mode ?? "hybrid",
+    mode: args.mode ?? "scale",
     targetResolution: args.targetResolution ?? [1920, 1080],
     rasterize: args.rasterize ?? "auto",
     asRootFrame: args.asRootFrame,
