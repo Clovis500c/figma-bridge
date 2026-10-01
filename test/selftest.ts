@@ -236,7 +236,13 @@ const dark = await call("build", {
 const darkFill = await call("run_script", {
   code: `const n = await figma.getNodeByIdAsync(${JSON.stringify(dark.data.rootId)}); return { mode: Object.values(n.explicitVariableModes)[0], pad: n.paddingTop }`,
 });
-check("build modes", !dark.isError && !dark.data.warnings && darkFill.data.result?.pad === 16, darkFill.data.result ?? dark.data);
+// Free Figma plans allow a single mode per collection: then only the variable bindings can be checked.
+const singleModePlan = ((tk1.data.warnings ?? []) as string[]).some((w) => /limited to 1 modes?/i.test(w));
+if (singleModePlan) {
+  check("build modes", !dark.isError && darkFill.data.result?.pad === 16, "variables bound; mode switch skipped (this Figma plan allows 1 mode)");
+} else {
+  check("build modes", !dark.isError && !dark.data.warnings && darkFill.data.result?.pad === 16, darkFill.data.result ?? dark.data);
+}
 const tokenCleanup = await call("run_script", {
   code: `
     for (const c of await figma.variables.getLocalVariableCollectionsAsync()) if (c.name === "selftest tokens") c.remove();
