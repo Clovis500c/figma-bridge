@@ -3989,7 +3989,7 @@
     finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
   }
   // package.json
-  var version = "1.8.0";
+  var version = "1.9.0";
 
   // plugin/code.ts
   var DEFAULT_SIZE = { width: 340, height: 540 };

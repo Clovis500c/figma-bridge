@@ -21,6 +21,7 @@ and any other MCP client.
 - **Read existing designs** compactly, search every page, and reuse the file's design system.
 - **Check its own work** with screenshots, a design audit, and a pixel diff against a mockup.
 - **Hand off to your codebase**: export a frame into your project with its own components, tokens and stack (React, Next, Vue, Svelte, React Native; Tailwind, CSS modules, styled-components; shadcn, MUI, Chakra) ([details](docs/export-code.md)), plus Dev Mode annotations.
+- **Figma Design, FigJam and Slides**: stickies, shapes, connectors, tables, Mermaid flowcharts laid out as diagrams, and slide decks; several files at once ([details](docs/figjam-slides.md)).
 - **200 000+ icons** through Iconify, checkpoints to roll back, and a library of reusable scripts.
 - **Zero-friction connection**: the plugin connects and reconnects on its own. Each AI command is one Ctrl+Z step, and you can cancel it from the plugin.
 
@@ -120,7 +121,7 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 
 | Tool | Purpose |
 |---|---|
-| `build` | Create a layout from a JSON spec in one call: grid, rich text, variants, reactions |
+| `build` | Create a layout in one call: grid, rich text, variants, reactions; FigJam boards and diagrams; slides |
 | `import_web` | Rebuild a website or HTML as editable layers, one frame per viewport |
 | `run_script` | Run any Figma Plugin API code |
 | `describe` | Compact outline of existing layers |
@@ -139,7 +140,7 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 | `checkpoint` | Save layers and restore them later |
 | `snippets` | Reusable script functions (`lib.name()` in scripts) |
 | `get_context` · `get_css` · `list_fonts` | File info, generated CSS, installed fonts |
-| `list_sessions` · `select_session` | Choose a file when several are open |
+| `list_sessions` · `select_session` | Choose a file when several are open (or pass `file` to any tool) |
 
 Each tool describes its parameters to the agent, which needs no extra instructions.
 
