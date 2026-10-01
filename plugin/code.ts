@@ -53,7 +53,12 @@ function post(msg: any) {
 }
 
 function sessionInfo() {
-  return { id: sessionId, fileName: figma.root.name, page: figma.currentPage.name, editorType: figma.editorType };
+  // fileKey (for the optional REST features) is only given to private and development plugins.
+  let fileKey: string | undefined;
+  try {
+    fileKey = figma.fileKey;
+  } catch (e) {}
+  return { id: sessionId, fileName: figma.root.name, page: figma.currentPage.name, pageId: figma.currentPage.id, editorType: figma.editorType, fileKey: fileKey };
 }
 
 function clampSize(w: number, h: number) {
@@ -159,6 +164,7 @@ const HANDLERS: { [method: string]: Handler } = {
   prototype: prototype,
   annotate: annotate,
   export_tree: exportTree,
+  node_info: nodeInfo,
   ping: function () {
     return Promise.resolve({ pong: true, session: sessionInfo() });
   },
@@ -186,6 +192,7 @@ const READ_ONLY: { [method: string]: boolean } = {
   list_fonts: true,
   wait_for_selection: true,
   export_tree: true,
+  node_info: true,
   ping: true,
 };
 
@@ -502,6 +509,19 @@ async function getContext() {
       bounds: { x: round(vb.x), y: round(vb.y), width: round(vb.width), height: round(vb.height) },
     },
   };
+}
+
+/** Names, types and pages of node ids (comment anchors, version diffs). */
+async function nodeInfo(p: any) {
+  const ids: string[] = Array.isArray(p.ids) ? p.ids.slice(0, 500) : [];
+  const out: any = {};
+  for (let i = 0; i < ids.length; i++) {
+    const n = await figma.getNodeByIdAsync(String(ids[i]));
+    if (!n) continue;
+    const pg = pageOf(n);
+    out[ids[i]] = { name: n.name, type: n.type, page: pg ? pg.name : undefined };
+  }
+  return out;
 }
 
 let fontCache: Font[] | null = null;

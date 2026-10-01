@@ -4011,7 +4011,11 @@
     figma.ui.postMessage(msg);
   }
   function sessionInfo() {
-    return { id: sessionId, fileName: figma.root.name, page: figma.currentPage.name, editorType: figma.editorType };
+    let fileKey;
+    try {
+      fileKey = figma.fileKey;
+    } catch (e) {}
+    return { id: sessionId, fileName: figma.root.name, page: figma.currentPage.name, pageId: figma.currentPage.id, editorType: figma.editorType, fileKey };
   }
   function clampSize(w, h) {
     return {
@@ -4113,6 +4117,7 @@
     prototype,
     annotate,
     export_tree: exportTree,
+    node_info: nodeInfo,
     ping: function() {
       return Promise.resolve({ pong: true, session: sessionInfo() });
     }
@@ -4136,6 +4141,7 @@
     list_fonts: true,
     wait_for_selection: true,
     export_tree: true,
+    node_info: true,
     ping: true
   };
   async function handleRequest(msg) {
@@ -4456,6 +4462,18 @@
         bounds: { x: round(vb.x), y: round(vb.y), width: round(vb.width), height: round(vb.height) }
       }
     };
+  }
+  async function nodeInfo(p) {
+    const ids = Array.isArray(p.ids) ? p.ids.slice(0, 500) : [];
+    const out = {};
+    for (let i = 0;i < ids.length; i++) {
+      const n = await figma.getNodeByIdAsync(String(ids[i]));
+      if (!n)
+        continue;
+      const pg = pageOf(n);
+      out[ids[i]] = { name: n.name, type: n.type, page: pg ? pg.name : undefined };
+    }
+    return out;
   }
   var fontCache = null;
   async function listFonts(p) {

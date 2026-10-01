@@ -33,6 +33,9 @@ export interface SessionInfo {
   version?: string;
   /** figma, figjam, slides or dev. */
   editorType?: string;
+  /** For the REST features; only private and development plugins receive it. */
+  fileKey?: string;
+  pageId?: string;
   connectedAt: number;
 }
 
@@ -299,6 +302,7 @@ export class Hub {
         if (typeof msg.fileName === "string") ws.data.session.fileName = msg.fileName;
         if (typeof msg.page === "string") ws.data.session.page = msg.page;
         if (typeof msg.editorType === "string") ws.data.session.editorType = msg.editorType;
+        if (typeof msg.pageId === "string") ws.data.session.pageId = msg.pageId;
       }
     } else if (ws.data.role === "agent") {
       if (msg.t === "req") this.handleRequest(msg, (m) => sendFrames(ws, m), ws, ws.data.channel!);
@@ -326,6 +330,8 @@ export class Hub {
         channel,
         version: msg.version,
         editorType: typeof s.editorType === "string" ? s.editorType : undefined,
+        fileKey: typeof s.fileKey === "string" && s.fileKey ? s.fileKey : undefined,
+        pageId: typeof s.pageId === "string" ? s.pageId : undefined,
         connectedAt: Date.now(),
       };
       const previous = this.plugins.get(session.id);
@@ -603,6 +609,14 @@ export class Bridge {
     const hit = await this.find(name);
     this.selection = { id: hit.id, fileName: hit.fileName };
     return hit;
+  }
+
+  /** The session this call goes to ({file}, the selection, or the only one), or null. */
+  async current(): Promise<SessionInfo | null> {
+    const file = callTarget.getStore()?.file;
+    if (file) return this.find(file);
+    const list = await this.sessions().catch(() => [] as SessionInfo[]);
+    return list.find((s) => s.id === this.selection.id) ?? (list.length === 1 ? list[0]! : null);
   }
 
   /** A connected file by session id, exact name or unique partial name. */
