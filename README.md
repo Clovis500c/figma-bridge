@@ -1,5 +1,7 @@
 # Figma Bridge
 
+[![CI](https://github.com/Clovis500c/figma-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/Clovis500c/figma-bridge/actions/workflows/ci.yml)
+
 **Let any AI agent design in the Figma desktop app, with no rate limits.**
 
 Figma Bridge is a local [MCP](https://modelcontextprotocol.io) server plus a Figma plugin. Your agent gets full read and
@@ -22,28 +24,41 @@ and any other MCP client.
 
 ## Installation
 
-Requires [Bun](https://bun.sh) and the Figma **desktop** app.
+Requires [Node.js](https://nodejs.org) 20+ and the Figma **desktop** app.
 
-1. Download the [latest release](https://github.com/Clovis500c/figma-bridge/releases/latest), unzip it, and run in that folder:
-
-   ```bash
-   bun install
-   ```
+1. Run:
 
    ```bash
-   bun run setup
+   npx @clovis500c/figma-bridge setup
    ```
 
-   `setup` finds the AI clients installed on your machine and adds Figma Bridge to each of them (originals are backed up).
+   It adds Figma Bridge to every AI client installed on your machine (originals are backed up), copies the Figma
+   plugin to `~/.figma-bridge/plugin` and prints the path of its manifest.
 
-2. In Figma: **Plugins → Development → Import plugin from manifest…** and select `plugin/manifest.json`.
+2. In Figma: **Plugins → Development → Import plugin from manifest…** and select that `manifest.json`.
 
 3. Restart your AI client, open a Figma file and run **Plugins → Development → Figma Bridge**. A green **Live** badge means it's connected.
+
+To update the plugin later, run `npx @clovis500c/figma-bridge plugin` and reopen it in Figma.
+
+<details>
+<summary>With Bun instead of npm</summary>
+
+Download the [latest release](https://github.com/Clovis500c/figma-bridge/releases/latest), unzip it, and run in that folder:
+
+```bash
+bun install
+bun run setup
+```
+
+Then import `plugin/manifest.json` in Figma as in step 2.
+
+</details>
 
 <details>
 <summary>Manual configuration</summary>
 
-`bun run setup --print` prints these snippets with your paths. To target one client: `bun run setup --client codex`.
+`npx @clovis500c/figma-bridge setup --print` prints these snippets. To target one client: `setup --client codex`.
 
 Most clients (`mcpServers` in their JSON config):
 
@@ -51,19 +66,22 @@ Most clients (`mcpServers` in their JSON config):
 {
   "mcpServers": {
     "FigmaBridge": {
-      "command": "C:\\Users\\you\\.bun\\bin\\bun.exe",
-      "args": ["run", "C:\\Users\\you\\figma-bridge\\src\\server.ts"]
+      "command": "npx",
+      "args": ["-y", "@clovis500c/figma-bridge"]
     }
   }
 }
 ```
 
+On Windows, use `"command": "cmd"` and `"args": ["/c", "npx", "-y", "@clovis500c/figma-bridge"]`.
+
 Codex (`~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.FigmaBridge]
-command = 'C:\Users\you\.bun\bin\bun.exe'
-args = ['run', 'C:\Users\you\figma-bridge\src\server.ts']
+command = 'npx'
+args = ['-y', '@clovis500c/figma-bridge']
+startup_timeout_sec = 60
 ```
 
 | Client | Config file |
@@ -133,8 +151,10 @@ Logs, screenshots, comparison heatmaps and exported code are written to `%TEMP%\
 ## Development
 
 ```bash
-bun run build     # compile the plugin (plugin/code.ts → plugin/code.js)
+bun install       # also builds the plugin and dist/server.js
+bun run build     # plugin/code.ts → plugin/code.js, src/cli.ts → dist/server.js (Node)
 bun run check     # type-check server and plugin, reject syntax Figma cannot run
+bun test          # unit tests (bridge, setup, schemas, tokens, code generation)
 bun run test      # end-to-end test against an open Figma file
 ```
 
