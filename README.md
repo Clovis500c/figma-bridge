@@ -26,6 +26,7 @@ and any other MCP client.
 - **Read existing designs** compactly, search every page, and reuse the file's design system.
 - **Check its own work** with screenshots, a design audit, and a pixel diff against a mockup.
 - **Hand off to your codebase**: export a frame into your project with its own components, tokens and stack (React, Next, Vue, Svelte, React Native; Tailwind, CSS modules, styled-components; shadcn, MUI, Chakra) ([details](docs/export-code.md)), plus Dev Mode annotations.
+- **Ship to Roblox**: turn a frame into native Roblox UI (ScreenGui, UIListLayout, UICorner, UIStroke, 9-slice panels) as an `.rbxmx` model and a Luau script for a Roblox Studio MCP, with optional asset upload ([details](docs/roblox.md)).
 - **Figma Design, FigJam and Slides**: stickies, shapes, connectors, tables, Mermaid flowcharts laid out as diagrams, and slide decks; several files at once ([details](docs/figjam-slides.md)).
 - **200 000+ icons** through Iconify, checkpoints to roll back, and a library of reusable scripts.
 - **Zero-friction connection**: the plugin connects and reconnects on its own. Each AI command is one Ctrl+Z step, and you can cancel it from the plugin.
@@ -37,7 +38,7 @@ and any other MCP client.
 | Setup | `npx … setup` configures every AI client found and installs the plugin | npx, a personal access token, plugin import | Plugin zip import, MCP config | OAuth (remote) or the desktop app |
 | Figma plan or seat | Any, free included | Any | Any, free included | Writing to the canvas: Full or Dev seat on a paid plan |
 | API token | Not needed (only for comments and versions) | Required | Not needed | OAuth sign-in |
-| Tools | 27 | 121 | 116 | 16 |
+| Tools | 28 | 121 | 116 | 16 |
 | Whole layout in one call | ✓ `build` spec (auto-layout, grid, variants, prototype) | Component sets from a variant matrix | — | — |
 | Pixel diff against a mockup | ✓ `compare`, with heatmap | — | Diff against a saved baseline | — |
 | Checkpoints to roll back | ✓ | — | — | — |
@@ -45,6 +46,7 @@ and any other MCP client.
 | Code that uses your components and tokens | ✓ React, Next, Vue, Svelte, React Native | — | ✓ | ✓ with Code Connect |
 | Token export | DTCG, CSS, Tailwind v3/v4, SCSS, TS, JSON | 10 formats | — | — |
 | FigJam and Slides | ✓ boards, Mermaid diagrams, decks | ✓ | FigJam, partly | — |
+| Figma → Roblox UI | ✓ native UI objects, `.rbxmx` + Luau, Open Cloud upload | — | — | — |
 
 Based on each project's documentation in October 2026; "—" means it isn't documented there. Corrections are welcome
 in an issue.
@@ -136,7 +138,7 @@ Keep the plugin open (the **—** button collapses it to a thin bar) and ask you
 > Audit our design system, fix what can be fixed safely, and tell me the score before and after.
 
 Clients that support MCP prompts also offer ready-made workflows: **new-screen**, **apply-design-system**,
-**reproduce-screenshot**, **import-website**, **figma-to-code** and **audit-and-fix**. Ready-made specs and tokens are
+**reproduce-screenshot**, **import-website**, **figma-to-code**, **audit-and-fix** and **figma-to-roblox**. Ready-made specs and tokens are
 in [examples/](examples).
 
 When your agent needs you to point at something, the plugin shows **Your agent is waiting** until you select it.
@@ -163,6 +165,7 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 | `prototype` | Link frames (click, hover, transitions) and set flow starting points |
 | `annotate` | Add, list or clear Dev Mode annotations |
 | `export_code` | Export a frame to code; with `projectPath`, code that uses the project's components and tokens |
+| `export_roblox` | Export a frame to Roblox UI: `.rbxmx`, a Luau builder script and PNG assets, optionally uploaded |
 | `insert_icon` · `search_icons` | Iconify icons as editable vectors |
 | `place_image` · `import_svg` | Images from disk or URL, SVG as vectors |
 | `checkpoint` | Save layers and restore them later |
@@ -190,7 +193,7 @@ Logs, screenshots, comparison heatmaps and exported code are written to `%TEMP%\
 bun install       # also builds the plugin and dist/server.js
 bun run build     # plugin/code.ts → plugin/code.js, src/cli.ts → dist/server.js (Node)
 bun run check     # type-check server and plugin, reject syntax Figma cannot run
-bun test          # unit tests (bridge, setup, schemas, tokens, code generation, web import)
+bun test          # unit tests (bridge, setup, schemas, tokens, code generation, web import, Roblox)
 bun run test      # end-to-end test against an open Figma file
 ```
 
@@ -199,5 +202,6 @@ it publishes to npm and creates the GitHub release. Directory listings (MCP Regi
 described in [docs/publishing.md](docs/publishing.md).
 
 Options: `FIGMA_BRIDGE_PORT` (default `3055`), `FIGMA_BRIDGE_CHANNEL`, `FIGMA_BRIDGE_OUT`, `FIGMA_BRIDGE_SNIPPETS`,
-`FIGMA_BRIDGE_BROWSER`, and `FIGMA_TOKEN` for the optional REST tools.
+`FIGMA_BRIDGE_BROWSER`, `FIGMA_TOKEN` for the optional REST tools, and `ROBLOX_API_KEY` + `ROBLOX_CREATOR_ID` for
+Roblox asset upload.
 The server listens on `127.0.0.1` only, and browsers can't send it commands.
