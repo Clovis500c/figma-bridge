@@ -657,7 +657,9 @@ class Mapper {
       // Text sized to its content can grow with the screen; text in a fixed box stays at its design size at most.
       const tight = n.text!.autoResize === "WIDTH_AND_HEIGHT" || n.text!.autoResize === "HEIGHT";
       const max = this.scaleOnly && tight ? size * 2 : size;
-      children.push(this.inst("UITextSizeConstraint", "UITextSizeConstraint", [["MaxTextSize", I(max)], ["MinTextSize", I(Math.max(1, Math.round(size * 0.5)))]]));
+      // Scale mode: no floor, or Roblox hides scaled text that can't fit at MinTextSize (small phones).
+      const min = this.scaleOnly ? 1 : Math.max(1, Math.round(size * 0.5));
+      children.push(this.inst("UITextSizeConstraint", "UITextSizeConstraint", [["MaxTextSize", I(max)], ["MinTextSize", I(min)]]));
       return this.inst(className, this.label(n, isButton ? "button" : "text"), [...common, ...props], children, n.id);
     }
 

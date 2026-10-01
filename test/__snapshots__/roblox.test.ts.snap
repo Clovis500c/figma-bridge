@@ -17,245 +17,305 @@ shopCardGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 shopCardGui.IgnoreGuiInset = true
 
 -- ShopCard
-local shopCard = Instance.new("Frame")
-shopCard.Name = "ShopCard"
-shopCard.AnchorPoint = Vector2.new(0.5, 0.5)
-shopCard.Position = UDim2.fromScale(0.5, 0.5)
-shopCard.Size = UDim2.fromScale(0.2083, 0.2778)
-shopCard.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-shopCard.BorderSizePixel = 0
-shopCard.ClipsDescendants = true
-local uicorner = Instance.new("UICorner")
-uicorner.Name = "UICorner"
-uicorner.CornerRadius = UDim.new(0.0533, 0)
-uicorner.Parent = shopCard
-local uistroke = Instance.new("UIStroke")
-uistroke.Name = "UIStroke"
-uistroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-uistroke.Color = Color3.fromRGB(229, 231, 235)
-uistroke.Thickness = 0.0033
-uistroke.Transparency = 0
-uistroke.LineJoinMode = Enum.LineJoinMode.Round
-uistroke.BorderStrokePosition = Enum.BorderStrokePosition.Inner
-uistroke.StrokeSizingMode = Enum.StrokeSizingMode.ScaledSize
-uistroke.Parent = shopCard
-local uishadow = Instance.new("UIShadow")
-uishadow.Name = "UIShadow"
-uishadow.Color = Color3.fromRGB(0, 0, 0)
-uishadow.Transparency = 0.8
-uishadow.BlurRadius = UDim.new(0.08, 0)
-uishadow.Offset = UDim2.fromScale(0, 0.0267)
-uishadow.Spread = UDim2.fromScale(0, 0)
-uishadow.Parent = shopCard
+do
+	local shopCard = Instance.new("Frame")
+	shopCard.Name = "ShopCard"
+	shopCard.AnchorPoint = Vector2.new(0.5, 0.5)
+	shopCard.Position = UDim2.fromScale(0.5, 0.5)
+	shopCard.Size = UDim2.fromScale(0.2083, 0.2778)
+	shopCard.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	shopCard.BorderSizePixel = 0
+	shopCard.ClipsDescendants = true
+	do
+		local uicorner = Instance.new("UICorner")
+		uicorner.Name = "UICorner"
+		uicorner.CornerRadius = UDim.new(0.0533, 0)
+		uicorner.Parent = shopCard
+	end
+	do
+		local uistroke = Instance.new("UIStroke")
+		uistroke.Name = "UIStroke"
+		uistroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		uistroke.Color = Color3.fromRGB(229, 231, 235)
+		uistroke.Thickness = 0.0033
+		uistroke.Transparency = 0
+		uistroke.LineJoinMode = Enum.LineJoinMode.Round
+		uistroke.BorderStrokePosition = Enum.BorderStrokePosition.Inner
+		uistroke.StrokeSizingMode = Enum.StrokeSizingMode.ScaledSize
+		uistroke.Parent = shopCard
+	end
+	do
+		local uishadow = Instance.new("UIShadow")
+		uishadow.Name = "UIShadow"
+		uishadow.Color = Color3.fromRGB(0, 0, 0)
+		uishadow.Transparency = 0.8
+		uishadow.BlurRadius = UDim.new(0.08, 0)
+		uishadow.Offset = UDim2.fromScale(0, 0.0267)
+		uishadow.Spread = UDim2.fromScale(0, 0)
+		uishadow.Parent = shopCard
+	end
 
--- Content
-local content = Instance.new("Frame")
-content.Name = "Content"
-content.Size = UDim2.fromScale(1, 1)
-content.ZIndex = 1
-content.BackgroundTransparency = 1
-content.BorderSizePixel = 0
-local uipadding = Instance.new("UIPadding")
-uipadding.Name = "UIPadding"
-uipadding.PaddingTop = UDim.new(0.08, 0)
-uipadding.PaddingRight = UDim.new(0.06, 0)
-uipadding.PaddingBottom = UDim.new(0.08, 0)
-uipadding.PaddingLeft = UDim.new(0.06, 0)
-uipadding.Parent = content
-local uilistLayout = Instance.new("UIListLayout")
-uilistLayout.Name = "UIListLayout"
-uilistLayout.FillDirection = Enum.FillDirection.Vertical
-uilistLayout.SortOrder = Enum.SortOrder.LayoutOrder
-uilistLayout.Padding = UDim.new(0.0476, 0)
-uilistLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-uilistLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-uilistLayout.Parent = content
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name = "TitleLabel"
-titleLabel.Size = UDim2.fromScale(0.4545, 0.119)
-titleLabel.LayoutOrder = 1
-titleLabel.BackgroundTransparency = 1
-titleLabel.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-titleLabel.TextSize = 24
-titleLabel.TextColor3 = Color3.fromRGB(17, 24, 39)
-titleLabel.Text = "Golden Sword"
-titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.TextYAlignment = Enum.TextYAlignment.Center
-titleLabel.LineHeight = 1.0417
-titleLabel.TextScaled = true
-local uitextSizeConstraint = Instance.new("UITextSizeConstraint")
-uitextSizeConstraint.Name = "UITextSizeConstraint"
-uitextSizeConstraint.MaxTextSize = 48
-uitextSizeConstraint.MinTextSize = 12
-uitextSizeConstraint.Parent = titleLabel
-titleLabel.Parent = content
-local priceLabel = Instance.new("TextLabel")
-priceLabel.Name = "PriceLabel"
-priceLabel.Size = UDim2.fromScale(1, 0.0873)
-priceLabel.LayoutOrder = 2
-priceLabel.BackgroundTransparency = 1
-priceLabel.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-priceLabel.TextSize = 16
-priceLabel.TextColor3 = Color3.fromRGB(245, 158, 11)
-priceLabel.RichText = true
-priceLabel.Text = "<font color=\\"#6B7280\\" weight=\\"400\\">Only </font>250 coins"
-priceLabel.TextXAlignment = Enum.TextXAlignment.Left
-priceLabel.TextYAlignment = Enum.TextYAlignment.Center
-priceLabel.TextWrapped = true
-priceLabel.TextScaled = true
-local uitextSizeConstraint2 = Instance.new("UITextSizeConstraint")
-uitextSizeConstraint2.Name = "UITextSizeConstraint"
-uitextSizeConstraint2.MaxTextSize = 32
-uitextSizeConstraint2.MinTextSize = 8
-uitextSizeConstraint2.Parent = priceLabel
-priceLabel.Parent = content
-local image = Instance.new("ImageLabel")
-image.Name = "Image"
-image.Size = UDim2.fromScale(1, 0.4762)
-image.LayoutOrder = 3
-image.BackgroundTransparency = 1
-image.Image = "rbxassetid://image:abc"
-image.ScaleType = Enum.ScaleType.Crop
-local uicorner2 = Instance.new("UICorner")
-uicorner2.Name = "UICorner"
-uicorner2.CornerRadius = UDim.new(0.0667, 0)
-uicorner2.Parent = image
-local uiaspectRatioConstraint = Instance.new("UIAspectRatioConstraint")
-uiaspectRatioConstraint.Name = "UIAspectRatioConstraint"
-uiaspectRatioConstraint.AspectRatio = 2.9333
-uiaspectRatioConstraint.Parent = image
-image.Parent = content
-local row = Instance.new("Frame")
-row.Name = "Row"
-row.Size = UDim2.fromScale(1, 0.1746)
-row.LayoutOrder = 4
-row.BackgroundTransparency = 1
-row.BorderSizePixel = 0
-local uilistLayout2 = Instance.new("UIListLayout")
-uilistLayout2.Name = "UIListLayout"
-uilistLayout2.FillDirection = Enum.FillDirection.Horizontal
-uilistLayout2.SortOrder = Enum.SortOrder.LayoutOrder
-uilistLayout2.Padding = UDim.new(0, 0)
-uilistLayout2.HorizontalAlignment = Enum.HorizontalAlignment.Left
-uilistLayout2.VerticalAlignment = Enum.VerticalAlignment.Center
-uilistLayout2.HorizontalFlex = Enum.UIFlexAlignment.SpaceBetween
-uilistLayout2.Parent = row
-local icon = Instance.new("ImageLabel")
-icon.Name = "Icon"
-icon.Size = UDim2.fromScale(0.0682, 0.5455)
-icon.LayoutOrder = 1
-icon.BackgroundTransparency = 1
-icon.Image = "rbxassetid://1:6:full"
-icon.ScaleType = Enum.ScaleType.Stretch
-local uiaspectRatioConstraint2 = Instance.new("UIAspectRatioConstraint")
-uiaspectRatioConstraint2.Name = "UIAspectRatioConstraint"
-uiaspectRatioConstraint2.AspectRatio = 1
-uiaspectRatioConstraint2.Parent = icon
-icon.Parent = row
-local buyButton = Instance.new("TextButton")
-buyButton.Name = "BuyButton"
-buyButton.Size = UDim2.fromScale(0.4545, 1)
-buyButton.LayoutOrder = 2
-buyButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-buyButton.Text = ""
-buyButton.AutoButtonColor = false
-buyButton.BorderSizePixel = 0
-local uigradient = Instance.new("UIGradient")
-uigradient.Name = "UIGradient"
-uigradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(34, 197, 94)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 163, 74)),
-	})
-uigradient.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0),
-		NumberSequenceKeypoint.new(1, 0),
-	})
-uigradient.Rotation = 90
-uigradient.Parent = buyButton
-local uicorner3 = Instance.new("UICorner")
-uicorner3.Name = "UICorner"
-uicorner3.CornerRadius = UDim.new(0.5, 0)
-uicorner3.Parent = buyButton
-local uipadding2 = Instance.new("UIPadding")
-uipadding2.Name = "UIPadding"
-uipadding2.PaddingTop = UDim.new(0.2273, 0)
-uipadding2.PaddingRight = UDim.new(0.125, 0)
-uipadding2.PaddingBottom = UDim.new(0.2273, 0)
-uipadding2.PaddingLeft = UDim.new(0.125, 0)
-uipadding2.Parent = buyButton
-local uilistLayout3 = Instance.new("UIListLayout")
-uilistLayout3.Name = "UIListLayout"
-uilistLayout3.FillDirection = Enum.FillDirection.Horizontal
-uilistLayout3.SortOrder = Enum.SortOrder.LayoutOrder
-uilistLayout3.Padding = UDim.new(0, 0)
-uilistLayout3.HorizontalAlignment = Enum.HorizontalAlignment.Center
-uilistLayout3.VerticalAlignment = Enum.VerticalAlignment.Center
-uilistLayout3.Parent = buyButton
-local label = Instance.new("TextLabel")
-label.Name = "Label"
-label.Size = UDim2.fromScale(0.3333, 1)
-label.LayoutOrder = 1
-label.BackgroundTransparency = 1
-label.FontFace = Font.new("rbxasset://fonts/families/Montserrat.json", Enum.FontWeight.SemiBold, Enum.FontStyle.Normal)
-label.TextSize = 18
-label.TextColor3 = Color3.fromRGB(255, 255, 255)
-label.Text = "Buy"
-label.TextXAlignment = Enum.TextXAlignment.Center
-label.TextYAlignment = Enum.TextYAlignment.Center
-label.TextScaled = true
-local uitextSizeConstraint3 = Instance.new("UITextSizeConstraint")
-uitextSizeConstraint3.Name = "UITextSizeConstraint"
-uitextSizeConstraint3.MaxTextSize = 36
-uitextSizeConstraint3.MinTextSize = 9
-uitextSizeConstraint3.Parent = label
-label.Parent = buyButton
-local uiflexItem = Instance.new("UIFlexItem")
-uiflexItem.Name = "UIFlexItem"
-uiflexItem.FlexMode = Enum.UIFlexMode.Fill
-uiflexItem.Parent = buyButton
-buyButton.Parent = row
-row.Parent = content
-content.Parent = shopCard
+	-- Content
+	do
+		local content = Instance.new("Frame")
+		content.Name = "Content"
+		content.Size = UDim2.fromScale(1, 1)
+		content.ZIndex = 1
+		content.BackgroundTransparency = 1
+		content.BorderSizePixel = 0
+		do
+			local uipadding = Instance.new("UIPadding")
+			uipadding.Name = "UIPadding"
+			uipadding.PaddingTop = UDim.new(0.08, 0)
+			uipadding.PaddingRight = UDim.new(0.06, 0)
+			uipadding.PaddingBottom = UDim.new(0.08, 0)
+			uipadding.PaddingLeft = UDim.new(0.06, 0)
+			uipadding.Parent = content
+		end
+		do
+			local uilistLayout = Instance.new("UIListLayout")
+			uilistLayout.Name = "UIListLayout"
+			uilistLayout.FillDirection = Enum.FillDirection.Vertical
+			uilistLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			uilistLayout.Padding = UDim.new(0.0476, 0)
+			uilistLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+			uilistLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+			uilistLayout.Parent = content
+		end
+		do
+			local titleLabel = Instance.new("TextLabel")
+			titleLabel.Name = "TitleLabel"
+			titleLabel.Size = UDim2.fromScale(0.4545, 0.119)
+			titleLabel.LayoutOrder = 1
+			titleLabel.BackgroundTransparency = 1
+			titleLabel.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
+			titleLabel.TextSize = 24
+			titleLabel.TextColor3 = Color3.fromRGB(17, 24, 39)
+			titleLabel.Text = "Golden Sword"
+			titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+			titleLabel.TextYAlignment = Enum.TextYAlignment.Center
+			titleLabel.LineHeight = 1.0417
+			titleLabel.TextScaled = true
+			do
+				local uitextSizeConstraint = Instance.new("UITextSizeConstraint")
+				uitextSizeConstraint.Name = "UITextSizeConstraint"
+				uitextSizeConstraint.MaxTextSize = 48
+				uitextSizeConstraint.MinTextSize = 1
+				uitextSizeConstraint.Parent = titleLabel
+			end
+			titleLabel.Parent = content
+		end
+		do
+			local priceLabel = Instance.new("TextLabel")
+			priceLabel.Name = "PriceLabel"
+			priceLabel.Size = UDim2.fromScale(1, 0.0873)
+			priceLabel.LayoutOrder = 2
+			priceLabel.BackgroundTransparency = 1
+			priceLabel.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
+			priceLabel.TextSize = 16
+			priceLabel.TextColor3 = Color3.fromRGB(245, 158, 11)
+			priceLabel.RichText = true
+			priceLabel.Text = "<font color=\\"#6B7280\\" weight=\\"400\\">Only </font>250 coins"
+			priceLabel.TextXAlignment = Enum.TextXAlignment.Left
+			priceLabel.TextYAlignment = Enum.TextYAlignment.Center
+			priceLabel.TextWrapped = true
+			priceLabel.TextScaled = true
+			do
+				local uitextSizeConstraint2 = Instance.new("UITextSizeConstraint")
+				uitextSizeConstraint2.Name = "UITextSizeConstraint"
+				uitextSizeConstraint2.MaxTextSize = 32
+				uitextSizeConstraint2.MinTextSize = 1
+				uitextSizeConstraint2.Parent = priceLabel
+			end
+			priceLabel.Parent = content
+		end
+		do
+			local image = Instance.new("ImageLabel")
+			image.Name = "Image"
+			image.Size = UDim2.fromScale(1, 0.4762)
+			image.LayoutOrder = 3
+			image.BackgroundTransparency = 1
+			image.Image = "rbxassetid://image:abc"
+			image.ScaleType = Enum.ScaleType.Crop
+			do
+				local uicorner2 = Instance.new("UICorner")
+				uicorner2.Name = "UICorner"
+				uicorner2.CornerRadius = UDim.new(0.0667, 0)
+				uicorner2.Parent = image
+			end
+			do
+				local uiaspectRatioConstraint = Instance.new("UIAspectRatioConstraint")
+				uiaspectRatioConstraint.Name = "UIAspectRatioConstraint"
+				uiaspectRatioConstraint.AspectRatio = 2.9333
+				uiaspectRatioConstraint.Parent = image
+			end
+			image.Parent = content
+		end
+		do
+			local row = Instance.new("Frame")
+			row.Name = "Row"
+			row.Size = UDim2.fromScale(1, 0.1746)
+			row.LayoutOrder = 4
+			row.BackgroundTransparency = 1
+			row.BorderSizePixel = 0
+			do
+				local uilistLayout2 = Instance.new("UIListLayout")
+				uilistLayout2.Name = "UIListLayout"
+				uilistLayout2.FillDirection = Enum.FillDirection.Horizontal
+				uilistLayout2.SortOrder = Enum.SortOrder.LayoutOrder
+				uilistLayout2.Padding = UDim.new(0, 0)
+				uilistLayout2.HorizontalAlignment = Enum.HorizontalAlignment.Left
+				uilistLayout2.VerticalAlignment = Enum.VerticalAlignment.Center
+				uilistLayout2.HorizontalFlex = Enum.UIFlexAlignment.SpaceBetween
+				uilistLayout2.Parent = row
+			end
+			do
+				local icon = Instance.new("ImageLabel")
+				icon.Name = "Icon"
+				icon.Size = UDim2.fromScale(0.0682, 0.5455)
+				icon.LayoutOrder = 1
+				icon.BackgroundTransparency = 1
+				icon.Image = "rbxassetid://1:6:full"
+				icon.ScaleType = Enum.ScaleType.Stretch
+				do
+					local uiaspectRatioConstraint2 = Instance.new("UIAspectRatioConstraint")
+					uiaspectRatioConstraint2.Name = "UIAspectRatioConstraint"
+					uiaspectRatioConstraint2.AspectRatio = 1
+					uiaspectRatioConstraint2.Parent = icon
+				end
+				icon.Parent = row
+			end
+			do
+				local buyButton = Instance.new("TextButton")
+				buyButton.Name = "BuyButton"
+				buyButton.Size = UDim2.fromScale(0.4545, 1)
+				buyButton.LayoutOrder = 2
+				buyButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+				buyButton.Text = ""
+				buyButton.AutoButtonColor = false
+				buyButton.BorderSizePixel = 0
+				do
+					local uigradient = Instance.new("UIGradient")
+					uigradient.Name = "UIGradient"
+					uigradient.Color = ColorSequence.new({
+							ColorSequenceKeypoint.new(0, Color3.fromRGB(34, 197, 94)),
+							ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 163, 74)),
+						})
+					uigradient.Transparency = NumberSequence.new({
+							NumberSequenceKeypoint.new(0, 0),
+							NumberSequenceKeypoint.new(1, 0),
+						})
+					uigradient.Rotation = 90
+					uigradient.Parent = buyButton
+				end
+				do
+					local uicorner3 = Instance.new("UICorner")
+					uicorner3.Name = "UICorner"
+					uicorner3.CornerRadius = UDim.new(0.5, 0)
+					uicorner3.Parent = buyButton
+				end
+				do
+					local uipadding2 = Instance.new("UIPadding")
+					uipadding2.Name = "UIPadding"
+					uipadding2.PaddingTop = UDim.new(0.2273, 0)
+					uipadding2.PaddingRight = UDim.new(0.125, 0)
+					uipadding2.PaddingBottom = UDim.new(0.2273, 0)
+					uipadding2.PaddingLeft = UDim.new(0.125, 0)
+					uipadding2.Parent = buyButton
+				end
+				do
+					local uilistLayout3 = Instance.new("UIListLayout")
+					uilistLayout3.Name = "UIListLayout"
+					uilistLayout3.FillDirection = Enum.FillDirection.Horizontal
+					uilistLayout3.SortOrder = Enum.SortOrder.LayoutOrder
+					uilistLayout3.Padding = UDim.new(0, 0)
+					uilistLayout3.HorizontalAlignment = Enum.HorizontalAlignment.Center
+					uilistLayout3.VerticalAlignment = Enum.VerticalAlignment.Center
+					uilistLayout3.Parent = buyButton
+				end
+				do
+					local label = Instance.new("TextLabel")
+					label.Name = "Label"
+					label.Size = UDim2.fromScale(0.3333, 1)
+					label.LayoutOrder = 1
+					label.BackgroundTransparency = 1
+					label.FontFace = Font.new("rbxasset://fonts/families/Montserrat.json", Enum.FontWeight.SemiBold, Enum.FontStyle.Normal)
+					label.TextSize = 18
+					label.TextColor3 = Color3.fromRGB(255, 255, 255)
+					label.Text = "Buy"
+					label.TextXAlignment = Enum.TextXAlignment.Center
+					label.TextYAlignment = Enum.TextYAlignment.Center
+					label.TextScaled = true
+					do
+						local uitextSizeConstraint3 = Instance.new("UITextSizeConstraint")
+						uitextSizeConstraint3.Name = "UITextSizeConstraint"
+						uitextSizeConstraint3.MaxTextSize = 36
+						uitextSizeConstraint3.MinTextSize = 1
+						uitextSizeConstraint3.Parent = label
+					end
+					label.Parent = buyButton
+				end
+				do
+					local uiflexItem = Instance.new("UIFlexItem")
+					uiflexItem.Name = "UIFlexItem"
+					uiflexItem.FlexMode = Enum.UIFlexMode.Fill
+					uiflexItem.Parent = buyButton
+				end
+				buyButton.Parent = row
+			end
+			row.Parent = content
+		end
+		content.Parent = shopCard
+	end
 
--- Badge
-local badge = Instance.new("ImageLabel")
-badge.Name = "Badge"
-badge.AnchorPoint = Vector2.new(1, 0)
-badge.Position = UDim2.fromScale(0.98, -0.0333)
-badge.Size = UDim2.fromScale(0.18, 0.0933)
-badge.ZIndex = 5
-badge.BackgroundTransparency = 1
-badge.Image = "rbxassetid://1:9:panel"
-badge.ScaleType = Enum.ScaleType.Stretch
-badge.BorderSizePixel = 0
-local label2 = Instance.new("TextLabel")
-label2.Name = "Label"
-label2.Position = UDim2.fromScale(0.2222, 0.1429)
-label2.Size = UDim2.fromScale(0.5556, 0.7143)
-label2.ZIndex = 1
-label2.BackgroundTransparency = 1
-label2.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-label2.TextSize = 12
-label2.TextColor3 = Color3.fromRGB(255, 255, 255)
-label2.Text = "NEW"
-label2.TextXAlignment = Enum.TextXAlignment.Center
-label2.TextYAlignment = Enum.TextYAlignment.Center
-label2.TextWrapped = true
-label2.TextTruncate = Enum.TextTruncate.AtEnd
-label2.TextScaled = true
-local uitextSizeConstraint4 = Instance.new("UITextSizeConstraint")
-uitextSizeConstraint4.Name = "UITextSizeConstraint"
-uitextSizeConstraint4.MaxTextSize = 12
-uitextSizeConstraint4.MinTextSize = 6
-uitextSizeConstraint4.Parent = label2
-label2.Parent = badge
-badge.Parent = shopCard
-local uiaspectRatioConstraint3 = Instance.new("UIAspectRatioConstraint")
-uiaspectRatioConstraint3.Name = "UIAspectRatioConstraint"
-uiaspectRatioConstraint3.AspectRatio = 1.3333
-uiaspectRatioConstraint3.DominantAxis = Enum.DominantAxis.Height
-uiaspectRatioConstraint3.Parent = shopCard
-shopCard.Parent = shopCardGui
+	-- Badge
+	do
+		local badge = Instance.new("ImageLabel")
+		badge.Name = "Badge"
+		badge.AnchorPoint = Vector2.new(1, 0)
+		badge.Position = UDim2.fromScale(0.98, -0.0333)
+		badge.Size = UDim2.fromScale(0.18, 0.0933)
+		badge.ZIndex = 5
+		badge.BackgroundTransparency = 1
+		badge.Image = "rbxassetid://1:9:panel"
+		badge.ScaleType = Enum.ScaleType.Stretch
+		badge.BorderSizePixel = 0
+		do
+			local label2 = Instance.new("TextLabel")
+			label2.Name = "Label"
+			label2.Position = UDim2.fromScale(0.2222, 0.1429)
+			label2.Size = UDim2.fromScale(0.5556, 0.7143)
+			label2.ZIndex = 1
+			label2.BackgroundTransparency = 1
+			label2.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
+			label2.TextSize = 12
+			label2.TextColor3 = Color3.fromRGB(255, 255, 255)
+			label2.Text = "NEW"
+			label2.TextXAlignment = Enum.TextXAlignment.Center
+			label2.TextYAlignment = Enum.TextYAlignment.Center
+			label2.TextWrapped = true
+			label2.TextTruncate = Enum.TextTruncate.AtEnd
+			label2.TextScaled = true
+			do
+				local uitextSizeConstraint4 = Instance.new("UITextSizeConstraint")
+				uitextSizeConstraint4.Name = "UITextSizeConstraint"
+				uitextSizeConstraint4.MaxTextSize = 12
+				uitextSizeConstraint4.MinTextSize = 1
+				uitextSizeConstraint4.Parent = label2
+			end
+			label2.Parent = badge
+		end
+		badge.Parent = shopCard
+	end
+	do
+		local uiaspectRatioConstraint3 = Instance.new("UIAspectRatioConstraint")
+		uiaspectRatioConstraint3.Name = "UIAspectRatioConstraint"
+		uiaspectRatioConstraint3.AspectRatio = 1.3333
+		uiaspectRatioConstraint3.DominantAxis = Enum.DominantAxis.Height
+		uiaspectRatioConstraint3.Parent = shopCard
+	end
+	shopCard.Parent = shopCardGui
+end
 
 shopCardGui.Parent = PARENT
 return shopCardGui

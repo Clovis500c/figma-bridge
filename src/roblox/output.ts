@@ -157,12 +157,20 @@ export function toLuau(root: RbxInstance, opts: LuauOptions = {}): string {
   const lines: string[] = [];
   const emit = (i: RbxInstance, parentVar: string | null, depth: number) => {
     const v = identifier(i.name, i.className, used);
+    // Each child lives in its own do-block: Luau allows 200 locals per function, a large UI has more instances.
+    const outer = "\t".repeat(Math.max(0, depth - 1));
+    const tab = "\t".repeat(depth);
+    const add = (line: string) => lines.push(tab + line.replace(/\n/g, `\n${tab}`));
     // Visual layers get a heading; modifiers (UICorner, UIStroke…) stay with their owner.
-    if (!/^UI/.test(i.className) && depth <= 2 && parentVar) lines.push("", `-- ${i.name.replace(/\n/g, " ")}`);
-    lines.push(`local ${v} = Instance.new(${luauString(i.className)})`);
-    for (const [k, val] of i.props) lines.push(`${v}.${k} = ${luauValue(val)}`);
+    if (!/^UI/.test(i.className) && depth <= 2 && parentVar) lines.push("", `${outer}-- ${i.name.replace(/\n/g, " ")}`);
+    if (parentVar) lines.push(`${outer}do`);
+    add(`local ${v} = Instance.new(${luauString(i.className)})`);
+    for (const [k, val] of i.props) add(`${v}.${k} = ${luauValue(val)}`);
     for (const c of i.children) emit(c, v, depth + 1);
-    if (parentVar) lines.push(`${v}.Parent = ${parentVar}`);
+    if (parentVar) {
+      add(`${v}.Parent = ${parentVar}`);
+      lines.push(`${outer}end`);
+    }
     return v;
   };
   const header = [

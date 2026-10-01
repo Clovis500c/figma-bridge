@@ -88,8 +88,8 @@ In `scale` mode no `UDim` or `UDim2` has an offset:
 | Text | `TextScaled = true` with a `UITextSizeConstraint` (below) |
 
 Text sized to its content (auto width or auto height in Figma) may grow up to twice its design size on larger screens;
-text in a fixed box stays at most at its design size, so a loose box doesn't blow it up. `MinTextSize` is half the
-design size.
+text in a fixed box stays at most at its design size, so a loose box doesn't blow it up. `MinTextSize` is 1: Roblox
+hides scaled text that can't fit at its minimum size, which would blank labels on small phones.
 
 ## Mapping
 
@@ -183,7 +183,7 @@ Free-positioned layers get `ZIndex` 1, 2, 3… in Figma's order (later layers on
 | Font family | `FontFace` family `rbxasset://fonts/families/<Name>.json` (table below; `fonts` overrides it) |
 | Font weight | `FontFace` weight: the closest of Thin 100, ExtraLight 200, Light 300, Regular 400, Medium 500, SemiBold 600, Bold 700, ExtraBold 800, Heavy 900 |
 | Italic / oblique style | `FontFace` style Italic |
-| Font size | `TextSize` (scaled for full screens, see Root) + `UITextSizeConstraint` (`MinTextSize` = half; `MaxTextSize` = size, or twice the size for auto-sized text in scale mode) + `TextScaled` in scale mode |
+| Font size | `TextSize` (scaled for full screens, see Root) + `UITextSizeConstraint` (`MinTextSize` = 1 in scale mode, half the size otherwise; `MaxTextSize` = size, or twice the size for auto-sized text in scale mode) + `TextScaled` in scale mode |
 | Fill color and opacity | `TextColor3`, `TextTransparency` |
 | Horizontal alignment | `TextXAlignment` Left, Center, Right (justified: Left) |
 | Vertical alignment | `TextYAlignment` Top, Center, Bottom |

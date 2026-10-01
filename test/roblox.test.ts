@@ -234,6 +234,8 @@ describe("mapping", () => {
     expect(prop(title, "TextWrapped")).toBeUndefined();
     // Text sized to its content may grow with the screen; text in a fixed box stays at most at its design size.
     expect(prop(find(title, "UITextSizeConstraint"), "MaxTextSize")).toEqual({ t: "int", v: 48 });
+    // No floor in scale mode: Roblox hides scaled text that cannot fit at MinTextSize.
+    expect(prop(find(title, "UITextSizeConstraint"), "MinTextSize")).toEqual({ t: "int", v: 1 });
     const price = find(panel, "PriceLabel")!;
     expect(prop(price, "RichText")).toEqual({ t: "bool", v: true });
     expect(prop(price, "Text")).toEqual({ t: "string", v: '<font color="#6B7280" weight="400">Only </font>250 coins' });
@@ -392,6 +394,23 @@ describe("rbxmx", () => {
 describe("Luau", () => {
   const { root } = mapCard();
   const luau = toLuau(root, { source: 'Shop card" in "Shop UI' });
+
+  test("a large UI stays under Luau's 200 locals per function", () => {
+    const leaf = (k: number): RbxInstance => ({ className: "Frame", name: `Cell${k}`, props: [], children: [{ className: "UICorner", name: "UICorner", props: [], children: [] }] });
+    const big: RbxInstance = { className: "ScreenGui", name: "BigGui", props: [], children: [{ className: "Frame", name: "List", props: [], children: Array.from({ length: 300 }, (_, k) => leaf(k)) }] };
+    const src = toLuau(big);
+    expect(() => luaparse.parse(src, { luaVersion: "5.3" })).not.toThrow();
+    // Locals alive at once: the ones declared in every do-block still open.
+    const live: number[] = [0];
+    let peak = 0;
+    for (const line of src.split("\n").map((l) => l.trim())) {
+      if (line === "do") live.push(0);
+      else if (line === "end") live.pop();
+      else if (line.startsWith("local ")) live[live.length - 1]!++;
+      peak = Math.max(peak, live.reduce((a, b) => a + b, 0));
+    }
+    expect(peak).toBeLessThan(10);
+  });
 
   test("parses, replaces a previous copy, returns the root", () => {
     expect(() => luaparse.parse(luau, { luaVersion: "5.3" })).not.toThrow();
