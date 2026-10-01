@@ -1,0 +1,89 @@
+{
+  "name": "Dashboard",
+  "layout": "row",
+  "w": 1440,
+  "h": 900,
+  "fill": "#F8FAFC",
+  "children": [
+    {
+      "name": "Sidebar",
+      "layout": "column",
+      "w": 240,
+      "h": "fill",
+      "padding": [24, 16],
+      "gap": 4,
+      "fill": "#0F172A",
+      "children": [
+        { "name": "Logo", "layout": "row", "gap": 10, "align": "center", "padding": [0, 12, 24, 12], "children": [{ "icon": "lucide:hexagon", "size": 24, "color": "#818CF8" }, { "text": "Acme", "size": 18, "weight": 700, "color": "#FFFFFF" }] },
+        { "name": "Nav item active", "layout": "row", "gap": 10, "align": "center", "w": "fill", "padding": [10, 12], "radius": 8, "fill": "#FFFFFF14", "children": [{ "icon": "lucide:layout-dashboard", "size": 18, "color": "#FFFFFF" }, { "text": "Overview", "color": "#FFFFFF", "weight": 500 }] },
+        { "name": "Nav item", "layout": "row", "gap": 10, "align": "center", "w": "fill", "padding": [10, 12], "radius": 8, "children": [{ "icon": "lucide:users", "size": 18, "color": "#94A3B8" }, { "text": "Customers", "color": "#CBD5E1" }] },
+        { "name": "Nav item", "layout": "row", "gap": 10, "align": "center", "w": "fill", "padding": [10, 12], "radius": 8, "children": [{ "icon": "lucide:credit-card", "size": 18, "color": "#94A3B8" }, { "text": "Billing", "color": "#CBD5E1" }] },
+        { "name": "Nav item", "layout": "row", "gap": 10, "align": "center", "w": "fill", "padding": [10, 12], "radius": 8, "children": [{ "icon": "lucide:settings", "size": 18, "color": "#94A3B8" }, { "text": "Settings", "color": "#CBD5E1" }] }
+      ]
+    },
+    {
+      "name": "Main",
+      "layout": "column",
+      "w": "fill",
+      "h": "fill",
+      "padding": 32,
+      "gap": 24,
+      "children": [
+        {
+          "name": "Top bar",
+          "layout": "row",
+          "align": "center",
+          "justify": "between",
+          "w": "fill",
+          "children": [
+            { "name": "Title", "text": "Overview", "size": 28, "weight": 700 },
+            { "name": "Button", "layout": "row", "gap": 8, "align": "center", "padding": [10, 16], "radius": 8, "fill": "#4F46E5", "children": [{ "icon": "lucide:plus", "size": 16, "color": "#FFFFFF" }, { "text": "New report", "weight": 600, "color": "#FFFFFF" }] }
+          ]
+        },
+        {
+          "name": "Stats",
+          "layout": "grid",
+          "columns": ["1fr", "1fr", "1fr", "1fr"],
+          "gap": 16,
+          "w": "fill",
+          "children": [
+            { "name": "Stat", "layout": "column", "gap": 6, "w": "fill", "padding": 20, "radius": 12, "fill": "#FFFFFF", "shadow": { "y": 1, "blur": 3, "color": "#0000001A" }, "children": [{ "text": "Revenue", "size": 13, "color": "#64748B" }, { "text": "$48,200", "size": 26, "weight": 700 }, { "text": "+12.5% vs last month", "size": 13, "color": "#16A34A" }] },
+            { "name": "Stat", "layout": "column", "gap": 6, "w": "fill", "padding": 20, "radius": 12, "fill": "#FFFFFF", "shadow": { "y": 1, "blur": 3, "color": "#0000001A" }, "children": [{ "text": "Customers", "size": 13, "color": "#64748B" }, { "text": "1,284", "size": 26, "weight": 700 }, { "text": "+4.1%", "size": 13, "color": "#16A34A" }] },
+            { "name": "Stat", "layout": "column", "gap": 6, "w": "fill", "padding": 20, "radius": 12, "fill": "#FFFFFF", "shadow": { "y": 1, "blur": 3, "color": "#0000001A" }, "children": [{ "text": "Churn", "size": 13, "color": "#64748B" }, { "text": "2.1%", "size": 26, "weight": 700 }, { "text": "-0.3%", "size": 13, "color": "#16A34A" }] },
+            { "name": "Stat", "layout": "column", "gap": 6, "w": "fill", "padding": 20, "radius": 12, "fill": "#FFFFFF", "shadow": { "y": 1, "blur": 3, "color": "#0000001A" }, "children": [{ "text": "NPS", "size": 13, "color": "#64748B" }, { "text": "61", "size": 26, "weight": 700 }, { "text": "+2", "size": 13, "color": "#16A34A" }] }
+          ]
+        },
+        {
+          "name": "Chart card",
+          "layout": "column",
+          "gap": 16,
+          "w": "fill",
+          "h": "fill",
+          "padding": 24,
+          "radius": 12,
+          "fill": "#FFFFFF",
+          "shadow": { "y": 1, "blur": 3, "color": "#0000001A" },
+          "children": [
+            { "name": "Title", "text": "Revenue over time", "size": 16, "weight": 600 },
+            {
+              "name": "Bars",
+              "layout": "row",
+              "align": "end",
+              "gap": 12,
+              "w": "fill",
+              "h": "fill",
+              "children": [
+                { "name": "Bar", "w": "fill", "h": 120, "radius": [6, 6, 0, 0], "fill": "#C7D2FE" },
+                { "name": "Bar", "w": "fill", "h": 180, "radius": [6, 6, 0, 0], "fill": "#A5B4FC" },
+                { "name": "Bar", "w": "fill", "h": 150, "radius": [6, 6, 0, 0], "fill": "#A5B4FC" },
+                { "name": "Bar", "w": "fill", "h": 220, "radius": [6, 6, 0, 0], "fill": "#818CF8" },
+                { "name": "Bar", "w": "fill", "h": 260, "radius": [6, 6, 0, 0], "fill": "#6366F1" },
+                { "name": "Bar", "w": "fill", "h": 300, "radius": [6, 6, 0, 0], "fill": "#4F46E5" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
