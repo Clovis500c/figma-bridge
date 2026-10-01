@@ -8,6 +8,7 @@ import { describe } from "./lib/describe";
 import { exportTree } from "./lib/export";
 import { getDesignSystem } from "./lib/design-system";
 import { designTokens } from "./lib/tokens";
+import { exportTokens } from "./lib/tokens-export";
 import { find } from "./lib/find";
 import { prototype } from "./lib/prototype";
 import { cancelWait, waitForSelection } from "./lib/selection";
@@ -145,6 +146,7 @@ const HANDLERS: { [method: string]: Handler } = {
   find: find,
   get_design_system: getDesignSystem,
   design_tokens: designTokens,
+  export_tokens: exportTokens,
   audit: audit,
   get_css: getCss,
   checkpoint: checkpoint,
@@ -167,6 +169,7 @@ const READ_ONLY: { [method: string]: boolean } = {
   describe: true,
   find: true,
   get_design_system: true,
+  export_tokens: true,
   audit: true,
   get_css: true,
   screenshot: true,

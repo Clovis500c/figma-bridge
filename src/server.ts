@@ -1,9 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { appendFileSync, mkdirSync, statSync, truncateSync, writeFileSync } from "node:fs";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Bridge, BridgeError } from "./bridge";
@@ -11,6 +11,7 @@ import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { generateCode, type IrNode } from "./codegen";
 import { normalizeTokens } from "./tokens";
+import { type ExportData, exportTokenFiles, type Format, FORMATS } from "./tokens-export";
 import { importWeb } from "./web/import";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 import { version as VERSION } from "../package.json";
@@ -310,28 +311,62 @@ server.registerTool(
 server.registerTool(
   "design_tokens",
   {
-    title: "Write the design system",
-    description: `Create or update variable collections (with modes such as Light/Dark) and paint, text and effect styles. Idempotent: matched by name, so re-run it to change values. Returns counts of created and updated items.
+    title: "Write or export the design system",
+    description: `WRITE (give tokens): create or update variable collections (with modes such as Light/Dark) and paint, text and effect styles. Idempotent: matched by name, so re-run it to change values. Returns counts of created and updated items.
 Accepted formats (auto-detected, or set format):
 SIMPLE: {"collections":[{"name":"Theme","modes":["Light","Dark"],"variables":{"color/primary":{"Light":"#0D99FF","Dark":"#2AA5FF"},"space/md":16,"radius/card":12,"color/link":"{color/primary}","flag/beta":true,"font/body":"Inter"}}],
  "styles":{"colors":{"Brand/Primary":"var:color/primary","Brand/Hero":{"gradient":["#0D99FF","#7C3AED"]}},"text":{"Heading/H1":{"font":"Inter","weight":700,"size":32,"lineHeight":1.2,"letterSpacing":"-1%"}},"effects":{"Shadow/Card":{"y":4,"blur":16,"color":"#0000001F"}}}}
  A scalar applies to every mode; an object keys values by mode. "{name}" or "var:name" is an alias. Detailed form: {"type":"color|number|string|boolean","values":{...},"description","scopes":["FRAME_FILL",...]}.
 W3C: design tokens with $value/$type (color, dimension, number, fontFamily, fontWeight, duration, typography → text style, shadow → effect style, gradient → paint style). Values go to \`mode\`; $extensions.modes {"Dark": value} adds other modes.
 TAILWIND: {theme:{colors, spacing, borderRadius, fontSize, extend}} → color/*, spacing/*, radius/*, font-size/* variables and text/* styles.
-Use them in build with "var:color/primary", "style:Heading/H1", and modes:{"Theme":"Dark"} on a frame.`,
+Use them in build with "var:color/primary", "style:Heading/H1", and modes:{"Theme":"Dark"} on a frame.
+EXPORT (action:"export"): every local variable (all modes, aliases kept as references) and style → formats: dtcg (W3C DTCG JSON, re-importable with its collections and modes), css (custom properties, one block per mode: [data-theme="dark"]), tailwind (v3 preset + tokens.css), tailwind4 (@theme), scss, ts (typed const), json (the SIMPLE format above). Writes the files into path (a folder) or returns their text. Re-exporting an unchanged file gives identical files.
+Example: {"action":"export","formats":["css","tailwind4","ts"],"path":"C:/app/src/styles"}`,
     inputSchema: {
-      tokens: z.object({}).passthrough().describe("Tokens in one of the formats above"),
-      format: z.enum(["auto", "simple", "w3c", "tailwind"]).optional().describe("Default auto"),
+      tokens: z.object({}).passthrough().optional().describe("Tokens to write, in one of the formats above"),
+      action: z.enum(["write", "export"]).optional().describe("Default: write when tokens are given, else export"),
+      format: z.enum(["auto", "simple", "w3c", "tailwind"]).optional().describe("Input format for write, default auto"),
       collection: z.string().optional().describe('Collection for W3C/Tailwind tokens (default "Tokens" / "Tailwind")'),
       mode: z.string().optional().describe('Mode that receives W3C/Tailwind values (default "Default")'),
+      formats: z.array(z.enum(FORMATS)).optional().describe('Export formats, default ["dtcg","css"]'),
+      path: z.string().optional().describe("Export folder (created if missing), or a file path when exporting one format; omit to get the text back"),
+      collections: z.array(z.string()).optional().describe("Export only these collections"),
+      modeSelector: z.string().optional().describe('CSS selector for non-default modes, default [data-theme="{mode}"] ({collection} also works)'),
     },
   },
   (args) =>
-    track("design_tokens", args.format ?? "auto", async () => {
+    track("design_tokens", args.action ?? (args.tokens ? args.format ?? "auto" : "export"), async () => {
+      if ((args.action ?? (args.tokens ? "write" : "export")) === "export") {
+        const data = await bridge.request<ExportData>("export_tokens", { collections: args.collections }, 60_000);
+        const formats = args.formats?.length ? args.formats : (["dtcg", "css"] as Format[]);
+        const { files, warnings } = exportTokenFiles(data, formats, { modeSelector: args.modeSelector });
+        const counts = { collections: data.collections.length, variables: data.collections.reduce((n, c) => n + c.variables.length, 0), paintStyles: data.styles.colors.length, textStyles: data.styles.text.length, effectStyles: data.styles.effects.length };
+        if (!args.path) {
+          const text = files.map((f) => `=== ${f.path} ===\n${f.content}`).join("\n");
+          return { content: [{ type: "text", text: json({ counts, files: files.map((f) => f.path), ...(warnings.length ? { warnings } : {}) }) }, { type: "text", text: text.length > MAX_OUTPUT_CHARS ? text.slice(0, MAX_OUTPUT_CHARS) + "\n… truncated: give path to write the files" : text }] };
+        }
+        const single = files.length === 1 && /\.[a-z0-9]+$/i.test(args.path);
+        const written = [];
+        for (const f of files) {
+          const target = single ? args.path : join(args.path, f.path);
+          written.push({ format: f.format, path: target, status: await writeIfChanged(target, f.content) });
+        }
+        return ok({ counts, files: written, ...(warnings.length ? { warnings } : {}) });
+      }
+      if (!args.tokens) throw new BridgeError("Give tokens to write, or action:\"export\".", "BAD_ARGS");
       const set = normalizeTokens(args.tokens as Record<string, unknown>, args);
       return ok(await bridge.request("design_tokens", { collections: set.collections, styles: set.styles, warnings: set.warnings }, 120_000));
     }),
 );
+
+/** Writes a file only when its content changed; returns what happened. */
+async function writeIfChanged(path: string, content: string): Promise<"created" | "updated" | "unchanged"> {
+  const before = await readFile(path, "utf8").catch(() => null);
+  if (before === content) return "unchanged";
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content);
+  return before === null ? "created" : "updated";
+}
 
 server.registerTool(
   "audit",

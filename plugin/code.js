@@ -2670,6 +2670,183 @@
     return v;
   }
 
+  // plugin/lib/tokens-export.ts
+  var TYPES2 = { COLOR: "color", FLOAT: "number", STRING: "string", BOOLEAN: "boolean" };
+  async function exportTokens(p) {
+    const only = Array.isArray(p.collections) && p.collections.length ? p.collections : null;
+    const collections = await figma.variables.getLocalVariableCollectionsAsync();
+    const vars = await figma.variables.getLocalVariablesAsync();
+    const byId = {};
+    for (let i = 0;i < vars.length; i++)
+      byId[vars[i].id] = vars[i];
+    const collName = {};
+    for (let i = 0;i < collections.length; i++)
+      collName[collections[i].id] = collections[i].name;
+    const warnings = [];
+    const aliasOf = async function(id) {
+      let v = byId[id] || null;
+      if (!v) {
+        try {
+          v = await figma.variables.getVariableByIdAsync(id);
+        } catch (e) {}
+        if (v)
+          byId[id] = v;
+      }
+      if (!v)
+        return { alias: { collection: "", name: id, missing: true } };
+      let collection = collName[v.variableCollectionId];
+      if (collection === undefined) {
+        try {
+          const c = await figma.variables.getVariableCollectionByIdAsync(v.variableCollectionId);
+          collection = c ? c.name : "";
+        } catch (e) {
+          collection = "";
+        }
+        collName[v.variableCollectionId] = collection;
+      }
+      const out2 = { alias: { collection, name: v.name } };
+      if (v.remote)
+        out2.alias.remote = true;
+      return out2;
+    };
+    const value = async function(raw, type) {
+      if (raw && typeof raw === "object" && raw.type === "VARIABLE_ALIAS")
+        return aliasOf(raw.id);
+      if (type === "COLOR" && raw && typeof raw === "object")
+        return toHex(raw);
+      if (type === "FLOAT")
+        return round(Number(raw));
+      return raw;
+    };
+    const outCollections = [];
+    for (let c = 0;c < collections.length; c++) {
+      const col = collections[c];
+      if (only && only.indexOf(col.name) === -1)
+        continue;
+      const modes = col.modes.slice().sort(function(a, b) {
+        return (a.modeId === col.defaultModeId ? 0 : 1) - (b.modeId === col.defaultModeId ? 0 : 1);
+      });
+      const list3 = [];
+      for (let i = 0;i < vars.length; i++) {
+        const v = vars[i];
+        if (v.variableCollectionId !== col.id)
+          continue;
+        const values = {};
+        for (let m = 0;m < modes.length; m++)
+          values[modes[m].name] = await value(v.valuesByMode[modes[m].modeId], v.resolvedType);
+        const item = { name: v.name, type: TYPES2[v.resolvedType] || "string", values };
+        if (v.description)
+          item.description = v.description;
+        if (v.scopes && v.scopes.length && !(v.scopes.length === 1 && v.scopes[0] === "ALL_SCOPES"))
+          item.scopes = v.scopes.slice();
+        if (v.hiddenFromPublishing)
+          item.hidden = true;
+        list3.push(item);
+      }
+      outCollections.push({
+        name: col.name,
+        modes: modes.map(function(m) {
+          return m.name;
+        }),
+        variables: list3
+      });
+    }
+    const styles = await localStyles();
+    const paint = [];
+    for (let i = 0;i < styles.paint.length; i++) {
+      const s = styles.paint[i];
+      const paints = [];
+      for (let k = 0;k < s.paints.length; k++) {
+        const pt = s.paints[k];
+        if (pt.visible === false)
+          continue;
+        if (pt.type === "SOLID") {
+          const bound = pt.boundVariables && pt.boundVariables.color;
+          paints.push(bound ? await aliasOf(bound.id) : toHex(pt.color, pt.opacity));
+        } else if (pt.type.indexOf("GRADIENT") === 0) {
+          const t = pt.gradientTransform;
+          const g = {
+            gradient: pt.gradientStops.map(function(st) {
+              return { color: toHex(st.color), at: round(st.position) };
+            })
+          };
+          if (pt.type === "GRADIENT_LINEAR")
+            g.angle = round(Math.atan2(t[0][1], t[0][0]) * 180 / Math.PI);
+          else
+            g.type = pt.type.replace("GRADIENT_", "").toLowerCase();
+          paints.push(g);
+        } else {
+          warnings.push('Paint style "' + s.name + '": ' + pt.type.toLowerCase() + " paints are not exported");
+        }
+      }
+      if (!paints.length)
+        continue;
+      const item = { name: s.name, value: paints.length === 1 ? paints[0] : paints };
+      if (s.description)
+        item.description = s.description;
+      paint.push(item);
+    }
+    const text = [];
+    for (let i = 0;i < styles.text.length; i++) {
+      const s = styles.text[i];
+      const item = { name: s.name, font: s.fontName.family, style: s.fontName.style, size: round(s.fontSize) };
+      const lh = s.lineHeight;
+      if (lh.unit === "PIXELS")
+        item.lineHeight = round(lh.value);
+      else if (lh.unit === "PERCENT")
+        item.lineHeight = round(lh.value) + "%";
+      if (s.letterSpacing.value)
+        item.letterSpacing = s.letterSpacing.unit === "PERCENT" ? round(s.letterSpacing.value) + "%" : round(s.letterSpacing.value);
+      if (s.textCase && s.textCase !== "ORIGINAL")
+        item.case = s.textCase === "UPPER" ? "upper" : s.textCase === "LOWER" ? "lower" : "title";
+      if (s.textDecoration && s.textDecoration !== "NONE")
+        item.decoration = s.textDecoration === "UNDERLINE" ? "underline" : "strike";
+      if (s.paragraphSpacing)
+        item.paragraphSpacing = round(s.paragraphSpacing);
+      const bound = s.boundVariables || {};
+      const keys = Object.keys(bound);
+      if (keys.length) {
+        item.variables = {};
+        for (let k = 0;k < keys.length; k++)
+          if (bound[keys[k]] && bound[keys[k]].id)
+            item.variables[keys[k]] = (await aliasOf(bound[keys[k]].id)).alias;
+      }
+      if (s.description)
+        item.description = s.description;
+      text.push(item);
+    }
+    const effect = [];
+    for (let i = 0;i < styles.effect.length; i++) {
+      const s = styles.effect[i];
+      const list3 = [];
+      for (let k = 0;k < s.effects.length; k++) {
+        const e = s.effects[k];
+        if (e.visible === false)
+          continue;
+        if (e.type === "DROP_SHADOW" || e.type === "INNER_SHADOW") {
+          const sh = { x: round(e.offset.x), y: round(e.offset.y), blur: round(e.radius), spread: round(e.spread || 0), color: toHex(e.color) };
+          if (e.type === "INNER_SHADOW")
+            sh.inner = true;
+          if (e.boundVariables && e.boundVariables.color)
+            sh.colorVariable = (await aliasOf(e.boundVariables.color.id)).alias;
+          list3.push(sh);
+        } else {
+          list3.push({ type: e.type === "LAYER_BLUR" ? "layer" : "background", blur: round(e.radius) });
+        }
+      }
+      if (!list3.length)
+        continue;
+      const item = { name: s.name, value: list3 };
+      if (s.description)
+        item.description = s.description;
+      effect.push(item);
+    }
+    const out = { fileName: figma.root.name, collections: outCollections, styles: { colors: paint, text, effects: effect } };
+    if (warnings.length)
+      out.warnings = warnings.slice(0, 40);
+    return out;
+  }
+
   // plugin/lib/find.ts
   var MAX_LIMIT = 500;
   function matcher(q) {
@@ -2962,6 +3139,7 @@
     find: find2,
     get_design_system: getDesignSystem,
     design_tokens: designTokens,
+    export_tokens: exportTokens,
     audit,
     get_css: getCss,
     checkpoint,
@@ -2982,6 +3160,7 @@
     describe: true,
     find: true,
     get_design_system: true,
+    export_tokens: true,
     audit: true,
     get_css: true,
     screenshot: true,
