@@ -36,7 +36,7 @@ async function listTools(command: string, args: string[]) {
 }
 
 function checkTools(tools: Awaited<ReturnType<typeof listTools>>) {
-  expect(tools.length).toBe(24);
+  expect(tools.length).toBe(25);
   const problems: string[] = [];
   for (const t of tools) {
     forbiddenKeys(t.inputSchema, t.name, problems);

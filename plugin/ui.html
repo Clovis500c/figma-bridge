@@ -779,7 +779,7 @@ function summarize(msg) {
       const walk = (n) => { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(walk); count++; if (Array.isArray(n.children)) n.children.forEach(walk); if (Array.isArray(n.variants)) n.variants.forEach(walk); };
       walk(p.spec);
       const root = Array.isArray(p.spec) ? p.spec[0] : p.spec;
-      return ((root && root.name) || "Layout") + " · " + count + " layer" + (count === 1 ? "" : "s");
+      return (p.label ? p.label + " · " : "") + ((root && root.name) || "Layout") + " · " + count + " layer" + (count === 1 ? "" : "s");
     }
     case "find": {
       const parts = [];

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Acme</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Inter", Arial, sans-serif; color: #111827; background: #ffffff; }
+  .site-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 32px; border-bottom: 1px solid #E5E7EB; }
+  .logo { font-weight: 700; font-size: 20px; }
+  .nav { display: flex; gap: 24px; }
+  .nav a { color: #374151; text-decoration: none; font-size: 14px; }
+  .hero { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 64px 32px; background: linear-gradient(180deg, #EEF2FF 0%, #FFFFFF 100%); text-align: center; }
+  .hero h1 { margin: 0; font-size: 48px; line-height: 56px; letter-spacing: -1px; }
+  .hero p { margin: 0; max-width: 560px; color: #6B7280; font-size: 18px; line-height: 28px; }
+  .actions { display: flex; gap: 12px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 15px; }
+  .btn-primary { background: #4F46E5; color: #fff; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }
+  .btn-secondary { border: 1px solid #D1D5DB; color: #111827; }
+  .pricing { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding: 48px 32px; }
+  .card { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 24px; border: 1px solid #E5E7EB; border-radius: 16px; }
+  .card.featured::before { content: "Popular"; position: absolute; top: -12px; right: 24px; background: #4F46E5; color: #fff; font-size: 12px; padding: 4px 10px; border-radius: 999px; }
+  .price { font-size: 36px; font-weight: 700; }
+  .price small { font-size: 14px; font-weight: 400; color: #6B7280; }
+  ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+  .newsletter { padding: 0 32px 48px; }
+  .newsletter p { margin: 0 0 12px; font-size: 14px; }
+  .newsletter p + p { margin-top: 24px; }
+  input { width: 320px; padding: 10px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font: inherit; font-size: 14px; }
+  .site-footer { padding: 24px 32px; background: #111827; color: #9CA3AF; font-size: 13px; }
+  .site-footer a { color: #fff; text-decoration: underline; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+</style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="logo">Acme</div>
+    <nav class="nav" aria-label="Main"><a href="/features">Features</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a></nav>
+  </header>
+  <section class="hero">
+    <h1>Ship faster with Acme</h1>
+    <p>The all-in-one platform for teams who want to build, test and deploy without the busywork.</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="#start"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>Get started</a>
+      <a class="btn btn-secondary" href="#demo">Book a demo</a>
+    </div>
+  </section>
+  <section class="pricing" id="pricing">
+    <div class="card"><h3 style="margin:0">Starter</h3><div class="price">$0 <small>/ month</small></div><ul><li>1 project</li><li>Community support</li></ul></div>
+    <div class="card featured"><h3 style="margin:0">Pro</h3><div class="price">$29 <small>/ month</small></div><ul><li>Unlimited projects</li><li>Priority <strong>email</strong> support</li></ul></div>
+    <div class="card"><h3 style="margin:0">Team</h3><div class="price">$99 <small>/ month</small></div><ul><li>Everything in Pro</li><li>SSO</li></ul></div>
+  </section>
+  <section class="newsletter">
+    <p>Get product updates</p>
+    <input type="email" placeholder="you@example.com">
+    <p>We send one email per month.</p>
+  </section>
+  <footer class="site-footer">© 2026 Acme Inc. Read our <a href="/privacy">privacy policy</a>. <img class="avatar" alt="Team photo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DwHwyBNIQBJyDiAACVpw/xlA6x0AAAAABJRU5ErkJggg=="></footer>
+</body>
+</html>

@@ -40,7 +40,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 24, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 25, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -324,6 +324,22 @@ const buildCleanup = await call("run_script", {
   code: `for (const id of ${JSON.stringify([set.data.rootId, grid.data.rootId, rich.data.rootId, screenA.data.rootId, screenB.data.rootId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,
 });
 check("build 1.4 cleanup", !buildCleanup.isError, buildCleanup.data.result);
+
+// ─── 1.6 tools ──────────────────────────────────────────────────────────────
+const web = await call("import_web", {
+  html: '<div style="display:flex;gap:12px;padding:24px;font-family:Inter"><div style="padding:16px;border-radius:12px;background:#0D99FF;color:#fff">selftest web</div><a href="#">Link</a></div>',
+  viewports: [480],
+  name: "selftest web",
+});
+if (web.isError && /NO_BROWSER|MISSING_DEPENDENCY/.test(web.data.code ?? "")) {
+  check("import_web", true, `skipped: ${web.data.error}`);
+} else {
+  const webInfo = await call("run_script", {
+    code: `const n = await figma.getNodeByIdAsync(${JSON.stringify(web.data.frames?.[0]?.rootId ?? "")}); return n && { w: n.width, text: n.findOne((t) => t.type === "TEXT" && t.characters === "selftest web") !== null }`,
+  });
+  check("import_web", !web.isError && webInfo.data.result?.w === 480 && webInfo.data.result.text && existsSync(web.data.frames[0].reference ?? ""), webInfo.data.result ?? web.data);
+  await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(web.data.frames?.[0]?.rootId ?? "")}))?.remove()` });
+}
 
 const cleanup = await call("run_script", {
   code: `for (const id of ${JSON.stringify([frameId, img.data.nodeId, svg.data.nodeId, newCardId ?? cardId, icon.data.nodeId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,

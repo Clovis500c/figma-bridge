@@ -31,7 +31,7 @@
     "setup": "bun run scripts/setup.ts",
     "build": "bun run build:plugin && bun run build:server",
     "build:plugin": "bun build plugin/code.ts --outfile plugin/code.js --target browser --format iife",
-    "build:server": "bun build src/cli.ts --target node --outfile dist/server.js",
+    "build:server": "bun build src/cli.ts --target node --outfile dist/server.js --external playwright-core",
     "prepare": "bun run build",
     "check": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && tsc -p plugin/tsconfig.json && bun run scripts/check-plugin.ts",
     "test": "bun run build && bun run test/selftest.ts",
@@ -56,5 +56,8 @@
   "bugs": "https://github.com/Clovis500c/figma-bridge/issues",
   "publishConfig": {
     "access": "public"
+  },
+  "optionalDependencies": {
+    "playwright-core": "^1.56.0"
   }
 }
