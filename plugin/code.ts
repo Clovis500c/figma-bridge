@@ -53,7 +53,7 @@ function post(msg: any) {
 }
 
 function sessionInfo() {
-  return { id: sessionId, fileName: figma.root.name, page: figma.currentPage.name };
+  return { id: sessionId, fileName: figma.root.name, page: figma.currentPage.name, editorType: figma.editorType };
 }
 
 function clampSize(w: number, h: number) {
@@ -164,6 +164,15 @@ const HANDLERS: { [method: string]: Handler } = {
   },
 };
 
+// Commands that only some editors support (others get a clear WRONG_EDITOR error).
+const EDITORS: { [method: string]: string[] } = {
+  prototype: ["figma"],
+  annotate: ["figma", "dev"],
+  design_tokens: ["figma", "slides"],
+  export_tokens: ["figma", "slides", "dev"],
+};
+const EDITOR_NAMES: { [editor: string]: string } = { figma: "Figma Design", figjam: "FigJam", slides: "Figma Slides", dev: "Dev Mode" };
+
 // Read-only commands don't need their own undo step.
 const READ_ONLY: { [method: string]: boolean } = {
   describe: true,
@@ -190,6 +199,13 @@ async function handleRequest(msg: any) {
   try {
     const handler = HANDLERS[msg.method];
     if (!handler) throw codeError("Unknown method: " + msg.method + " (reopen the plugin after updating it)", "UNKNOWN_METHOD");
+    const editors = EDITORS[msg.method];
+    if (editors && editors.indexOf(figma.editorType) === -1) {
+      throw codeError(msg.method + " is not available in " + (EDITOR_NAMES[figma.editorType] || figma.editorType) + " (works in " + editors.map(function (e) {
+        return EDITOR_NAMES[e];
+      }).join(", ") + ").", "WRONG_EDITOR");
+    }
+    if (mutates && figma.editorType === "dev") throw codeError("Dev Mode is read-only: switch the file to Design mode to let the agent edit it.", "WRONG_EDITOR");
     const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000), String(msg.id));
     reply = { t: "res", id: msg.id, ok: true, result: result };
   } catch (e) {

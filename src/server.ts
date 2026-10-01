@@ -10,6 +10,7 @@ import { Bridge, BridgeError, callTarget } from "./bridge";
 import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { generateCode, type IrNode } from "./codegen";
+import { diagramSpec } from "./diagram";
 import { planProjectExport, writePlan } from "./project/plan";
 import { normalizeTokens } from "./tokens";
 import { type ExportData, exportTokenFiles, type Format, FORMATS } from "./tokens-export";
@@ -128,6 +129,12 @@ async function prepareSpec(spec: unknown, defaultColor: string) {
   const walk = (node: any) => {
     if (!node || typeof node !== "object") return;
     if (Array.isArray(node)) return node.forEach(walk);
+    // A diagram becomes a section of shapes and connectors before anything else.
+    if (String(node.type ?? "").toLowerCase() === "diagram") {
+      const expanded = diagramSpec(node);
+      for (const k of Object.keys(node)) delete node[k];
+      Object.assign(node, expanded);
+    }
     if (node.icon && !node.svg) {
       const size = typeof node.size === "number" ? node.size : 24;
       jobs.push(iconSvg(String(node.icon), size, typeof node.color === "string" ? node.color : defaultColor).then((svg) => void (node.svg = svg)));
@@ -150,6 +157,7 @@ async function prepareSpec(spec: unknown, defaultColor: string) {
     }
     if (Array.isArray(node.children)) node.children.forEach(walk);
     if (Array.isArray(node.variants)) node.variants.forEach(walk);
+    if (Array.isArray(node.slides)) node.slides.forEach(walk);
     if (node.base) walk(node.base);
   };
   walk(spec);
@@ -244,6 +252,10 @@ INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary",
 COMPONENT SET: {type:"componentSet", name:"Button", base:{shared frame spec}, variants:[{props:{Variant:"Primary",Size:"M"}, fill:"#0D99FF", children:[…]}, …], properties:{Label:"Button", "Show icon":{type:"boolean",default:true}, Icon:{type:"instance",default:"Icon/Star"}}}. One component per variant, combined as variants.
 On a layer inside a component: bind:"Label" links a text to a text property (created if missing); bind:{visible:"Show icon"} or {mainComponent:"Icon"} for the others. type:"component" takes properties too.
 PROTOTYPE: reactions:[{trigger:"click", action:"navigate", to:"Details", transition:"smart", duration:300}] on any layer (see the prototype tool).
+SECTION: {type:"section", name, children (placed with x/y), w?, h?} (wraps its children when no size).
+FIGJAM files: {type:"sticky", text, color:"yellow"|"blue"|…|"#hex", wide?}, {type:"shape", shape:"rounded"|"square"|"ellipse"|"diamond"|"database"|"hexagon"|…, text, w, h, fill, stroke}, {type:"connector", from, to, label?, line:"elbowed"|"straight"|"curved", dashed?, endArrow?:"arrow"|"none"} (from/to: layer name, key or id; any node can set key:"a"), {type:"table", rows:[["Name","Role"],["Ada","Eng"]]}, {type:"codeBlock", code, language:"typescript"}.
+DIAGRAM (FigJam): {type:"diagram", source:"flowchart LR\n A[Start] --> B{Valid?}\n B -->|yes| C(Done)\n B -.->|no| A", as?:"shapes"|"stickies", name?} lays out a Mermaid flowchart (shapes [] () {} (()) [()] {{}}, edges --> --- -.-> ==> with |labels|, subgraphs → sections).
+SLIDES files: {slides:[{name, fill?, children:[…]}, …]} or {type:"slide", …}: one 1920×1080 slide per entry, children placed with x/y or auto-layout.
 gap/padding/radius accept "var:<number variable>". MODES: modes:{"Theme":"Dark"} sets a collection's variable mode on a frame and its children.
 Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
 Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`,

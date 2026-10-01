@@ -376,6 +376,15 @@ if (web.isError && /NO_BROWSER|MISSING_DEPENDENCY/.test(web.data.code ?? "")) {
   await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(web.data.frames?.[0]?.rootId ?? "")}))?.remove()` });
 }
 
+// ─── 1.9: per-call file targeting, editor checks ────────────────────────────
+const sessions = await call("list_sessions");
+const target = sessions.data.sessions?.[0];
+const targeted = await call("get_context", { file: target?.fileName });
+check("file argument", !targeted.isError && targeted.data.fileName === target?.fileName, { file: target?.fileName, editor: target?.editor });
+const wrong = await call("build", { select: false, spec: { type: "sticky", text: "selftest" } });
+check("editor check (sticky in Design)", target?.editor === "figjam" ? !wrong.isError : wrong.isError && wrong.data.code === "WRONG_EDITOR", wrong.data.error ?? "created");
+if (target?.editor === "figjam" && wrong.data.rootId) await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(wrong.data.rootId)}))?.remove()` });
+
 const cleanup = await call("run_script", {
   code: `for (const id of ${JSON.stringify([frameId, img.data.nodeId, svg.data.nodeId, newCardId ?? cardId, icon.data.nodeId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,
 });

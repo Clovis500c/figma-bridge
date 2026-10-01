@@ -1177,6 +1177,186 @@
     return a.x >= b.x - 0.5 && a.y >= b.y - 0.5 && a.x + a.width <= b.x + b.width + 0.5 && a.y + a.height <= b.y + b.height + 0.5;
   }
 
+  // plugin/lib/figjam.ts
+  var EDITORS = { sticky: "figjam", shape: "figjam", connector: "figjam", table: "figjam", codeblock: "figjam", slide: "slides" };
+  var EDITOR_NAMES = { figma: "Figma Design", figjam: "FigJam", slides: "Figma Slides", dev: "Dev Mode" };
+  function requireEditor(type, path) {
+    const wanted = EDITORS[type];
+    if (wanted && figma.editorType !== wanted) {
+      throw codeError(path + ': "' + type + '" needs a ' + EDITOR_NAMES[wanted] + " file; this file is open in " + (EDITOR_NAMES[figma.editorType] || figma.editorType) + ".", "WRONG_EDITOR");
+    }
+  }
+  var STICKY_COLORS = {
+    white: "#FFFFFF",
+    gray: "#E6E6E6",
+    grey: "#E6E6E6",
+    green: "#B3EFBD",
+    teal: "#B3F4EF",
+    blue: "#A8DAFF",
+    violet: "#D3BDFF",
+    purple: "#D3BDFF",
+    pink: "#FFA8DB",
+    red: "#FFB8A8",
+    orange: "#FFD3A8",
+    yellow: "#FFE299"
+  };
+  function solid(color) {
+    const hex = STICKY_COLORS[String(color).toLowerCase()] || color;
+    const c = parseHex(hex);
+    return { type: "SOLID", color: { r: c.r, g: c.g, b: c.b }, opacity: c.a };
+  }
+  async function setSublayerText(sub, text, opts) {
+    const font = sub.fontName;
+    if (font !== figma.mixed)
+      await loadFont(font);
+    else if (sub.characters.length) {
+      const fonts = sub.getRangeAllFontNames(0, sub.characters.length);
+      for (let i = 0;i < fonts.length; i++)
+        await loadFont(fonts[i]);
+    }
+    if (opts && opts.font) {
+      await loadFont(opts.font);
+      sub.fontName = opts.font;
+    }
+    sub.characters = String(text === undefined || text === null ? "" : text);
+    if (opts && typeof opts.size === "number")
+      sub.fontSize = opts.size;
+    if (opts && opts.color)
+      sub.fills = [solid(opts.color)];
+  }
+  async function createSticky(s) {
+    const n = figma.createSticky();
+    if (s.wide)
+      n.isWideWidth = true;
+    if (s.author === false)
+      n.authorVisible = false;
+    if (s.color || s.fill)
+      n.fills = [solid(s.color || s.fill)];
+    await setSublayerText(n.text, s.text);
+    return n;
+  }
+  var SHAPES = {
+    square: "SQUARE",
+    rect: "SQUARE",
+    rectangle: "SQUARE",
+    rounded: "ROUNDED_RECTANGLE",
+    roundedrectangle: "ROUNDED_RECTANGLE",
+    ellipse: "ELLIPSE",
+    circle: "ELLIPSE",
+    diamond: "DIAMOND",
+    decision: "DIAMOND",
+    triangle: "TRIANGLE_UP",
+    triangleup: "TRIANGLE_UP",
+    triangledown: "TRIANGLE_DOWN",
+    parallelogram: "PARALLELOGRAM_RIGHT",
+    parallelogramleft: "PARALLELOGRAM_LEFT",
+    database: "ENG_DATABASE",
+    cylinder: "ENG_DATABASE",
+    queue: "ENG_QUEUE",
+    file: "ENG_FILE",
+    folder: "ENG_FOLDER",
+    trapezoid: "TRAPEZOID",
+    process: "PREDEFINED_PROCESS",
+    subroutine: "PREDEFINED_PROCESS",
+    shield: "SHIELD",
+    document: "DOCUMENT_SINGLE",
+    documents: "DOCUMENT_MULTIPLE",
+    input: "MANUAL_INPUT",
+    hexagon: "HEXAGON",
+    chevron: "CHEVRON",
+    pentagon: "PENTAGON",
+    octagon: "OCTAGON",
+    star: "STAR",
+    plus: "PLUS",
+    arrowleft: "ARROW_LEFT",
+    arrowright: "ARROW_RIGHT",
+    junction: "SUMMING_JUNCTION",
+    or: "OR",
+    speech: "SPEECH_BUBBLE",
+    speechbubble: "SPEECH_BUBBLE",
+    storage: "INTERNAL_STORAGE"
+  };
+  async function createShape(s, path, warnings) {
+    const n = figma.createShapeWithText();
+    const key = String(s.shape || "rounded").toLowerCase().replace(/[^a-z]/g, "");
+    const shape = SHAPES[key] || String(s.shape || "").toUpperCase();
+    try {
+      n.shapeType = shape;
+    } catch (e) {
+      warnings.push(path + ': unknown shape "' + s.shape + '", used a rounded rectangle');
+      n.shapeType = "ROUNDED_RECTANGLE";
+    }
+    const w = typeof s.w === "number" ? s.w : typeof s.width === "number" ? s.width : 0;
+    const h = typeof s.h === "number" ? s.h : typeof s.height === "number" ? s.height : 0;
+    if (w || h)
+      n.resize(w || n.width, h || n.height);
+    if (s.fill !== undefined)
+      n.fills = s.fill === null ? [] : [solid(s.fill)];
+    if (s.stroke !== undefined)
+      n.strokes = s.stroke === null ? [] : [solid(s.stroke)];
+    if (typeof s.strokeWidth === "number")
+      n.strokeWeight = s.strokeWidth;
+    if (s.text !== undefined)
+      await setSublayerText(n.text, s.text, { size: s.size, color: s.color });
+    return n;
+  }
+  async function createTable(s, path) {
+    const rows = Array.isArray(s.rows) ? s.rows : [];
+    if (!rows.length)
+      throw codeError(path + ': a table needs rows:[["Header 1","Header 2"],["a","b"]]', "BAD_ARGS");
+    let cols = 0;
+    for (let i = 0;i < rows.length; i++)
+      cols = Math.max(cols, Array.isArray(rows[i]) ? rows[i].length : 1);
+    const t = figma.createTable(rows.length, cols);
+    for (let r = 0;r < rows.length; r++) {
+      for (let c = 0;c < cols; c++) {
+        const value = Array.isArray(rows[r]) ? rows[r][c] : c === 0 ? rows[r] : "";
+        const cell = t.cellAt(r, c);
+        await setSublayerText(cell.text, value === undefined ? "" : value);
+        if (r === 0 && s.header !== false)
+          cell.fills = [solid(s.headerFill || "#F2F2F2")];
+      }
+    }
+    return t;
+  }
+  var LANGUAGES = ["TYPESCRIPT", "CPP", "RUBY", "CSS", "JAVASCRIPT", "HTML", "JSON", "GRAPHQL", "PYTHON", "GO", "SQL", "SWIFT", "KOTLIN", "RUST", "BASH", "PLAINTEXT", "DART"];
+  var LANGUAGE_ALIASES = { ts: "TYPESCRIPT", tsx: "TYPESCRIPT", js: "JAVASCRIPT", jsx: "JAVASCRIPT", "c++": "CPP", py: "PYTHON", sh: "BASH", shell: "BASH", text: "PLAINTEXT", txt: "PLAINTEXT", golang: "GO", rb: "RUBY" };
+  function createCodeBlock(s) {
+    const n = figma.createCodeBlock();
+    const lang = String(s.language || "plaintext").toLowerCase();
+    const code = LANGUAGE_ALIASES[lang] || lang.toUpperCase();
+    n.codeLanguage = LANGUAGES.indexOf(code) !== -1 ? code : "PLAINTEXT";
+    n.code = String(s.code === undefined ? "" : s.code);
+    return n;
+  }
+  function createSlide() {
+    return figma.createSlide();
+  }
+  var CAPS = { arrow: "ARROW_LINES", triangle: "ARROW_EQUILATERAL", filled: "TRIANGLE_FILLED", diamond: "DIAMOND_FILLED", circle: "CIRCLE_FILLED", none: "NONE" };
+  var LINES = { elbowed: "ELBOWED", elbow: "ELBOWED", straight: "STRAIGHT", curved: "CURVED", curve: "CURVED" };
+  var MAGNETS = ["AUTO", "TOP", "LEFT", "BOTTOM", "RIGHT", "CENTER", "NONE"];
+  async function createConnector(s, fromId, toId) {
+    const n = figma.createConnector();
+    const magnet = function(v) {
+      const m = String(v || "AUTO").toUpperCase();
+      return MAGNETS.indexOf(m) !== -1 ? m : "AUTO";
+    };
+    n.connectorStart = { endpointNodeId: fromId, magnet: magnet(s.fromMagnet) };
+    n.connectorEnd = { endpointNodeId: toId, magnet: magnet(s.toMagnet) };
+    n.connectorLineType = LINES[String(s.line || "elbowed").toLowerCase()] || "ELBOWED";
+    n.connectorEndStrokeCap = CAPS[String(s.endArrow === undefined ? "arrow" : s.endArrow).toLowerCase()] || "ARROW_LINES";
+    n.connectorStartStrokeCap = CAPS[String(s.startArrow === undefined ? "none" : s.startArrow).toLowerCase()] || "NONE";
+    if (s.color || s.stroke)
+      n.strokes = [solid(s.color || s.stroke)];
+    if (typeof s.strokeWidth === "number")
+      n.strokeWeight = s.strokeWidth;
+    if (s.dashed)
+      n.dashPattern = [8, 6];
+    if (s.label !== undefined && s.label !== "")
+      await setSublayerText(n.text, s.label);
+    return n;
+  }
+
   // plugin/lib/prototype.ts
   var TRIGGERS = {
     click: "ON_CLICK",
@@ -1763,7 +1943,9 @@
     const spec = p.spec;
     if (!spec || typeof spec !== "object")
       throw codeError("`spec` must be a node object or an array of node objects", "BAD_ARGS");
-    const roots = Array.isArray(spec) ? spec : [spec];
+    const roots = Array.isArray(spec) ? spec : Array.isArray(spec.slides) ? spec.slides.map(function(sl) {
+      return Object.assign({ type: "slide" }, sl);
+    }) : [spec];
     const d = p.defaults || {};
     const ctx = {
       warnings: [],
@@ -1774,6 +1956,8 @@
       defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 },
       binds: [],
       reactions: [],
+      connectors: [],
+      keys: {},
       requestId,
       total: countNodes(roots),
       lastProgress: 0
@@ -1786,7 +1970,7 @@
       const node = await createNode(roots[i], parent, ctx, "spec" + (roots.length > 1 ? "[" + i + "]" : ""));
       if (!node)
         continue;
-      if (!isAutoLayout(parent) && roots[i].x === undefined && roots[i].y === undefined) {
+      if (node.type !== "SLIDE" && !isAutoLayout(parent) && roots[i].x === undefined && roots[i].y === undefined) {
         if (cursorX === null) {
           place(node, p.x, p.y);
         } else {
@@ -1799,6 +1983,7 @@
     }
     if (ctx.reactions.length)
       await applyBuildReactions(ctx.reactions, ctx.ids, ctx.warnings);
+    const connectors = await createConnectors(ctx);
     for (let i = 0;i < ctx.binds.length; i++)
       ctx.warnings.push(ctx.binds[i].path + ": bind needs a component or componentSet ancestor, ignored");
     if (p.select !== false && made.length && parent.type === "PAGE" && parent === figma.currentPage) {
@@ -1810,7 +1995,7 @@
       rootIds: made.map(function(n) {
         return n.id;
       }),
-      created: ctx.count,
+      created: ctx.count + connectors,
       ids: ctx.ids
     };
     if (ctx.warnings.length)
@@ -1891,7 +2076,7 @@
   function nodeType(s) {
     if (s.type) {
       const t = String(s.type).toLowerCase().replace(/[_\s-]/g, "");
-      return t === "rectangle" ? "rect" : t === "circle" ? "ellipse" : t === "variants" ? "componentset" : t;
+      return t === "rectangle" ? "rect" : t === "circle" ? "ellipse" : t === "variants" ? "componentset" : t === "shapewithtext" ? "shape" : t === "code" ? "codeblock" : t;
     }
     if (Array.isArray(s.variants))
       return "componentset";
@@ -1916,8 +2101,30 @@
       throw codeError("Spec is too large (max " + MAX_NODES3 + " nodes). Split it into several build calls.", "TOO_LARGE");
     checkCancelled(ctx.requestId);
     const type = nodeType(s);
+    requireEditor(type, path);
     let node;
     switch (type) {
+      case "connector":
+        ctx.connectors.push({ spec: s, parent, path });
+        return null;
+      case "sticky":
+        node = await createSticky(s);
+        break;
+      case "shape":
+        node = await createShape(s, path, ctx.warnings);
+        break;
+      case "table":
+        node = await createTable(s, path);
+        break;
+      case "codeblock":
+        node = createCodeBlock(s);
+        break;
+      case "section":
+        node = figma.createSection();
+        break;
+      case "slide":
+        node = createSlide();
+        break;
       case "frame":
       case "component":
         node = type === "component" ? figma.createComponent() : figma.createFrame();
@@ -1954,8 +2161,11 @@
     }
     ctx.count++;
     progress(ctx);
-    parent.appendChild(node);
+    if (type !== "slide" || parent.type !== "PAGE")
+      parent.appendChild(node);
     const parentAuto = isAutoLayout(parent);
+    if (s.key !== undefined)
+      ctx.keys[String(s.key)] = node.id;
     if (s.bind)
       ctx.binds.push({ node, bind: s.bind, path });
     const bindStart = ctx.binds.length;
@@ -1965,6 +2175,10 @@
       node.name = "icon/" + s.icon;
     if (type === "frame" || type === "component")
       await setupFrame(node, s, ctx, path);
+    else if (type === "slide")
+      await setupFrame(node, s, ctx, path, true);
+    else if (type === "section")
+      await setupSection(node, s, ctx, path);
     else if (type === "componentset")
       await setupLayout(node, Object.assign({ layout: "row", wrap: true, gap: 16, padding: 16 }, s), ctx, path);
     else if (type === "text")
@@ -1974,7 +2188,7 @@
     else if (type === "line") {
       node.resize(num(s.w, s.width, 100), 0);
       if (s.stroke === undefined)
-        node.strokes = [solid(ctx.defaults.color)];
+        node.strokes = [solid2(ctx.defaults.color)];
     } else if ((type === "rect" || type === "ellipse") && s.w === undefined && s.width === undefined && s.size === undefined) {
       node.resize(100, 100);
     }
@@ -1982,14 +2196,18 @@
       await overrideTexts(node, s.text, ctx);
     if (type === "componentset" && s.stroke === undefined) {
       const set = node;
-      set.strokes = [solid("#9747FF")];
+      set.strokes = [solid2("#9747FF")];
       set.dashPattern = [10, 5];
       set.cornerRadius = 5;
     }
-    await applyVisuals(node, s, ctx, type);
+    if (FIXED_LOOK.indexOf(type) === -1)
+      await applyVisuals(node, s, ctx, type);
+    else if (typeof s.opacity === "number")
+      node.opacity = s.opacity;
     if (type === "text" && Array.isArray(s.spans))
       await applySpans(node, s, ctx, path);
-    applySize(node, s, parentAuto, type, ctx, path);
+    if (FIXED_LOOK.indexOf(type) === -1 && type !== "section" && type !== "slide")
+      applySize(node, s, parentAuto, type, ctx, path);
     if (type === "component" && !s.variantOf)
       await addProperties(node, s.properties, ctx.binds.splice(bindStart), ctx, path);
     if (parent.layoutMode === "GRID")
@@ -2004,7 +2222,7 @@
     }
     if (s.grow && parentAuto)
       node.layoutGrow = 1;
-    if (typeof s.rotation === "number")
+    if (typeof s.rotation === "number" && "rotation" in node)
       node.rotation = s.rotation;
     if (s.visible === false)
       node.visible = false;
@@ -2023,19 +2241,82 @@
     }
     return node;
   }
-  async function setupFrame(f, s, ctx, path) {
-    f.fills = [];
+  var FIXED_LOOK = ["sticky", "shape", "table", "codeblock"];
+  async function setupFrame(f, s, ctx, path, keepFills) {
+    if (!keepFills)
+      f.fills = [];
     await setupLayout(f, s, ctx, path);
     const children = Array.isArray(s.children) ? s.children : [];
     for (let i = 0;i < children.length; i++) {
       try {
         await createNode(children[i], f, ctx, path + ".children[" + i + "]");
       } catch (e) {
-        if (e.code === "TOO_LARGE" || e.code === "CANCELLED")
+        if (e.code === "TOO_LARGE" || e.code === "CANCELLED" || e.code === "WRONG_EDITOR")
           throw e;
         ctx.warnings.push(path + ".children[" + i + "]: " + (e.message || e));
       }
     }
+  }
+  async function setupSection(sec, s, ctx, path) {
+    const children = Array.isArray(s.children) ? s.children : [];
+    const made = [];
+    for (let i = 0;i < children.length; i++) {
+      try {
+        const n = await createNode(children[i], sec, ctx, path + ".children[" + i + "]");
+        if (n)
+          made.push(n);
+      } catch (e) {
+        if (e.code === "TOO_LARGE" || e.code === "CANCELLED" || e.code === "WRONG_EDITOR")
+          throw e;
+        ctx.warnings.push(path + ".children[" + i + "]: " + (e.message || e));
+      }
+    }
+    const w = num(s.w, s.width, 0);
+    const h = num(s.h, s.height, 0);
+    if (w && h) {
+      sec.resizeWithoutConstraints(w, h);
+      return;
+    }
+    const pad = typeof s.padding === "number" ? s.padding : 40;
+    let right = 0;
+    let bottom = 0;
+    for (let i = 0;i < made.length; i++) {
+      right = Math.max(right, made[i].x + made[i].width);
+      bottom = Math.max(bottom, made[i].y + made[i].height);
+    }
+    sec.resizeWithoutConstraints(Math.max(w || right + pad, 100), Math.max(h || bottom + pad, 100));
+  }
+  async function createConnectors(ctx) {
+    let made = 0;
+    for (let i = 0;i < ctx.connectors.length; i++) {
+      const c = ctx.connectors[i];
+      const ends = [];
+      const sides = ["from", "to"];
+      for (let k = 0;k < 2; k++) {
+        const ref = c.spec[sides[k]];
+        let id = ref === undefined ? "" : ctx.keys[String(ref)] || ctx.ids[String(ref)] || "";
+        if (!id && ref !== undefined && /^[\dI;:]+$/.test(String(ref))) {
+          const n = await figma.getNodeByIdAsync(String(ref));
+          if (n)
+            id = n.id;
+        }
+        ends.push(id);
+      }
+      if (!ends[0] || !ends[1]) {
+        ctx.warnings.push(c.path + ': connector ends not found (from "' + c.spec.from + '", to "' + c.spec.to + '")');
+        continue;
+      }
+      try {
+        const n = await createConnector(c.spec, ends[0], ends[1]);
+        c.parent.appendChild(n);
+        if (c.spec.name)
+          n.name = String(c.spec.name);
+        made++;
+      } catch (e) {
+        ctx.warnings.push(c.path + ": " + (e.message || e));
+      }
+    }
+    return made;
   }
   async function setupLayout(f, s, ctx, path) {
     const layout = String(s.layout || s.direction || "").toLowerCase();
@@ -2070,7 +2351,7 @@
         if (s.rowGap !== undefined)
           await setNumber(f, "counterAxisSpacing", s.rowGap);
       }
-    } else if (s.w === undefined && s.width === undefined && s.size === undefined) {
+    } else if (s.w === undefined && s.width === undefined && s.size === undefined && f.type !== "SLIDE") {
       f.resize(100, 100);
     }
   }
@@ -2210,7 +2491,7 @@
       t.maxLines = s.maxLines;
     }
     if (s.fill === undefined && s.color === undefined && !s.textStyle)
-      t.fills = [solid(ctx.defaults.color)];
+      t.fills = [solid2(ctx.defaults.color)];
     if (s.textStyle) {
       const style = await findStyle("text", stripPrefix(s.textStyle));
       await loadFont(style.fontName);
@@ -2497,7 +2778,7 @@
   function stripPrefix(v) {
     return String(v).replace(/^(style|var):/, "");
   }
-  function solid(hex) {
+  function solid2(hex) {
     const c = parseHex(hex);
     return { type: "SOLID", color: { r: c.r, g: c.g, b: c.b }, opacity: c.a };
   }
@@ -2521,9 +2802,9 @@
     if (typeof v === "string") {
       if (v.indexOf("var:") === 0) {
         const variable = await findVariable(stripPrefix(v));
-        return figma.variables.setBoundVariableForPaint(solid("#000000"), "color", variable);
+        return figma.variables.setBoundVariableForPaint(solid2("#000000"), "color", variable);
       }
-      return solid(v);
+      return solid2(v);
     }
     if (v && Array.isArray(v.gradient)) {
       const stops = v.gradient.map(function(c, i, all) {
@@ -3730,7 +4011,7 @@
     figma.ui.postMessage(msg);
   }
   function sessionInfo() {
-    return { id: sessionId, fileName: figma.root.name, page: figma.currentPage.name };
+    return { id: sessionId, fileName: figma.root.name, page: figma.currentPage.name, editorType: figma.editorType };
   }
   function clampSize(w, h) {
     return {
@@ -3836,6 +4117,13 @@
       return Promise.resolve({ pong: true, session: sessionInfo() });
     }
   };
+  var EDITORS2 = {
+    prototype: ["figma"],
+    annotate: ["figma", "dev"],
+    design_tokens: ["figma", "slides"],
+    export_tokens: ["figma", "slides", "dev"]
+  };
+  var EDITOR_NAMES2 = { figma: "Figma Design", figjam: "FigJam", slides: "Figma Slides", dev: "Dev Mode" };
   var READ_ONLY = {
     describe: true,
     find: true,
@@ -3860,6 +4148,14 @@
       const handler = HANDLERS[msg.method];
       if (!handler)
         throw codeError("Unknown method: " + msg.method + " (reopen the plugin after updating it)", "UNKNOWN_METHOD");
+      const editors = EDITORS2[msg.method];
+      if (editors && editors.indexOf(figma.editorType) === -1) {
+        throw codeError(msg.method + " is not available in " + (EDITOR_NAMES2[figma.editorType] || figma.editorType) + " (works in " + editors.map(function(e) {
+          return EDITOR_NAMES2[e];
+        }).join(", ") + ").", "WRONG_EDITOR");
+      }
+      if (mutates && figma.editorType === "dev")
+        throw codeError("Dev Mode is read-only: switch the file to Design mode to let the agent edit it.", "WRONG_EDITOR");
       const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000), String(msg.id));
       reply = { t: "res", id: msg.id, ok: true, result };
     } catch (e) {

@@ -12,6 +12,7 @@ import {
   parseHex,
   place,
 } from "./util";
+import { createCodeBlock, createConnector, createShape, createSlide, createSticky, createTable, requireEditor } from "./figjam";
 import { applyBuildReactions } from "./prototype";
 import { applyModes } from "./tokens";
 
@@ -26,6 +27,10 @@ interface Ctx {
   binds: { node: SceneNode; bind: any; path: string }[];
   /** Prototype links, applied at the end because destinations may come later in the spec. */
   reactions: { node: SceneNode; reactions: any; path: string }[];
+  /** FigJam connectors, created last because they point at nodes by name, key or id. */
+  connectors: { spec: any; parent: BaseNode & ChildrenMixin; path: string }[];
+  /** key → node id: a stable handle for connectors that layer names can't give. */
+  keys: { [key: string]: string };
   requestId?: string;
   total: number;
   lastProgress: number;
@@ -37,7 +42,14 @@ const SHADOW_DEFAULT = { x: 0, y: 4, blur: 16, spread: 0, color: "#0000001F" };
 export async function build(p: any, _timeoutMs?: number, requestId?: string) {
   const spec = p.spec;
   if (!spec || typeof spec !== "object") throw codeError("`spec` must be a node object or an array of node objects", "BAD_ARGS");
-  const roots: any[] = Array.isArray(spec) ? spec : [spec];
+  // {slides:[…]} builds a deck: one slide per entry.
+  const roots: any[] = Array.isArray(spec)
+    ? spec
+    : Array.isArray(spec.slides)
+      ? spec.slides.map(function (sl: any) {
+          return Object.assign({ type: "slide" }, sl);
+        })
+      : [spec];
   const d = p.defaults || {};
   const ctx: Ctx = {
     warnings: [],
@@ -48,6 +60,8 @@ export async function build(p: any, _timeoutMs?: number, requestId?: string) {
     defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 },
     binds: [],
     reactions: [],
+    connectors: [],
+    keys: {},
     requestId: requestId,
     total: countNodes(roots),
     lastProgress: 0,
@@ -60,7 +74,7 @@ export async function build(p: any, _timeoutMs?: number, requestId?: string) {
   for (let i = 0; i < roots.length; i++) {
     const node = await createNode(roots[i], parent, ctx, "spec" + (roots.length > 1 ? "[" + i + "]" : ""));
     if (!node) continue;
-    if (!isAutoLayout(parent) && roots[i].x === undefined && roots[i].y === undefined) {
+    if (node.type !== "SLIDE" && !isAutoLayout(parent) && roots[i].x === undefined && roots[i].y === undefined) {
       if (cursorX === null) {
         place(node, p.x, p.y);
       } else {
@@ -72,6 +86,7 @@ export async function build(p: any, _timeoutMs?: number, requestId?: string) {
     made.push(node);
   }
   if (ctx.reactions.length) await applyBuildReactions(ctx.reactions, ctx.ids, ctx.warnings);
+  const connectors = await createConnectors(ctx);
   for (let i = 0; i < ctx.binds.length; i++) ctx.warnings.push(ctx.binds[i].path + ": bind needs a component or componentSet ancestor, ignored");
   if (p.select !== false && made.length && parent.type === "PAGE" && parent === figma.currentPage) {
     figma.currentPage.selection = made;
@@ -82,7 +97,7 @@ export async function build(p: any, _timeoutMs?: number, requestId?: string) {
     rootIds: made.map(function (n) {
       return n.id;
     }),
-    created: ctx.count,
+    created: ctx.count + connectors,
     ids: ctx.ids,
   };
   if (ctx.warnings.length) out.warnings = ctx.warnings.slice(0, 50);
@@ -166,7 +181,7 @@ async function preloadFonts(roots: any[], ctx: Ctx) {
 function nodeType(s: any): string {
   if (s.type) {
     const t = String(s.type).toLowerCase().replace(/[_\s-]/g, "");
-    return t === "rectangle" ? "rect" : t === "circle" ? "ellipse" : t === "variants" ? "componentset" : t;
+    return t === "rectangle" ? "rect" : t === "circle" ? "ellipse" : t === "variants" ? "componentset" : t === "shapewithtext" ? "shape" : t === "code" ? "codeblock" : t;
   }
   if (Array.isArray(s.variants)) return "componentset";
   if (s.text !== undefined || Array.isArray(s.spans)) return "text";
@@ -185,8 +200,31 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
   if (ctx.count >= MAX_NODES) throw codeError("Spec is too large (max " + MAX_NODES + " nodes). Split it into several build calls.", "TOO_LARGE");
   checkCancelled(ctx.requestId);
   const type = nodeType(s);
+  requireEditor(type, path);
   let node: SceneNode;
   switch (type) {
+    case "connector":
+      // Created at the end: its ends may come later in the spec.
+      ctx.connectors.push({ spec: s, parent: parent, path: path });
+      return null;
+    case "sticky":
+      node = await createSticky(s);
+      break;
+    case "shape":
+      node = await createShape(s, path, ctx.warnings);
+      break;
+    case "table":
+      node = await createTable(s, path);
+      break;
+    case "codeblock":
+      node = createCodeBlock(s);
+      break;
+    case "section":
+      node = figma.createSection();
+      break;
+    case "slide":
+      node = createSlide();
+      break;
     case "frame":
     case "component":
       node = type === "component" ? figma.createComponent() : figma.createFrame();
@@ -222,8 +260,10 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
   }
   ctx.count++;
   progress(ctx);
-  parent.appendChild(node);
+  // Slides live in the slide grid, where createSlide puts them.
+  if (type !== "slide" || parent.type !== "PAGE") parent.appendChild(node);
   const parentAuto = isAutoLayout(parent);
+  if (s.key !== undefined) ctx.keys[String(s.key)] = node.id;
   if (s.bind) ctx.binds.push({ node: node, bind: s.bind, path: path });
   const bindStart = ctx.binds.length;
 
@@ -231,6 +271,8 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
   else if (type === "icon") node.name = "icon/" + s.icon;
 
   if (type === "frame" || type === "component") await setupFrame(node as FrameNode, s, ctx, path);
+  else if (type === "slide") await setupFrame(node as any, s, ctx, path, true);
+  else if (type === "section") await setupSection(node as SectionNode, s, ctx, path);
   else if (type === "componentset") await setupLayout(node as ComponentSetNode, Object.assign({ layout: "row", wrap: true, gap: 16, padding: 16 }, s), ctx, path);
   else if (type === "text") await setupText(node as TextNode, s, ctx);
   else if (type === "image") await setupImage(node as RectangleNode, s, ctx, path);
@@ -248,9 +290,10 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
     set.dashPattern = [10, 5];
     set.cornerRadius = 5;
   }
-  await applyVisuals(node, s, ctx, type);
+  if (FIXED_LOOK.indexOf(type) === -1) await applyVisuals(node, s, ctx, type);
+  else if (typeof s.opacity === "number") (node as any).opacity = s.opacity;
   if (type === "text" && Array.isArray(s.spans)) await applySpans(node as TextNode, s, ctx, path);
-  applySize(node, s, parentAuto, type, ctx, path);
+  if (FIXED_LOOK.indexOf(type) === -1 && type !== "section" && type !== "slide") applySize(node, s, parentAuto, type, ctx, path);
   if (type === "component" && !s.variantOf) await addProperties(node as ComponentNode, s.properties, ctx.binds.splice(bindStart), ctx, path);
   if ((parent as any).layoutMode === "GRID") placeInGrid(node, s, ctx, path);
 
@@ -260,7 +303,7 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
     if (typeof s.y === "number") node.y = s.y;
   }
   if (s.grow && parentAuto) (node as any).layoutGrow = 1;
-  if (typeof s.rotation === "number") node.rotation = s.rotation;
+  if (typeof s.rotation === "number" && "rotation" in node) (node as any).rotation = s.rotation;
   if (s.visible === false) node.visible = false;
   if (s.locked) node.locked = true;
   if (s.modes) await applyModes(node, s.modes, ctx.warnings, path);
@@ -274,18 +317,82 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
   return node;
 }
 
-async function setupFrame(f: FrameNode, s: any, ctx: Ctx, path: string) {
-  f.fills = [];
+/** FigJam nodes with their own look (set when created): no generic fills, radius or resizing. */
+const FIXED_LOOK = ["sticky", "shape", "table", "codeblock"];
+
+async function setupFrame(f: FrameNode, s: any, ctx: Ctx, path: string, keepFills?: boolean) {
+  if (!keepFills) f.fills = [];
   await setupLayout(f, s, ctx, path);
   const children: any[] = Array.isArray(s.children) ? s.children : [];
   for (let i = 0; i < children.length; i++) {
     try {
       await createNode(children[i], f, ctx, path + ".children[" + i + "]");
     } catch (e) {
-      if ((e as any).code === "TOO_LARGE" || (e as any).code === "CANCELLED") throw e;
+      if ((e as any).code === "TOO_LARGE" || (e as any).code === "CANCELLED" || (e as any).code === "WRONG_EDITOR") throw e;
       ctx.warnings.push(path + ".children[" + i + "]: " + ((e as Error).message || e));
     }
   }
+}
+
+/** Sections hold freely placed children; without w/h they wrap them with a margin. */
+async function setupSection(sec: SectionNode, s: any, ctx: Ctx, path: string) {
+  const children: any[] = Array.isArray(s.children) ? s.children : [];
+  const made: SceneNode[] = [];
+  for (let i = 0; i < children.length; i++) {
+    try {
+      const n = await createNode(children[i], sec, ctx, path + ".children[" + i + "]");
+      if (n) made.push(n);
+    } catch (e) {
+      if ((e as any).code === "TOO_LARGE" || (e as any).code === "CANCELLED" || (e as any).code === "WRONG_EDITOR") throw e;
+      ctx.warnings.push(path + ".children[" + i + "]: " + ((e as Error).message || e));
+    }
+  }
+  const w = num(s.w, s.width, 0);
+  const h = num(s.h, s.height, 0);
+  if (w && h) {
+    sec.resizeWithoutConstraints(w, h);
+    return;
+  }
+  const pad = typeof s.padding === "number" ? s.padding : 40;
+  let right = 0;
+  let bottom = 0;
+  for (let i = 0; i < made.length; i++) {
+    right = Math.max(right, made[i].x + made[i].width);
+    bottom = Math.max(bottom, made[i].y + made[i].height);
+  }
+  sec.resizeWithoutConstraints(Math.max(w || right + pad, 100), Math.max(h || bottom + pad, 100));
+}
+
+/** Connectors from build specs: {type:"connector", from, to} with layer names, keys or ids. */
+async function createConnectors(ctx: Ctx): Promise<number> {
+  let made = 0;
+  for (let i = 0; i < ctx.connectors.length; i++) {
+    const c = ctx.connectors[i];
+    const ends: string[] = [];
+    const sides = ["from", "to"];
+    for (let k = 0; k < 2; k++) {
+      const ref = c.spec[sides[k]];
+      let id = ref === undefined ? "" : ctx.keys[String(ref)] || ctx.ids[String(ref)] || "";
+      if (!id && ref !== undefined && /^[\dI;:]+$/.test(String(ref))) {
+        const n = await figma.getNodeByIdAsync(String(ref));
+        if (n) id = n.id;
+      }
+      ends.push(id);
+    }
+    if (!ends[0] || !ends[1]) {
+      ctx.warnings.push(c.path + ': connector ends not found (from "' + c.spec.from + '", to "' + c.spec.to + '")');
+      continue;
+    }
+    try {
+      const n = await createConnector(c.spec, ends[0], ends[1]);
+      c.parent.appendChild(n);
+      if (c.spec.name) n.name = String(c.spec.name);
+      made++;
+    } catch (e) {
+      ctx.warnings.push(c.path + ": " + ((e as Error).message || e));
+    }
+  }
+  return made;
 }
 
 async function setupLayout(f: FrameNode | ComponentSetNode, s: any, ctx: Ctx, path: string) {
@@ -314,7 +421,7 @@ async function setupLayout(f: FrameNode | ComponentSetNode, s: any, ctx: Ctx, pa
       f.layoutWrap = "WRAP";
       if (s.rowGap !== undefined) await setNumber(f, "counterAxisSpacing", s.rowGap);
     }
-  } else if (s.w === undefined && s.width === undefined && s.size === undefined) {
+  } else if (s.w === undefined && s.width === undefined && s.size === undefined && (f as any).type !== "SLIDE") {
     f.resize(100, 100);
   }
 }

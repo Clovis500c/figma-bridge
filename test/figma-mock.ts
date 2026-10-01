@@ -53,6 +53,35 @@ export function node(type: string, props: Record<string, any> = {}, children?: M
     ...(type === "TEXT" ? { characters: "", fontName: { family: "Inter", style: "Regular" }, fontSize: 14, lineHeight: { unit: "AUTO" }, letterSpacing: { unit: "PERCENT", value: 0 }, textStyleId: "", hasMissingFont: false } : {}),
     ...(type === "FRAME" || type === "COMPONENT" ? { layoutMode: "NONE", itemSpacing: 0, paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0, topLeftRadius: 0, topRightRadius: 0, bottomRightRadius: 0, bottomLeftRadius: 0, clipsContent: false } : {}),
     ...props,
+    width: props.width ?? 100,
+    height: props.height ?? 100,
+    x: 0,
+    y: 0,
+    appendChild(child: MockNode) {
+      if (child.parent?.children) child.parent.children = child.parent.children.filter((c) => c !== child);
+      (this.children ??= []).push(child);
+      child.parent = this as MockNode;
+    },
+    resize(w: number, h: number) {
+      this.width = w;
+      this.height = h;
+    },
+    resizeWithoutConstraints(w: number, h: number) {
+      this.width = w;
+      this.height = h;
+    },
+    remove() {
+      if (this.parent?.children) this.parent.children = this.parent.children.filter((c: MockNode) => c !== this);
+      this.removed = true;
+    },
+    findOne(pred: (n: MockNode) => boolean): MockNode | null {
+      for (const c of this.children ?? []) {
+        if (pred(c)) return c;
+        const hit = c.findOne?.(pred);
+        if (hit) return hit;
+      }
+      return null;
+    },
     setBoundVariable(field: string, v: MockVariable | null) {
       if (v) this.boundVariables[field] = { type: "VARIABLE_ALIAS", id: v.id };
       else delete this.boundVariables[field];
@@ -78,6 +107,7 @@ export function installFigma(opts: {
   paintStyles?: any[];
   textStyles?: any[];
   effectStyles?: any[];
+  editorType?: string;
 }) {
   const root: any = {
     type: "DOCUMENT",
@@ -159,6 +189,42 @@ export function installFigma(opts: {
     },
     ui: { postMessage() {} },
   };
+  // Node creation, enough for build: frames, text, shapes, FigJam and Slides nodes.
+  const sublayer = () => ({ characters: "", fontName: { family: "Inter", style: "Medium" }, fontSize: 16, fills: [], getRangeAllFontNames: () => [{ family: "Inter", style: "Medium" }] });
+  const created = (type: string, extra: Record<string, any> = {}) => {
+    const n = node(type, { name: "", ...extra });
+    n.name = extra.name ?? "";
+    return n;
+  };
+  const frameProps = () => ({ layoutMode: "NONE", children: [], clipsContent: false, layoutSizingHorizontal: "FIXED", layoutSizingVertical: "FIXED", primaryAxisSizingMode: "AUTO", counterAxisSizingMode: "AUTO" });
+  Object.assign(figma, {
+    editorType: opts.editorType ?? "figma",
+    viewport: { center: { x: 0, y: 0 }, zoom: 1, bounds: { x: 0, y: 0, width: 1000, height: 800 }, scrollAndZoomIntoView() {} },
+    commitUndo() {},
+    notify() {},
+    createFrame: () => created("FRAME", frameProps()),
+    createComponent: () => created("COMPONENT", frameProps()),
+    createRectangle: () => created("RECTANGLE"),
+    createEllipse: () => created("ELLIPSE"),
+    createLine: () => created("LINE"),
+    createText: () => created("TEXT", { characters: "", fontName: { family: "Inter", style: "Regular" }, fontSize: 12, textAutoResize: "NONE", layoutSizingHorizontal: "FIXED", layoutSizingVertical: "FIXED" }),
+    createSection: () => created("SECTION", { children: [] }),
+    createSticky: () => created("STICKY", { text: sublayer(), isWideWidth: false, authorVisible: true, width: 240, height: 240 }),
+    createShapeWithText: () => created("SHAPE_WITH_TEXT", { text: sublayer(), shapeType: "SQUARE", strokeWeight: 1, width: 208, height: 208 }),
+    createConnector: () => created("CONNECTOR", { text: sublayer(), connectorLineType: "ELBOWED", connectorStart: {}, connectorEnd: {}, dashPattern: [] }),
+    createCodeBlock: () => created("CODE_BLOCK", { code: "", codeLanguage: "PLAINTEXT" }),
+    createTable: (rows: number, cols: number) => {
+      const cells = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => ({ type: "TABLE_CELL", rowIndex: r, columnIndex: c, text: sublayer(), fills: [] })));
+      return created("TABLE", { numRows: rows, numColumns: cols, cellAt: (r: number, c: number) => cells[r]![c]!, cells });
+    },
+    createSlide: () => {
+      const slide = created("SLIDE", { ...frameProps(), width: 1920, height: 1080, fills: [solid("#FFFFFF")] });
+      const grid = (figma.slides ??= []);
+      grid.push(slide);
+      figma.currentPage.appendChild(slide);
+      return slide;
+    },
+  });
   for (const p of opts.pages) {
     p.selection = p.selection ?? [];
     p.backgrounds = p.backgrounds ?? [solid("#FFFFFF")];
