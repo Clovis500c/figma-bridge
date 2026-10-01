@@ -1,6 +1,6 @@
 // Design lint: finds common mistakes so the agent can fix its own work.
-import { designSystemHealth } from "./health";
-import { contrastRatio, getNode, isAutoLayout, round } from "./util";
+import { autoFix, designSystemHealth } from "./health";
+import { contrastRatio, getNode, invalidateCaches, isAutoLayout, round } from "./util";
 
 type Severity = "error" | "warning" | "info";
 interface Issue {
@@ -16,6 +16,13 @@ const MAX_ISSUES = 120;
 export const DEFAULT_NAME = /^(Frame|Rectangle|Ellipse|Group|Vector|Text|Line|Polygon|Star|Component|Instance|Section|Image)( \d+)?$/;
 
 export async function audit(p: any, _timeoutMs?: number, requestId?: string) {
+  if (p.fix === true || (Array.isArray(p.fixes) && p.fixes.length)) {
+    // Fix first, then report on the result.
+    const fixed = await autoFix(p, requestId);
+    invalidateCaches();
+    const after: any = p.scope === "design-system" ? await designSystemHealth(p, requestId) : await lint(p);
+    return Object.assign({ fixed: fixed.fixed, changes: fixed.changes, fixScope: fixed.scope }, after);
+  }
   if (p.scope === "design-system") return designSystemHealth(p, requestId);
   return lint(p);
 }

@@ -255,6 +255,67 @@
       p = p.parent;
     return p;
   }
+  function toLab(c) {
+    const lin = function(v) {
+      return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    };
+    const r = lin(c.r);
+    const g = lin(c.g);
+    const b = lin(c.b);
+    const x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047;
+    const y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+    const z = (0.0193339 * r + 0.119192 * g + 0.9503041 * b) / 1.08883;
+    const f = function(t) {
+      return t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
+    };
+    return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+  }
+  function deltaE(a, b) {
+    const l1 = toLab(a);
+    const l2 = toLab(b);
+    const rad = Math.PI / 180;
+    const c1 = Math.sqrt(l1[1] * l1[1] + l1[2] * l1[2]);
+    const c2 = Math.sqrt(l2[1] * l2[1] + l2[2] * l2[2]);
+    const cm = (c1 + c2) / 2;
+    const g = 0.5 * (1 - Math.sqrt(Math.pow(cm, 7) / (Math.pow(cm, 7) + Math.pow(25, 7))));
+    const a1 = l1[1] * (1 + g);
+    const a2 = l2[1] * (1 + g);
+    const cp1 = Math.sqrt(a1 * a1 + l1[2] * l1[2]);
+    const cp2 = Math.sqrt(a2 * a2 + l2[2] * l2[2]);
+    const hue = function(x, y) {
+      if (x === 0 && y === 0)
+        return 0;
+      const h = Math.atan2(y, x) / rad;
+      return h < 0 ? h + 360 : h;
+    };
+    const h1 = hue(a1, l1[2]);
+    const h2 = hue(a2, l2[2]);
+    const dl = l2[0] - l1[0];
+    const dc = cp2 - cp1;
+    let dh = 0;
+    if (cp1 * cp2 !== 0) {
+      dh = h2 - h1;
+      if (dh > 180)
+        dh -= 360;
+      else if (dh < -180)
+        dh += 360;
+    }
+    const dH = 2 * Math.sqrt(cp1 * cp2) * Math.sin(dh / 2 * rad);
+    const lm = (l1[0] + l2[0]) / 2;
+    const cpm = (cp1 + cp2) / 2;
+    let hm = h1 + h2;
+    if (cp1 * cp2 !== 0) {
+      if (Math.abs(h1 - h2) > 180)
+        hm += h1 + h2 < 360 ? 360 : -360;
+      hm /= 2;
+    }
+    const t = 1 - 0.17 * Math.cos((hm - 30) * rad) + 0.24 * Math.cos(2 * hm * rad) + 0.32 * Math.cos((3 * hm + 6) * rad) - 0.2 * Math.cos((4 * hm - 63) * rad);
+    const sl = 1 + 0.015 * Math.pow(lm - 50, 2) / Math.sqrt(20 + Math.pow(lm - 50, 2));
+    const sc = 1 + 0.045 * cpm;
+    const sh = 1 + 0.015 * cpm * t;
+    const rt = -2 * Math.sqrt(Math.pow(cpm, 7) / (Math.pow(cpm, 7) + Math.pow(25, 7))) * Math.sin(60 * Math.exp(-Math.pow((hm - 275) / 25, 2)) * rad);
+    return Math.sqrt(Math.pow(dl / sl, 2) + Math.pow(dc / sc, 2) + Math.pow(dH / sh, 2) + rt * (dc / sc) * (dH / sh));
+  }
 
   // plugin/lib/annotate.ts
   var COLORS = ["yellow", "orange", "red", "pink", "violet", "blue", "teal", "green"];
@@ -717,8 +778,218 @@
       issues: picked,
       totalIssues: issues.length,
       nodesChecked: nodes.length,
-      truncated: scope.truncated
+      truncated: scope.truncated,
+      hint: "audit {fix:true} binds raw colors and numbers to matching variables, applies matching text styles and renames default layer names."
     };
+  }
+  function resolved(v, byId, collections, depth) {
+    const col = collections[v.variableCollectionId];
+    if (!col)
+      return null;
+    const raw = v.valuesByMode[col.defaultModeId];
+    if (raw && raw.type === "VARIABLE_ALIAS") {
+      const t = byId[raw.id];
+      return t && (depth || 0) < 10 ? resolved(t, byId, collections, (depth || 0) + 1) : null;
+    }
+    return raw;
+  }
+  function scoped(v, wanted) {
+    const s = v.scopes || [];
+    if (!s.length || s.indexOf("ALL_SCOPES") !== -1)
+      return true;
+    for (let i = 0;i < wanted.length; i++)
+      if (s.indexOf(wanted[i]) !== -1)
+        return true;
+    return false;
+  }
+  var FILL_SCOPES = { TEXT: ["ALL_FILLS", "TEXT_FILL"], FRAME: ["ALL_FILLS", "FRAME_FILL"], COMPONENT: ["ALL_FILLS", "FRAME_FILL"], SECTION: ["ALL_FILLS", "FRAME_FILL"] };
+  async function autoFix(p, requestId) {
+    const all = ["colors", "numbers", "textStyles", "names"];
+    const fixes = Array.isArray(p.fixes) && p.fixes.length ? p.fixes : all;
+    for (let i = 0;i < fixes.length; i++)
+      if (all.indexOf(fixes[i]) === -1)
+        throw codeError('Unknown fix "' + fixes[i] + '" (use ' + all.join(", ") + ")", "BAD_ARGS");
+    const scope = await scopeNodes(p, false, requestId);
+    const vars = await localVariables();
+    const byId = {};
+    const collections = {};
+    for (let i = 0;i < vars.vars.length; i++)
+      byId[vars.vars[i].id] = vars.vars[i];
+    for (let i = 0;i < vars.collections.length; i++)
+      collections[vars.collections[i].id] = vars.collections[i];
+    const colorVars = [];
+    const numberVars = [];
+    for (let i = 0;i < vars.vars.length; i++) {
+      const v = vars.vars[i];
+      const value = resolved(v, byId, collections);
+      if (v.resolvedType === "COLOR" && value && typeof value === "object")
+        colorVars.push({ v, rgba: value });
+      if (v.resolvedType === "FLOAT" && typeof value === "number")
+        numberVars.push({ v, num: value });
+    }
+    const changes = [];
+    const counts = { colors: 0, numbers: 0, textStyles: 0, names: 0 };
+    const record = function(n, fix, from, to) {
+      counts[fix]++;
+      if (changes.length < 200)
+        changes.push({ nodeId: n.id, name: n.name, fix, from, to });
+    };
+    const matchColor = function(n, paint, scopes) {
+      const alpha = paint.opacity === undefined ? 1 : paint.opacity;
+      const ranked = colorVars.filter(function(c) {
+        return scoped(c.v, scopes) && Math.abs((c.rgba.a === undefined ? 1 : c.rgba.a) - alpha) < 0.02;
+      }).map(function(c) {
+        return { c, d: deltaE(c.rgba, paint.color) };
+      }).filter(function(x) {
+        return x.d < 2;
+      }).sort(function(a, b) {
+        return a.d - b.d;
+      });
+      for (let i = 0;i < ranked.length; i++) {
+        try {
+          const r = ranked[i].c.v.resolveForConsumer(n).value;
+          if (r && typeof r === "object" && deltaE(r, paint.color) < 2)
+            return ranked[i].c.v;
+        } catch (e) {}
+      }
+      return null;
+    };
+    const matchNumber = function(value, scopes, hint) {
+      const hits = numberVars.filter(function(c) {
+        return Math.abs(c.num - value) < 0.01 && scoped(c.v, scopes);
+      });
+      hits.sort(function(a, b) {
+        return (hint.test(b.v.name) ? 1 : 0) - (hint.test(a.v.name) ? 1 : 0);
+      });
+      return hits.length ? hits[0].v : null;
+    };
+    const textStyles = fixes.indexOf("textStyles") !== -1 ? (await localStyles()).text : [];
+    for (let i = 0;i < scope.nodes.length; i++) {
+      if (i % 200 === 0)
+        checkCancelled(requestId);
+      const n = scope.nodes[i];
+      if (n.type === "INSTANCE" || n.locked)
+        continue;
+      const bound = n.boundVariables || {};
+      if (fixes.indexOf("colors") !== -1) {
+        const fields = ["fills", "strokes"];
+        for (let f = 0;f < fields.length; f++) {
+          const field = fields[f];
+          if (!(field in n) || n[field] === figma.mixed)
+            continue;
+          if (field === "fills" && n.fillStyleId || field === "strokes" && n.strokeStyleId)
+            continue;
+          const paints = n[field].slice();
+          let changed = false;
+          for (let k = 0;k < paints.length; k++) {
+            const pt = paints[k];
+            if (pt.type !== "SOLID" || pt.visible === false || pt.boundVariables && pt.boundVariables.color)
+              continue;
+            const v = matchColor(n, pt, field === "strokes" ? ["STROKE_COLOR"] : FILL_SCOPES[n.type] || ["ALL_FILLS", "SHAPE_FILL"]);
+            if (!v)
+              continue;
+            paints[k] = figma.variables.setBoundVariableForPaint(pt, "color", v);
+            changed = true;
+            record(n, "colors", field + " " + toHex(pt.color, pt.opacity), "var:" + v.name);
+          }
+          if (changed)
+            n[field] = paints;
+        }
+      }
+      if (fixes.indexOf("numbers") !== -1) {
+        const fields = [];
+        if (n.layoutMode && n.layoutMode !== "NONE") {
+          for (let k = 0;k < NUMBER_FIELDS.length; k++)
+            if (NUMBER_FIELDS[k] !== "counterAxisSpacing" || n.layoutWrap === "WRAP")
+              fields.push(NUMBER_FIELDS[k]);
+        }
+        if ("topLeftRadius" in n && n.type !== "TEXT")
+          for (let k = 0;k < RADIUS_FIELDS.length; k++)
+            fields.push(RADIUS_FIELDS[k]);
+        for (let k = 0;k < fields.length; k++) {
+          const f = fields[k];
+          const value = n[f];
+          if (typeof value !== "number" || !value || bound[f])
+            continue;
+          const radius = f.indexOf("Radius") !== -1;
+          const v = matchNumber(value, radius ? ["CORNER_RADIUS"] : ["GAP"], radius ? /radius|corner|round/i : /spac|gap|pad/i);
+          if (!v)
+            continue;
+          try {
+            n.setBoundVariable(f, v);
+            record(n, "numbers", f + " " + round(value), "var:" + v.name);
+          } catch (e) {}
+        }
+      }
+      if (n.type === "TEXT" && textStyles.length && !n.textStyleId && n.fontName !== figma.mixed && n.fontSize !== figma.mixed && n.lineHeight !== figma.mixed && n.letterSpacing !== figma.mixed) {
+        for (let k = 0;k < textStyles.length; k++) {
+          const s = textStyles[k];
+          if (s.fontName.family === n.fontName.family && s.fontName.style === n.fontName.style && Math.abs(s.fontSize - n.fontSize) < 0.01 && JSON.stringify(s.lineHeight) === JSON.stringify(n.lineHeight) && s.letterSpacing.unit === n.letterSpacing.unit && Math.abs(s.letterSpacing.value - n.letterSpacing.value) < 0.01) {
+            try {
+              await loadFont(s.fontName);
+              await n.setTextStyleIdAsync(s.id);
+              record(n, "textStyles", n.fontName.family + " " + n.fontName.style + " " + round(n.fontSize), "style:" + s.name);
+            } catch (e) {}
+            break;
+          }
+        }
+      }
+      if (fixes.indexOf("names") !== -1 && n.type !== "TEXT" && DEFAULT_NAME.test(n.name)) {
+        const name = nameFromContent(n);
+        if (name && name !== n.name) {
+          const from = n.name;
+          n.name = name;
+          record(n, "names", from, name);
+        }
+      }
+    }
+    return { scope: scope.label, fixed: counts, changes, truncated: scope.truncated || changes.length >= 200 };
+  }
+  function firstText(n, depth) {
+    if (n.type === "TEXT")
+      return n.characters;
+    if (depth > 3 || !("children" in n))
+      return "";
+    for (let i = 0;i < n.children.length; i++) {
+      if (n.children[i].visible === false)
+        continue;
+      const t = firstText(n.children[i], depth + 1);
+      if (t.trim())
+        return t;
+    }
+    return "";
+  }
+  function hasImage(n) {
+    return "fills" in n && n.fills !== figma.mixed && n.fills.some(function(f) {
+      return f.type === "IMAGE" && f.visible !== false;
+    });
+  }
+  function vectorOnly(n) {
+    if (n.type === "VECTOR" || n.type === "BOOLEAN_OPERATION" || n.type === "STAR" || n.type === "POLYGON")
+      return true;
+    if (!("children" in n) || !n.children.length || n.type === "TEXT")
+      return false;
+    for (let i = 0;i < n.children.length; i++)
+      if (!vectorOnly(n.children[i]))
+        return false;
+    return true;
+  }
+  function nameFromContent(n) {
+    if (hasImage(n))
+      return "Image";
+    if (n.type === "VECTOR" || (n.type === "GROUP" || n.type === "FRAME") && vectorOnly(n))
+      return "Icon";
+    const text = firstText(n, 0).split(`
+`)[0].trim();
+    if (text)
+      return text.length > 32 ? text.slice(0, 31) + "…" : text;
+    if (n.layoutMode === "HORIZONTAL")
+      return "Row";
+    if (n.layoutMode === "VERTICAL")
+      return "Column";
+    if (n.layoutMode === "GRID")
+      return "Grid";
+    return null;
   }
 
   // plugin/lib/audit.ts
@@ -726,6 +997,12 @@
   var MAX_ISSUES2 = 120;
   var DEFAULT_NAME = /^(Frame|Rectangle|Ellipse|Group|Vector|Text|Line|Polygon|Star|Component|Instance|Section|Image)( \d+)?$/;
   async function audit(p, _timeoutMs, requestId) {
+    if (p.fix === true || Array.isArray(p.fixes) && p.fixes.length) {
+      const fixed = await autoFix(p, requestId);
+      invalidateCaches();
+      const after = p.scope === "design-system" ? await designSystemHealth(p, requestId) : await lint(p);
+      return Object.assign({ fixed: fixed.fixed, changes: fixed.changes, fixScope: fixed.scope }, after);
+    }
     if (p.scope === "design-system")
       return designSystemHealth(p, requestId);
     return lint(p);
@@ -3543,7 +3820,7 @@
   };
   async function handleRequest(msg) {
     const started = Date.now();
-    const mutates = !READ_ONLY[msg.method];
+    const mutates = !READ_ONLY[msg.method] || !!(msg.params && (msg.params.fix === true || msg.params.fixes && msg.params.fixes.length));
     let reply;
     if (mutates)
       commitUndo();

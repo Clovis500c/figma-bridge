@@ -169,7 +169,7 @@ const server = new McpServer(
       "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
       "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
       "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
-      "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again. audit {scope:'design-system'} scores the file's design system.",
+      "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again. audit {scope:'design-system'} scores the file's design system; audit {fix:true} binds raw values to variables and styles.",
       "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
       "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
       "Existing website or HTML → import_web turns it into editable auto-layout frames (one per viewport); then compare against the returned reference screenshot.",
@@ -378,7 +378,10 @@ server.registerTool(
       "Returns issues with nodeId, severity and message.\n" +
       "scope \"design-system\" scores the whole file (or nodeId) from 0 to 100, overall and per category: tokens (raw colors, spacing and radii vs variables and styles), " +
       "contrast, typography (text using text styles), components (detached-looking frames, heavily overridden instances), styles (duplicate or unused styles, variables and components), " +
-      'naming (default layer names, token naming convention). Returns the scores and concrete issues. Example: {"scope":"design-system"}.',
+      "naming (default layer names, token naming convention). Returns the scores and concrete issues.\n" +
+      "fix:true applies safe fixes to nodeId / the selection / the page, as one undo step: binds raw colors to the closest color variable (same value or ΔE < 2, as the layer's mode sees it), " +
+      "spacing, padding and radii to number variables with the same value, applies text styles that match exactly, and renames default layer names from their content. " +
+      'Returns {fixed, changes:[{nodeId, fix, from, to}]} plus the report after fixing. fixes limits it, e.g. ["colors","names"]. Example: {"scope":"design-system"} then {"fix":true}.',
     inputSchema: {
       nodeId: z.string().optional(),
       scope: z.enum(["layers", "design-system"]).optional().describe("Default layers"),
@@ -386,10 +389,12 @@ server.registerTool(
         .array(z.string())
         .optional()
         .describe("layers scope only: contrast, text-overflow, clipped, missing-font, tiny-text, no-auto-layout, off-grid, fractional, default-name, empty, font-sprawl, type-scale"),
+      fix: z.boolean().optional().describe("Apply the safe fixes, then report"),
+      fixes: z.array(z.enum(["colors", "numbers", "textStyles", "names"])).optional().describe("Only these fixes (implies fix)"),
     },
   },
   (args) =>
-    track("audit", `${args.scope ?? "layers"} ${args.nodeId ?? ""}`, async () => ok(await bridge.request("audit", args, 120_000))),
+    track("audit", `${args.scope ?? "layers"}${args.fix || args.fixes ? " fix" : ""} ${args.nodeId ?? ""}`, async () => ok(await bridge.request("audit", args, 120_000))),
 );
 
 server.registerTool(

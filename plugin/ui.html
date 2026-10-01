@@ -800,7 +800,7 @@ function summarize(msg) {
       return vars + " variable" + (vars === 1 ? "" : "s") + " · " + styles + " style" + (styles === 1 ? "" : "s");
     }
     case "export_tokens": return p.collections && p.collections.length ? p.collections.join(", ") : "Variables and styles";
-    case "audit": return (p.scope === "design-system" ? "Design system health · " : "") + (p.nodeId ? "Node " + p.nodeId : p.scope === "design-system" ? "Whole file" : "Selection");
+    case "audit": return (p.fix || p.fixes ? "Fix · " : p.scope === "design-system" ? "Design system health · " : "") + (p.nodeId ? "Node " + p.nodeId : p.scope === "design-system" && !p.fix ? "Whole file" : "Selection");
     case "get_css": return p.nodeId ? "Node " + p.nodeId : "Selection";
     case "checkpoint": return p.action.charAt(0).toUpperCase() + p.action.slice(1) + (p.label ? " · " + p.label : p.id ? " · " + p.id : "");
     default: return "";

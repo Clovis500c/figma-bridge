@@ -258,8 +258,15 @@ if (singleModePlan) {
 } else {
   check("build modes", !dark.isError && !dark.data.warnings && darkFill.data.result?.pad === 16, darkFill.data.result ?? dark.data);
 }
+const raw = await call("build", { select: false, spec: { name: "selftest raw", layout: "column", padding: 16, fill: "#FFFFFF", children: [{ text: "raw" }] } });
+const fixed = await call("audit", { fix: true, fixes: ["colors", "numbers"], nodeId: raw.data.rootId });
+const fixedInfo = await call("run_script", {
+  code: `const n = await figma.getNodeByIdAsync(${JSON.stringify(raw.data.rootId)}); return { fill: !!n.fills[0].boundVariables?.color, pad: !!n.boundVariables?.paddingTop }`,
+});
+check("audit fix", !fixed.isError && fixedInfo.data.result?.fill && fixedInfo.data.result.pad, { fixed: fixed.data.fixed, result: fixedInfo.data.result, error: fixed.data.error });
 const health = await call("audit", { scope: "design-system" });
 check("audit design-system", !health.isError && typeof health.data.score === "number" && !!health.data.categories?.tokens, { score: health.data.score, issues: health.data.totalIssues, error: health.data.error });
+await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(raw.data.rootId ?? "")}))?.remove()` });
 const tokenCleanup = await call("run_script", {
   code: `
     for (const c of await figma.variables.getLocalVariableCollectionsAsync()) if (c.name === "selftest tokens") c.remove();

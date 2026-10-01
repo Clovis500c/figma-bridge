@@ -182,7 +182,8 @@ const READ_ONLY: { [method: string]: boolean } = {
 
 async function handleRequest(msg: any) {
   const started = Date.now();
-  const mutates = !READ_ONLY[msg.method];
+  // audit is read-only unless it applies fixes.
+  const mutates = !READ_ONLY[msg.method] || !!(msg.params && (msg.params.fix === true || (msg.params.fixes && msg.params.fixes.length)));
   let reply: any;
   // Each AI command becomes a single Ctrl+Z step.
   if (mutates) commitUndo();
