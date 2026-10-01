@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer } from "node:net";
-import { Bridge, BridgeError, Framer, type Msg } from "../src/bridge";
+import { Bridge, BridgeError, callTarget, Framer, type Msg } from "../src/bridge";
 
 const noop = () => {};
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -43,7 +43,7 @@ class FakePlugin {
     origin?: string,
   ) {
     this.ws = browserSocket(port, origin);
-    this.ws.onopen = () => this.send({ t: "hello", role: "plugin", channel: "default", version: "9.9.9", session: { id, fileName, page: "Page 1" } });
+    this.ws.onopen = () => this.send({ t: "hello", role: "plugin", channel: "default", version: "9.9.9", session: { id, fileName, page: "Page 1", editorType: /board/i.test(fileName) ? "figjam" : "figma" } });
     this.ws.onmessage = (ev) => {
       const m = this.framer.decode(String(ev.data));
       if (!m) return;
@@ -155,6 +155,25 @@ describe("hub", () => {
     await hub.select("s1");
     expect(await hub.request<{ from: string }>("ping")).toMatchObject({ from: "s1" });
     await expect(agent.select("nothing like it")).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  test("{file} targets one file per call, in parallel, without changing the selection", async () => {
+    const { agent, plugin } = await setup();
+    const a = plugin("s1", "Marketing site");
+    const b = plugin("s2", "Team board");
+    // Each plugin answers after 300 ms: two calls at once must not take 600 ms.
+    for (const p of [a, b]) p.onRequest = (m) => setTimeout(() => p.send({ t: "res", id: m.id, ok: true, result: p.reply(m) }), 300);
+    await Promise.all([a.ready(), b.ready()]);
+    const t0 = Date.now();
+    const [ra, rb] = await Promise.all([
+      callTarget.run({ file: "marketing" }, () => agent.request<{ from: string }>("ping")),
+      callTarget.run({ file: "s2" }, () => agent.request<{ from: string }>("ping")),
+    ]);
+    expect([ra.from, rb.from]).toEqual(["s1", "s2"]);
+    expect(Date.now() - t0).toBeLessThan(550);
+    expect(agent.selection).toEqual({});
+    await expect(callTarget.run({ file: "nope" }, () => agent.request("ping"))).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await agent.sessions()).map((s) => [s.fileName, s.editorType])).toEqual([["Marketing site", "figma"], ["Team board", "figjam"]]);
   });
 
   test("errors from the plugin keep their code and details", async () => {
