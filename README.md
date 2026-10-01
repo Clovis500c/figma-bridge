@@ -13,6 +13,10 @@ and any other MCP client.
 
 <p align="center"><img src="docs/plugin.jpg" alt="Figma Bridge plugin" width="620"></p>
 
+<!-- Demo: record it with docs/record-demo.md, save it as docs/demo.gif, then uncomment.
+<p align="center"><img src="docs/demo.gif" alt="An agent building, importing and exporting with Figma Bridge" width="720"></p>
+-->
+
 ## Features
 
 - **Build whole layouts in one call** from a JSON spec: auto-layout and grid, rich text, icons, images, component sets with variants and properties, prototype links.
@@ -25,6 +29,25 @@ and any other MCP client.
 - **Figma Design, FigJam and Slides**: stickies, shapes, connectors, tables, Mermaid flowcharts laid out as diagrams, and slide decks; several files at once ([details](docs/figjam-slides.md)).
 - **200 000+ icons** through Iconify, checkpoints to roll back, and a library of reusable scripts.
 - **Zero-friction connection**: the plugin connects and reconnects on its own. Each AI command is one Ctrl+Z step, and you can cancel it from the plugin.
+
+## How it compares
+
+| | Figma Bridge | [figma-console-mcp](https://github.com/southleft/figma-console-mcp) | [Figwright](https://github.com/awdr74100/figwright) | [Figma MCP server](https://help.figma.com/hc/en-us/articles/39216419318551-Get-started-with-the-Figma-MCP-server) (official) |
+|---|---|---|---|---|
+| Setup | `npx … setup` configures every AI client found and installs the plugin | npx, a personal access token, plugin import | Plugin zip import, MCP config | OAuth (remote) or the desktop app |
+| Figma plan or seat | Any, free included | Any | Any, free included | Writing to the canvas: Full or Dev seat on a paid plan |
+| API token | Not needed (only for comments and versions) | Required | Not needed | OAuth sign-in |
+| Tools | 27 | 121 | 116 | 16 |
+| Whole layout in one call | ✓ `build` spec (auto-layout, grid, variants, prototype) | Component sets from a variant matrix | — | — |
+| Pixel diff against a mockup | ✓ `compare`, with heatmap | — | Diff against a saved baseline | — |
+| Checkpoints to roll back | ✓ | — | — | — |
+| Website or HTML → editable layers | ✓ any URL, HTML or file, several widths | — | — | Captures UI rendered in a browser |
+| Code that uses your components and tokens | ✓ React, Next, Vue, Svelte, React Native | — | ✓ | ✓ with Code Connect |
+| Token export | DTCG, CSS, Tailwind v3/v4, SCSS, TS, JSON | 10 formats | — | — |
+| FigJam and Slides | ✓ boards, Mermaid diagrams, decks | ✓ | FigJam, partly | — |
+
+Based on each project's documentation in October 2026; "—" means it isn't documented there. Corrections are welcome
+in an issue.
 
 ## Installation
 
@@ -106,11 +129,15 @@ Keep the plugin open (the **—** button collapses it to a thin bar) and ask you
 
 > Design a mobile sign-in screen from scratch on a new page: logo, email and password fields, a primary button and a "Forgot password?" link.
 
-> Create our design system from `tokens.json` (Light and Dark modes), then rebuild the selected screen with those variables and show it in Dark mode.
+> Import https://example.com/pricing at desktop and mobile widths, then rename the layers and use our text styles.
 
-> Import https://example.com/pricing at desktop and mobile widths, then rename the layers and swap the fonts for ours.
+> Export the selected card into C:\code\my-app using our existing components, then write it.
 
-> Reproduce `C:\mockups\dashboard.png` as an editable frame with auto-layout, compare it with the screenshot and fix the differences.
+> Audit our design system, fix what can be fixed safely, and tell me the score before and after.
+
+Clients that support MCP prompts also offer ready-made workflows: **new-screen**, **apply-design-system**,
+**reproduce-screenshot**, **import-website**, **figma-to-code** and **audit-and-fix**. Ready-made specs and tokens are
+in [examples/](examples).
 
 When your agent needs you to point at something, the plugin shows **Your agent is waiting** until you select it.
 A running command has a **Cancel** button: `build` stops at the next layer, but a script cannot be interrupted and
@@ -167,8 +194,9 @@ bun test          # unit tests (bridge, setup, schemas, tokens, code generation,
 bun run test      # end-to-end test against an open Figma file
 ```
 
-To release, change `version` in `package.json`, then run **Actions → Release → Run workflow** on `main`: it publishes to
-npm and creates the GitHub release.
+To release, change `version` in `package.json` and `server.json`, then run **Actions → Release → Run workflow** on `main`:
+it publishes to npm and creates the GitHub release. Directory listings (MCP Registry, Glama, Smithery, LobeHub) are
+described in [docs/publishing.md](docs/publishing.md).
 
 Options: `FIGMA_BRIDGE_PORT` (default `3055`), `FIGMA_BRIDGE_CHANNEL`, `FIGMA_BRIDGE_OUT`, `FIGMA_BRIDGE_SNIPPETS`,
 `FIGMA_BRIDGE_BROWSER`, and `FIGMA_TOKEN` for the optional REST tools.
