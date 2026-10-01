@@ -243,6 +243,29 @@ server.registerTool(
 );
 
 server.registerTool(
+  "find",
+  {
+    title: "Find layers",
+    description:
+      "Search layers across all pages (or one page / subtree) by name, text content, type, style name or component. " +
+      'Strings match as case-insensitive substrings, or as a regex when written "/pattern/flags". Filters combine (AND). ' +
+      "Returns {total, matches:[{id, name, type, page, path, text?}], truncated}. Use it to locate layers before describe, build into them or run_script.",
+    inputSchema: {
+      name: z.string().optional().describe('Layer name, e.g. "button" or "/^Card \\d+$/"'),
+      text: z.string().optional().describe("Text content of TEXT layers"),
+      type: z.array(z.string()).optional().describe('Node types, e.g. ["FRAME","INSTANCE","TEXT","COMPONENT","COMPONENT_SET","SECTION"]'),
+      style: z.string().optional().describe("Name of a paint, text or effect style the layer uses"),
+      component: z.string().optional().describe("Instances of this component or component set (name, id or key)"),
+      pageId: z.string().optional().describe("Only this page"),
+      parentId: z.string().optional().describe("Only inside this layer"),
+      limit: z.number().int().min(1).max(500).optional().describe("Max matches returned, default 50"),
+    },
+  },
+  (args) =>
+    track("find", oneLine(JSON.stringify(args)), async () => ok(await bridge.request("find", args, 60_000))),
+);
+
+server.registerTool(
   "get_design_system",
   {
     title: "List styles, variables and components",

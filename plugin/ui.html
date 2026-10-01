@@ -314,6 +314,7 @@
       <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19.5 6v5.5c0 4.5-3.2 7.7-7.5 9-4.3-1.3-7.5-4.5-7.5-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
       <symbol id="i-braces" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H7a2 2 0 0 0-2 2v3.5a2 2 0 0 1-2 2 2 2 0 0 1 2 2V18a2 2 0 0 0 2 2h1M16 4h1a2 2 0 0 1 2 2v3.5a2 2 0 0 0 2 2 2 2 0 0 0-2 2V18a2 2 0 0 1-2 2h-1"/></symbol>
       <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5"/><path d="M3.5 4v4.5H8M12 8v4.5l3 2"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5.5 12.5 4 4 9-9"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     </defs>
@@ -435,6 +436,7 @@ const METHODS = {
   run_script: { label: "Script", color: "#8b5cf6", icon: "i-script" },
   build: { label: "Build", color: "#0d99ff", icon: "i-build" },
   describe: { label: "Describe", color: "#64748b", icon: "i-tree" },
+  find: { label: "Find", color: "#64748b", icon: "i-search" },
   get_design_system: { label: "Design system", color: "#64748b", icon: "i-swatch" },
   design_tokens: { label: "Design tokens", color: "#0d99ff", icon: "i-swatch" },
   audit: { label: "Audit", color: "#16a34a", icon: "i-shield" },
@@ -589,6 +591,15 @@ function summarize(msg) {
       walk(p.spec);
       const root = Array.isArray(p.spec) ? p.spec[0] : p.spec;
       return ((root && root.name) || "Layout") + " · " + count + " layer" + (count === 1 ? "" : "s");
+    }
+    case "find": {
+      const parts = [];
+      if (p.name) parts.push("name “" + p.name + "”");
+      if (p.text) parts.push("text “" + p.text + "”");
+      if (p.type) parts.push([].concat(p.type).join("|").toLowerCase());
+      if (p.style) parts.push("style “" + p.style + "”");
+      if (p.component) parts.push("instances of “" + p.component + "”");
+      return parts.join(" · ") || "Layers";
     }
     case "describe": return (p.nodeId ? "Node " + p.nodeId : "Selection") + (p.depth !== undefined ? " · depth " + p.depth : "");
     case "get_design_system": return p.include ? p.include.join(", ") : "Styles, variables and components";

@@ -6,6 +6,7 @@ import { checkpoint } from "./lib/checkpoint";
 import { describe } from "./lib/describe";
 import { getDesignSystem } from "./lib/design-system";
 import { designTokens } from "./lib/tokens";
+import { find } from "./lib/find";
 import {
   codeError,
   fontNamesOf,
@@ -129,6 +130,7 @@ const HANDLERS: { [method: string]: Handler } = {
   run_script: runScript,
   build: build,
   describe: describe,
+  find: find,
   get_design_system: getDesignSystem,
   design_tokens: designTokens,
   audit: audit,
@@ -147,6 +149,7 @@ const HANDLERS: { [method: string]: Handler } = {
 // Read-only commands don't need their own undo step.
 const READ_ONLY: { [method: string]: boolean } = {
   describe: true,
+  find: true,
   get_design_system: true,
   audit: true,
   get_css: true,

@@ -40,7 +40,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 18, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 19, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -248,6 +248,12 @@ const richInfo = await call("run_script", {
   code: `const t = await figma.getNodeByIdAsync(${JSON.stringify(rich.data.rootId)}); return { text: t.characters, style: t.getRangeFontName(9, 13).style, link: t.getRangeHyperlink(9, 13)?.value, size: t.getRangeFontSize(13, 17) }`,
 });
 check("build spans", !rich.isError && richInfo.data.result?.style === "Bold" && richInfo.data.result.size === 20 && !!richInfo.data.result.link, richInfo.data.result ?? rich.data);
+
+const found = await call("find", { text: "docs", type: ["TEXT"] });
+const foundRe = await call("find", { name: "/^selftest (grid|rich)$/", limit: 5 });
+check("find", !found.isError && found.data.matches?.some((m: any) => m.id === rich.data.rootId) && foundRe.data.total >= 2, { text: found.data.total, regex: foundRe.data.total });
+const foundInst = await call("find", { component: "selftest Button" });
+check("find (component)", !foundInst.isError && typeof foundInst.data.total === "number", foundInst.data.total ?? foundInst.data);
 
 const buildCleanup = await call("run_script", {
   code: `for (const id of ${JSON.stringify([set.data.rootId, grid.data.rootId, rich.data.rootId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,

@@ -2038,6 +2038,118 @@
     return v;
   }
 
+  // plugin/lib/find.ts
+  var MAX_LIMIT = 500;
+  function matcher(q) {
+    if (q === undefined || q === null || q === "")
+      return null;
+    const str = String(q);
+    const m = /^\/(.+)\/([gimsuy]*)$/.exec(str);
+    if (m) {
+      let re;
+      try {
+        re = new RegExp(m[1], m[2].replace("g", ""));
+      } catch (e) {
+        throw codeError("Invalid regex " + str + ": " + (e.message || e), "BAD_ARGS");
+      }
+      return function(s) {
+        return re.test(s);
+      };
+    }
+    const needle = str.toLowerCase();
+    return function(s) {
+      return s.toLowerCase().indexOf(needle) !== -1;
+    };
+  }
+  async function find2(p) {
+    const byName = matcher(p.name);
+    const byText = matcher(p.text);
+    const byStyle = matcher(p.style);
+    const byComponent = matcher(p.component);
+    const types = (Array.isArray(p.type) ? p.type : p.type ? [p.type] : []).map(function(t) {
+      return String(t).toUpperCase().replace(/[\s-]/g, "_");
+    });
+    if (!byName && !byText && !byStyle && !byComponent && !types.length) {
+      throw codeError("Give at least one filter: name, text, type, style or component", "BAD_ARGS");
+    }
+    const limit = Math.max(1, Math.min(MAX_LIMIT, p.limit || 50));
+    let roots;
+    if (p.parentId)
+      roots = [await getNode(p.parentId)];
+    else if (p.pageId)
+      roots = [await getNode(p.pageId)];
+    else
+      roots = figma.root.children.slice();
+    for (let i = 0;i < roots.length; i++)
+      if (roots[i].type === "PAGE")
+        await roots[i].loadAsync();
+    const test = function(n) {
+      if (types.length && types.indexOf(n.type) === -1)
+        return false;
+      if (byName && !byName(n.name))
+        return false;
+      if (byText && !(n.type === "TEXT" && byText(n.characters)))
+        return false;
+      if (byComponent && n.type !== "INSTANCE")
+        return false;
+      if (byStyle && !(n.fillStyleId || n.strokeStyleId || n.textStyleId || n.effectStyleId))
+        return false;
+      return true;
+    };
+    let candidates = [];
+    for (let i = 0;i < roots.length; i++) {
+      const r = roots[i];
+      if (r.type !== "PAGE" && test(r))
+        candidates.push(r);
+      if ("findAll" in r)
+        candidates = candidates.concat(r.findAll(test));
+    }
+    const matches = [];
+    let total = 0;
+    for (let i = 0;i < candidates.length; i++) {
+      const n = candidates[i];
+      if (byStyle && !await usesStyle(n, byStyle))
+        continue;
+      if (byComponent && !await isInstanceOf(n, byComponent, String(p.component)))
+        continue;
+      total++;
+      if (matches.length < limit)
+        matches.push(describeMatch(n));
+    }
+    return { total, matches, truncated: total > matches.length };
+  }
+  async function usesStyle(n, test) {
+    const fields = ["fillStyleId", "strokeStyleId", "textStyleId", "effectStyleId"];
+    for (let i = 0;i < fields.length; i++) {
+      const name = await styleName(n[fields[i]]);
+      if (name && test(name))
+        return true;
+    }
+    return false;
+  }
+  async function isInstanceOf(n, test, ref) {
+    const main = await n.getMainComponentAsync();
+    if (!main)
+      return false;
+    if (main.id === ref || main.key === ref || test(main.name))
+      return true;
+    const set = main.parent && main.parent.type === "COMPONENT_SET" ? main.parent : null;
+    return !!set && (set.id === ref || set.key === ref || test(set.name));
+  }
+  function describeMatch(n) {
+    const names = [];
+    let p = n.parent;
+    while (p && p.type !== "PAGE" && p.type !== "DOCUMENT") {
+      names.unshift(p.name);
+      p = p.parent;
+    }
+    const page = pageOf(n);
+    const out = { id: n.id, name: n.name, type: n.type, page: page ? page.name : null, path: names.join(" / ") };
+    if (n.type === "TEXT")
+      out.text = n.characters.length > 80 ? n.characters.slice(0, 77) + "…" : n.characters;
+    return out;
+  }
+
   // plugin/code.ts
   var VERSION = "1.3.0";
   var DEFAULT_SIZE = { width: 340, height: 540 };
@@ -2139,6 +2251,7 @@
     run_script: runScript,
     build,
     describe,
+    find: find2,
     get_design_system: getDesignSystem,
     design_tokens: designTokens,
     audit,
@@ -2155,6 +2268,7 @@
   };
   var READ_ONLY = {
     describe: true,
+    find: true,
     get_design_system: true,
     audit: true,
     get_css: true,
