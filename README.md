@@ -110,7 +110,7 @@ Each tool describes its parameters to the agent, which needs no extra instructio
 | Plugin status | Fix |
 |---|---|
 | **Offline** | The MCP server isn't running: start or restart your AI client and check that `FigmaBridge` is enabled. |
-| **Port busy** | Another program uses port 3055 (often an old TalkToFigma socket). Close it; the plugin reconnects. |
+| **Port busy** | Another program uses port 3055. Close it; the plugin reconnects. |
 
 Logs and screenshots are written to `%TEMP%\figma-bridge`.
 
