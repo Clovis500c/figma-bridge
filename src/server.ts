@@ -12,7 +12,7 @@ import { generateCode, type IrNode } from "./codegen";
 import { normalizeTokens } from "./tokens";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 
-const VERSION = "1.4.0";
+const VERSION = "1.5.0";
 const PORT = Number(process.env.FIGMA_BRIDGE_PORT) || 3055;
 const CHANNEL = process.env.FIGMA_BRIDGE_CHANNEL || "default";
 const OUT_DIR = process.env.FIGMA_BRIDGE_OUT || join(tmpdir(), "figma-bridge");
