@@ -1,7 +1,26 @@
 // Figma Bridge — plugin main thread.
-// Syntax stays ES2017 (no ?. ?? or object spread): the plugin sandbox parser is conservative.
+// Syntax stays ES2017 (no ?. ?? object spread or optional catch binding): the sandbox parser is conservative.
+import { audit } from "./lib/audit";
+import { build } from "./lib/build";
+import { checkpoint } from "./lib/checkpoint";
+import { describe } from "./lib/describe";
+import { getDesignSystem } from "./lib/design-system";
+import {
+  codeError,
+  fontNamesOf,
+  getNode,
+  invalidateCaches,
+  loadFont,
+  pageOf,
+  parentFor,
+  parseHex,
+  place,
+  round,
+  safeStringify,
+  toSafe,
+} from "./lib/util";
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const DEFAULT_SIZE = { width: 340, height: 540 };
 const MIN_SIZE = { width: 280, height: 260 };
 const MAX_SIZE = { width: 900, height: 1200 };
@@ -10,21 +29,9 @@ const COMPACT_HEIGHT = 44;
 figma.skipInvisibleInstanceChildren = true;
 figma.showUI(__html__, { width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height, themeColors: true, title: "Figma Bridge" });
 
+const sessionId = randomId();
 let size = { width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height };
 let compact = false;
-
-function clampSize(w: number, h: number) {
-  return {
-    width: Math.round(Math.min(MAX_SIZE.width, Math.max(MIN_SIZE.width, Number(w) || DEFAULT_SIZE.width))),
-    height: Math.round(Math.min(MAX_SIZE.height, Math.max(MIN_SIZE.height, Number(h) || DEFAULT_SIZE.height))),
-  };
-}
-
-function applySize() {
-  figma.ui.resize(size.width, compact ? COMPACT_HEIGHT : size.height);
-}
-
-const sessionId = randomId();
 
 function randomId(): string {
   let s = "";
@@ -38,6 +45,17 @@ function post(msg: any) {
 
 function sessionInfo() {
   return { id: sessionId, fileName: figma.root.name, page: figma.currentPage.name };
+}
+
+function clampSize(w: number, h: number) {
+  return {
+    width: Math.round(Math.min(MAX_SIZE.width, Math.max(MIN_SIZE.width, Number(w) || DEFAULT_SIZE.width))),
+    height: Math.round(Math.min(MAX_SIZE.height, Math.max(MIN_SIZE.height, Number(h) || DEFAULT_SIZE.height))),
+  };
+}
+
+function applySize() {
+  figma.ui.resize(size.width, compact ? COMPACT_HEIGHT : size.height);
 }
 
 async function sendInit() {
@@ -95,9 +113,8 @@ async function focusNode(id: string) {
     figma.notify("This layer no longer exists", { timeout: 2000 });
     return;
   }
-  let page: BaseNode | null = node;
-  while (page && page.type !== "PAGE") page = page.parent;
-  if (page && page !== figma.currentPage) await figma.setCurrentPageAsync(page as PageNode);
+  const page = pageOf(node);
+  if (page && page !== figma.currentPage) await figma.setCurrentPageAsync(page);
   if (node.type === "PAGE") return;
   figma.currentPage.selection = [node as SceneNode];
   figma.viewport.scrollAndZoomIntoView([node as SceneNode]);
@@ -109,6 +126,12 @@ type Handler = (params: any, timeoutMs: number) => Promise<any>;
 
 const HANDLERS: { [method: string]: Handler } = {
   run_script: runScript,
+  build: build,
+  describe: describe,
+  get_design_system: getDesignSystem,
+  audit: audit,
+  get_css: getCss,
+  checkpoint: checkpoint,
   screenshot: screenshot,
   place_image: placeImage,
   import_svg: importSvg,
@@ -119,25 +142,44 @@ const HANDLERS: { [method: string]: Handler } = {
   },
 };
 
+// Read-only commands don't need their own undo step.
+const READ_ONLY: { [method: string]: boolean } = {
+  describe: true,
+  get_design_system: true,
+  audit: true,
+  get_css: true,
+  screenshot: true,
+  get_context: true,
+  list_fonts: true,
+  ping: true,
+};
+
 async function handleRequest(msg: any) {
   const started = Date.now();
+  const mutates = !READ_ONLY[msg.method];
   let reply: any;
+  // Each AI command becomes a single Ctrl+Z step.
+  if (mutates) commitUndo();
   try {
     const handler = HANDLERS[msg.method];
-    if (!handler) throw codeError("Unknown method: " + msg.method, "UNKNOWN_METHOD");
+    if (!handler) throw codeError("Unknown method: " + msg.method + " (reopen the plugin after updating it)", "UNKNOWN_METHOD");
     const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000));
     reply = { t: "res", id: msg.id, ok: true, result: result };
   } catch (e) {
     reply = Object.assign({ t: "res", id: msg.id, ok: false }, describeError(e));
   }
+  if (mutates) {
+    commitUndo();
+    invalidateCaches();
+  }
   reply.ms = Date.now() - started;
   post(reply);
 }
 
-function codeError(message: string, code: string): Error {
-  const e: any = new Error(message);
-  e.code = code;
-  return e;
+function commitUndo() {
+  try {
+    figma.commitUndo();
+  } catch (e) {}
 }
 
 function describeError(e: any) {
@@ -154,18 +196,45 @@ function describeError(e: any) {
 // ─── run_script ─────────────────────────────────────────────────────────────
 
 const AsyncFunction: any = Object.getPrototypeOf(async function () {}).constructor;
-const SCRIPT_ARGS = ["figma", "console", "utils"];
+const SCRIPT_ARGS = ["figma", "console", "utils", "lib"];
 let lineBase: number | null = null;
+let currentConsole: any = console;
+
+// Snippet library sent by the server (saved with the `snippets` tool), compiled once per version.
+const lib: { [name: string]: (args?: any) => Promise<any> } = {};
+let libHash = "";
+
+function loadLibrary(hash: string, sources: { [name: string]: string }) {
+  if (!hash || hash === libHash) return;
+  const names = Object.keys(lib);
+  for (let i = 0; i < names.length; i++) delete lib[names[i]];
+  const keys = Object.keys(sources || {});
+  for (let i = 0; i < keys.length; i++) {
+    const name = keys[i];
+    try {
+      const fn = new AsyncFunction("figma", "utils", "lib", "console", "args", sources[name]);
+      lib[name] = function (args?: any) {
+        return fn(figma, utils, lib, currentConsole, args);
+      };
+    } catch (e) {
+      const message = "Snippet " + name + " does not compile: " + ((e as Error).message || e);
+      lib[name] = function () {
+        return Promise.reject(new Error(message));
+      };
+    }
+  }
+  libHash = hash;
+}
 
 function compile(code: string): { fn: any; offset: number } {
   // A lone expression is returned automatically: `figma.currentPage.name` works as-is.
   if (!/\breturn\b/.test(code)) {
     try {
       const expr = code.trim().replace(/;+\s*$/, "");
-      return { fn: new AsyncFunction(SCRIPT_ARGS[0], SCRIPT_ARGS[1], SCRIPT_ARGS[2], "return (\n" + expr + "\n);"), offset: 1 };
+      return { fn: new AsyncFunction(SCRIPT_ARGS[0], SCRIPT_ARGS[1], SCRIPT_ARGS[2], SCRIPT_ARGS[3], "return (\n" + expr + "\n);"), offset: 1 };
     } catch (e) {}
   }
-  return { fn: new AsyncFunction(SCRIPT_ARGS[0], SCRIPT_ARGS[1], SCRIPT_ARGS[2], code), offset: 0 };
+  return { fn: new AsyncFunction(SCRIPT_ARGS[0], SCRIPT_ARGS[1], SCRIPT_ARGS[2], SCRIPT_ARGS[3], code), offset: 0 };
 }
 
 function stackLine(stack: string): number | null {
@@ -205,10 +274,12 @@ async function runScript(p: any, timeoutMs: number) {
   const scriptConsole = makeConsole(logs);
   let compiled = { fn: null as any, offset: 0 };
   let timer: any;
+  loadLibrary(p.libHash, p.lib);
+  currentConsole = scriptConsole;
   try {
     compiled = compile(String(p.code || ""));
     const value = await Promise.race([
-      compiled.fn(figma, scriptConsole, utils),
+      compiled.fn(figma, scriptConsole, utils, lib),
       new Promise(function (_, reject) {
         timer = setTimeout(function () {
           reject(codeError("Script timed out after " + timeoutMs + " ms (async work may still be running in Figma)", "TIMEOUT"));
@@ -243,114 +314,13 @@ function makeConsole(logs: string[]) {
   return { log: add("log"), info: add("info"), warn: add("warn"), error: add("error"), debug: add("debug") };
 }
 
-function safeStringify(v: any): string {
-  try {
-    return JSON.stringify(toSafe(v, 0, []));
-  } catch (e) {
-    return String(v);
-  }
-}
-
-function isNode(v: any): boolean {
-  return v && typeof v === "object" && typeof v.id === "string" && typeof v.type === "string" && "removed" in v;
-}
-
-function nodeRef(n: any) {
-  return n.removed ? { id: n.id, removed: true } : { id: n.id, name: n.name, type: n.type };
-}
-
-/** Converts script results to plain JSON-safe data (nodes → {id,name,type}). */
-function toSafe(v: any, depth: number, seen: any[]): any {
-  if (v === null || v === undefined) return null;
-  const t = typeof v;
-  if (t === "number") return isFinite(v) ? v : String(v);
-  if (t === "string" || t === "boolean") return v;
-  if (t === "bigint" || t === "symbol") return String(v);
-  if (t === "function") return "[Function]";
-  if (v instanceof Uint8Array) return { type: "Uint8Array", length: v.length };
-  if (isNode(v)) return nodeRef(v);
-  if (v instanceof Error) return { error: v.message };
-  if (depth > 12) return "[MaxDepth]";
-  if (seen.indexOf(v) !== -1) return "[Circular]";
-  seen.push(v);
-  let out: any;
-  if (Array.isArray(v)) {
-    out = v.slice(0, 5000).map(function (x) {
-      return toSafe(x, depth + 1, seen);
-    });
-    if (v.length > 5000) out.push("… " + (v.length - 5000) + " more");
-  } else if (v instanceof Map) {
-    out = {};
-    v.forEach(function (val: any, key: any) {
-      out[String(key)] = toSafe(val, depth + 1, seen);
-    });
-  } else if (v instanceof Set) {
-    out = toSafe(Array.from(v), depth + 1, seen);
-  } else {
-    out = {};
-    const keys = Object.keys(v);
-    for (let i = 0; i < keys.length; i++) out[keys[i]] = toSafe(v[keys[i]], depth + 1, seen);
-  }
-  seen.pop();
-  return out;
-}
-
 // ─── Script helpers (`utils`) ───────────────────────────────────────────────
-
-const fontLoads: { [key: string]: Promise<void> } = {};
-
-function fontNamesOf(f: any): FontName[] {
-  if (typeof f === "string") {
-    const i = f.indexOf(":");
-    return [{ family: i === -1 ? f : f.slice(0, i), style: i === -1 ? "Regular" : f.slice(i + 1) }];
-  }
-  if (isNode(f) && f.type === "TEXT") {
-    const text = f as TextNode;
-    if (text.characters.length) return text.getRangeAllFontNames(0, text.characters.length);
-    return text.fontName === figma.mixed ? [] : [text.fontName as FontName];
-  }
-  if (f && typeof f.family === "string") return [{ family: f.family, style: f.style || "Regular" }];
-  if (Array.isArray(f)) {
-    let all: FontName[] = [];
-    for (let i = 0; i < f.length; i++) all = all.concat(fontNamesOf(f[i]));
-    return all;
-  }
-  throw new Error("loadFonts: expected 'Family:Style', FontName or TextNode, got " + safeStringify(f));
-}
-
-function parseHex(hex: string): RGBA {
-  let h = String(hex).replace(/^#/, "");
-  if (h.length === 3 || h.length === 4) {
-    h = h
-      .split("")
-      .map(function (c) {
-        return c + c;
-      })
-      .join("");
-  }
-  if (!/^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(h)) throw new Error("Invalid hex color: " + hex);
-  const n = function (i: number) {
-    return parseInt(h.slice(i, i + 2), 16) / 255;
-  };
-  return { r: n(0), g: n(2), b: n(4), a: h.length === 8 ? n(6) : 1 };
-}
 
 const utils = {
   /** utils.loadFonts('Inter:Bold', {family, style}, textNode, …) — cached per session. */
   loadFonts: async function (...fonts: any[]) {
     const names = fontNamesOf(fonts);
-    await Promise.all(
-      names.map(function (n) {
-        const key = n.family + "\u0000" + n.style;
-        if (!fontLoads[key]) {
-          fontLoads[key] = figma.loadFontAsync(n).catch(function (e) {
-            delete fontLoads[key];
-            throw new Error('Font "' + n.family + " " + n.style + '" is not available: ' + (e && e.message ? e.message : e));
-          });
-        }
-        return fontLoads[key];
-      }),
-    );
+    await Promise.all(names.map(loadFont));
     return names.length;
   },
   node: function (id: string) {
@@ -372,27 +342,33 @@ const utils = {
     const c = parseHex(hex);
     return [{ type: "SOLID", color: { r: c.r, g: c.g, b: c.b }, opacity: opacity === undefined ? c.a : opacity }];
   },
+  /** Same spec as the `build` tool (icons and image `src` need the tool itself). */
+  build: function (spec: any, options?: any) {
+    return build(Object.assign({}, options || {}, { spec: spec, select: options && options.select === true }));
+  },
+  /** Compact outline of a node tree, like the `describe` tool. */
+  describe: async function (node?: any, depth?: number) {
+    const id = node && typeof node === "object" ? node.id : node;
+    const out = await describe({ nodeId: id, depth: depth });
+    return out.outline;
+  },
 };
 
 // ─── Other commands ─────────────────────────────────────────────────────────
 
-async function getNode(id: string): Promise<BaseNode> {
-  const node = await figma.getNodeByIdAsync(id);
-  if (!node) throw codeError("Node not found: " + id, "NOT_FOUND");
-  return node;
-}
-
-async function parentFor(parentId?: string): Promise<BaseNode & ChildrenMixin> {
-  if (!parentId) return figma.currentPage;
-  const parent: any = await getNode(parentId);
-  if (!("appendChild" in parent)) throw codeError("Node " + parentId + " (" + parent.type + ") cannot have children", "BAD_ARGS");
-  return parent;
-}
-
-function place(node: SceneNode, x?: number, y?: number) {
-  const c = figma.viewport.center;
-  node.x = typeof x === "number" ? x : Math.round(c.x - node.width / 2);
-  node.y = typeof y === "number" ? y : Math.round(c.y - node.height / 2);
+async function getCss(p: any) {
+  const node: any = p.nodeId ? await getNode(p.nodeId) : figma.currentPage.selection[0];
+  if (!node) throw codeError("No nodeId given and nothing is selected", "BAD_ARGS");
+  if (typeof node.getCSSAsync !== "function") throw codeError("A " + node.type + " node has no CSS", "BAD_ARGS");
+  const out: any = { nodeId: node.id, name: node.name, css: await node.getCSSAsync() };
+  if (p.children && "children" in node) {
+    out.children = [];
+    const kids = node.children.slice(0, 50);
+    for (let i = 0; i < kids.length; i++) {
+      out.children.push({ nodeId: kids[i].id, name: kids[i].name, css: await kids[i].getCSSAsync() });
+    }
+  }
+  return out;
 }
 
 async function screenshot(p: any) {
@@ -410,7 +386,7 @@ async function screenshot(p: any) {
 async function placeImage(p: any) {
   if (!(p.bytes instanceof Uint8Array)) throw codeError("No image bytes received", "BAD_ARGS");
   const image = figma.createImage(p.bytes);
-  const size = await image.getSizeAsync();
+  const imgSize = await image.getSizeAsync();
   const paint: ImagePaint = { type: "IMAGE", imageHash: image.hash, scaleMode: p.scaleMode || "FILL" };
   let target: any;
   if (p.nodeId) {
@@ -421,10 +397,10 @@ async function placeImage(p: any) {
     let w = p.width;
     let h = p.height;
     if (!w && !h) {
-      w = size.width;
-      h = size.height;
-    } else if (!h) h = (w * size.height) / size.width;
-    else if (!w) w = (h * size.width) / size.height;
+      w = imgSize.width;
+      h = imgSize.height;
+    } else if (!h) h = (w * imgSize.height) / imgSize.width;
+    else if (!w) w = (h * imgSize.width) / imgSize.height;
     target = figma.createRectangle();
     target.name = p.name || "Image";
     target.resize(Math.max(1, w), Math.max(1, h));
@@ -438,8 +414,8 @@ async function placeImage(p: any) {
     imageHash: image.hash,
     width: round(target.width),
     height: round(target.height),
-    imageWidth: size.width,
-    imageHeight: size.height,
+    imageWidth: imgSize.width,
+    imageHeight: imgSize.height,
   };
 }
 
@@ -448,12 +424,9 @@ async function importSvg(p: any) {
   const node = figma.createNodeFromSvg(String(p.svg));
   if (p.name) node.name = p.name;
   (await parentFor(p.parentId)).appendChild(node);
-  place(node, p.x, p.y);
+  if (typeof p.size === "number" && node.height > 0) node.rescale(p.size / Math.max(node.width, node.height));
+  if (!("layoutMode" in node.parent! && (node.parent as any).layoutMode !== "NONE")) place(node, p.x, p.y);
   return { nodeId: node.id, name: node.name, width: round(node.width), height: round(node.height) };
-}
-
-function round(n: number) {
-  return Math.round(n * 100) / 100;
 }
 
 function bounds(n: any) {

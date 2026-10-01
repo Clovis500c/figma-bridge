@@ -20,6 +20,7 @@ so there are **no API quotas, no tokens, and no rate limits**.
 - [Installation](#installation)
 - [Daily use](#daily-use)
 - [What the AI can do (tools)](#what-the-ai-can-do-tools)
+- [Building layouts](#building-layouts)
 - [Writing scripts](#writing-scripts)
 - [Several Figma files or Claude windows](#several-figma-files-or-claude-windows)
 - [Troubleshooting](#troubleshooting)
@@ -178,22 +179,79 @@ collapsed, but **not when closed**: closing it disconnects the file.
 
 ## What the AI can do (tools)
 
-The tool set is small on purpose. `run_script` can do anything the Figma Plugin API can do. The other tools cover what
-a script can't do by itself: reading files from your disk, downloading URLs, and saving images.
+The AI gets 17 tools. The server also gives it a short workflow, so you don't need to explain any of this yourself:
+**read the file → build → check visually and with the audit → fix**.
+
+### Create
 
 | Tool | What it does |
 |---|---|
-| **`run_script`** `({ code, timeoutMs? })` | **The main tool.** Runs JavaScript inside Figma with the full Plugin API (`figma`). The code runs as the body of an async function: use `await` freely and `return` a result. A single expression is returned automatically. Default timeout 30 s, max 120 s. On failure it returns `{ ok: false, error, line, stack }`, where `line` is the line in *your* script. |
-| **`screenshot`** `({ nodeId?, scale?, format?, maxDimension?, returnImage? })` | Exports a node (by default the current selection) as PNG or JPG. The image is saved to a temp folder and the tool returns `{ path, width, height }`. This keeps images out of the AI's context unless it asks for them. With `returnImage: true` the AI also *sees* the image (capped at 1568 px). |
-| **`place_image`** `({ path` or `url, nodeId?, parentId?, x?, y?, width?, height?, scaleMode?, name? })` | Loads a PNG, JPG, WEBP or GIF from your disk or the web. It either sets it as the image fill of an existing node, or creates a new rectangle for it (native size, centred in view by default). WEBP files and images larger than 4096 px, Figma's limit, are converted automatically. |
-| **`import_svg`** `({ path` or `svgString, x?, y?, parentId?, name? })` | Turns an SVG into editable Figma vectors. |
-| **`get_context`** `()` | File name, pages, current page, selection (ids, names, types, positions and sizes) and viewport. The AI usually calls this first. |
-| **`list_fonts`** `({ filter?, limit? })` | Fonts available in Figma, grouped by family with their styles. |
-| **`list_sessions`** `()` | Which Figma files currently have the plugin open, and the bridge status. |
-| **`select_session`** `({ name })` | Chooses which file to work on when several are connected (by file name or part of it). |
+| **`build`** `({ spec, parentId?, x?, y?, defaults?, select? })` | **The fastest way to design.** Builds a whole layout from a JSON description in one call: frames with auto-layout, text, icons, images, component instances, styles and variables. Fonts are loaded automatically. See [Building layouts](#building-layouts). |
+| **`run_script`** `({ code, timeoutMs? })` | Runs any JavaScript inside Figma with the full Plugin API (`figma`), for everything `build` doesn't cover (editing existing layers, bulk renames, complex logic). `await` works at the top level; `return` a result. On failure it returns `{ ok: false, error, line, stack }`, where `line` is the line in *your* script. Default timeout 30 s, max 120 s. |
+| **`insert_icon`** `({ name, size?, color?, parentId?, x?, y? })` | Inserts an icon as editable vectors from any [Iconify](https://icon-sets.iconify.design/) set: `lucide:house`, `tabler:user`, `ph:heart`, `material-symbols:search`, `simple-icons:figma` (brand logos)… |
+| **`search_icons`** `({ query, prefix?, limit? })` | Searches 200 000+ open-source icons and returns their names. |
+| **`place_image`** `({ path` or `url, nodeId?, … })` | Places a PNG, JPG, WEBP or GIF from your disk or the web, as a fill of an existing layer or on a new rectangle. WEBP and images over 4096 px are converted automatically. |
+| **`import_svg`** `({ path` or `svgString, … })` | Turns an SVG into editable vectors. |
 
-The server also gives the AI short usage instructions: batch many changes into one script, load fonts before editing
-text, check the result with a screenshot. You don't need to explain any of this yourself.
+### Read and check
+
+| Tool | What it does |
+|---|---|
+| **`get_context`** `()` | File name, pages, current page, selection and viewport. The AI usually starts here. |
+| **`describe`** `({ nodeId?, depth?, maxNodes? })` | A compact outline of a design, one line per layer: type, name, id, size, auto-layout, colours, text, font, styles, variables, components. The AI reads your existing work cheaply before editing it. |
+| **`get_design_system`** `({ include?, limit? })` | Your file's colour, text and effect styles, variables (with values) and components (with variant options). The AI then reuses them instead of hard-coding colours. |
+| **`audit`** `({ nodeId?, rules? })` | Checks a design for low text contrast (WCAG AA), text overflowing its box, clipped layers, missing fonts, tiny text, frames without auto-layout, spacing off the 4 px grid, fractional sizes, default layer names, too many fonts or font sizes. |
+| **`screenshot`** `({ nodeId?, scale?, format?, maxDimension?, returnImage? })` | Exports a layer to a PNG/JPG file and returns its path and size. With `returnImage: true` the AI also *sees* it. |
+| **`get_css`** `({ nodeId?, children? })` | The CSS Figma generates for a layer, for turning a design into code. |
+| **`list_fonts`** `({ filter?, limit? })` | Installed fonts, grouped by family. |
+
+### Stay safe and go faster
+
+| Tool | What it does |
+|---|---|
+| **`checkpoint`** `({ action, nodeIds?, id?, label? })` | `save` copies layers to a **⟲ Bridge checkpoints** page; `restore` puts them back if an edit went wrong; `list` and `delete` manage them. |
+| **`snippets`** `({ action, name?, code?, description?, usage? })` | The AI's own library of reusable functions (a button, a card, a renaming pass…), saved in `~/.figma-bridge/snippets` and callable from any script as `await lib.name(args)`. It survives updates of this repo. |
+| **`list_sessions`** / **`select_session`** | Lists the Figma files with the plugin open, and picks which one to work on. |
+
+**Undo:** every command the AI runs is a **single Ctrl+Z step** in Figma, so you can undo a whole `build` or script at once.
+
+---
+
+## Building layouts
+
+`build` takes a tree of nodes. Each node is an object with optional `children`. The type is guessed from its
+properties (`text` → text, `icon` → icon, `src` → image, `component` → instance, otherwise a frame):
+
+```json
+{
+  "name": "Card", "layout": "column", "w": 320, "padding": 24, "gap": 12,
+  "fill": "#FFFFFF", "radius": 16, "stroke": "#E5E7EB", "shadow": true,
+  "children": [
+    { "text": "Pro plan", "size": 20, "weight": 600 },
+    { "text": "Everything you need to ship faster.", "color": "#6B7280", "w": "fill" },
+    { "layout": "row", "gap": 8, "align": "center", "children": [
+      { "icon": "lucide:check", "size": 16, "color": "#16A34A" },
+      { "text": "Unlimited projects" }
+    ]},
+    { "src": "C:/photos/hero.jpg", "w": "fill", "h": 160, "radius": 12 },
+    { "component": "Button", "props": { "Variant": "Primary" }, "text": { "Label": "Upgrade" } }
+  ]
+}
+```
+
+| Property | Values |
+|---|---|
+| `layout` | `"row"` or `"column"` turns on auto-layout. Leave it out for free positioning (`x`, `y` on children). |
+| `gap`, `padding`, `align`, `justify`, `wrap` | Auto-layout spacing (`gap: "auto"` = space between), padding (`24`, `[12, 24]` or `[t, r, b, l]`), cross-axis alignment (`start`, `center`, `end`, `baseline`), main-axis alignment (`start`, `center`, `end`, `between`). |
+| `w`, `h` | A number (fixed), `"fill"` (stretch inside an auto-layout parent) or `"hug"`. Auto-layout frames hug their content by default. |
+| `fill`, `stroke`, `color` | `"#RRGGBB"` or `"#RRGGBBAA"`, `"style:Brand/Primary"` (a paint style), `"var:color/primary"` (a variable), `{ "gradient": ["#a", "#b"], "angle": 90 }`, or `null`. |
+| Text | `text`, `font` (`"Inter"` or `"Inter:Bold"`), `weight` (`400`–`900`), `size`, `lineHeight` (`1.5`, `24` or `"150%"`), `letterSpacing`, `align`, `case`, `maxLines`, `textStyle: "style:Heading/H1"`. |
+| Effects | `radius` (number or 4 corners), `opacity`, `shadow` (`true`, an object, a list, or `"style:Name"`), `blur`, `backgroundBlur`. |
+| Variables | `gap`, `padding` and `radius` also accept `"var:spacing/md"`. |
+| Other types | `rect`, `ellipse`, `line`, `svg` (`{ "svg": "<svg…>" }`), `component` (a frame that becomes a component). |
+
+The result lists the id of every named layer (`ids`), so the AI can edit them afterwards. Missing fonts fall back to
+Inter and are reported in `warnings`, and a broken child is skipped without stopping the rest.
 
 ---
 
@@ -201,41 +259,28 @@ text, check the result with a screenshot. You don't need to explain any of this 
 
 You normally never write scripts: the AI does. This section is for reference or for writing your own.
 
-A script is the **body of an async function** that receives `figma`, `console` and `utils`:
+A script is the **body of an async function** that receives `figma`, `console`, `utils` and `lib`:
 
 ```js
-// Create a card with auto-layout and a title
-await utils.loadFonts("Inter:Bold", "Inter:Regular");
-
-const card = figma.createFrame();
-card.name = "Card";
-card.layoutMode = "VERTICAL";
-card.itemSpacing = 8;
-card.paddingLeft = card.paddingRight = card.paddingTop = card.paddingBottom = 24;
-card.cornerRadius = 16;
-card.fills = utils.solid("#1E1E2E");
-
-const title = figma.createText();
-title.fontName = { family: "Inter", style: "Bold" };
-title.characters = "Hello from Claude";
-title.fontSize = 24;
-title.fills = utils.solid("#FFFFFF");
-card.appendChild(title);
-
-figma.viewport.scrollAndZoomIntoView([card]);
-console.log("created card", card.id);   // shows up in `logs`
-return { id: card.id };                  // the tool's result
+// Rename every text layer of the selection after its content
+const texts = [];
+for (const n of figma.currentPage.selection) if ("findAll" in n) texts.push(...n.findAll((c) => c.type === "TEXT"));
+for (const t of texts) t.name = t.characters.slice(0, 30);
+console.log("renamed", texts.length);   // shows up in `logs`
+return texts.length;                     // the tool's result
 ```
 
-### Helpers (`utils`)
+### Helpers
 
 | Helper | What it does |
 |---|---|
-| `await utils.loadFonts("Inter:Bold", …)` | Loads fonts before you edit text. Accepts `"Family:Style"` strings, `{ family, style }` objects, or a text node (loads all its fonts). Fonts are cached, so calling it again is free. |
+| `await utils.loadFonts("Inter:Bold", …)` | Loads fonts before you edit text. Accepts `"Family:Style"`, `{ family, style }` or a text node. Cached. |
+| `await utils.build(spec, { parentId })` | Same as the `build` tool, from a script (icons and image `src` need the tool itself). |
+| `await utils.describe(nodeOrId, depth)` | Same outline as the `describe` tool, as text. |
 | `await utils.node("12:34")` | Gets a node by id (on any page). |
-| `await utils.page("Page name")` | Switches to a page by name or id and returns it. |
-| `utils.solid("#A259FF", 0.8?)` | Returns a solid fill (`Paint[]`), ready for `node.fills = …`. |
-| `utils.hex("#A259FF")` | Converts a hex colour to Figma's `{ r, g, b }` (0 to 1). |
+| `await utils.page("Page name")` | Switches to a page and returns it. |
+| `utils.solid("#A259FF", 0.8?)` / `utils.hex("#A259FF")` | A solid fill (`Paint[]`) / a Figma colour `{ r, g, b }`. |
+| `await lib.myHelper(args)` | Runs a snippet saved with the `snippets` tool. |
 
 ### Good to know
 
@@ -294,6 +339,8 @@ These are optional environment variables for the MCP server. Set them in the `en
 - **Web pages can't control your Figma.** Browsers always send an `Origin` header, so a website trying to open a
   WebSocket to the port is refused as a command sender. Only local programs (like the MCP server) can send commands.
 - The plugin can't reach the internet: its manifest allows no domains except `localhost:3055`.
+- The server only goes online for what you ask: icons (`api.iconify.design`, only the icon name is sent) and image URLs
+  passed to `place_image` or `build`.
 - `run_script` runs **arbitrary code** in your Figma file, which is the point. Only connect agents you trust, and keep
   normal Figma version history in mind (**File → Show version history**) if you want to roll back.
 
@@ -302,10 +349,13 @@ These are optional environment variables for the MCP server. Set them in the `en
 ## Development
 
 ```
-src/server.ts      MCP server (stdio) and the 8 tools
+src/server.ts      MCP server (stdio) and the 17 tools
 src/bridge.ts      WebSocket hub: sessions, request routing, large-message chunking, port takeover
+src/icons.ts       Iconify icons (fetch and search)
+src/snippets.ts    the snippet library (~/.figma-bridge/snippets)
 src/image.ts       reads image format and size from file headers (no dependencies)
-plugin/code.ts     plugin main thread, compiled to plugin/code.js
+plugin/code.ts     plugin main thread, bundled with plugin/lib/*.ts into plugin/code.js
+plugin/lib/        build, describe, design system, audit, checkpoints, shared helpers
 plugin/ui.html     plugin window: WebSocket, reconnection, image conversion, activity log
 plugin/manifest.json
 scripts/setup.ts   registers the MCP server in Claude Code (bun run setup)

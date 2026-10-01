@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { Bridge, BridgeError } from "./bridge";
+import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
+import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const PORT = Number(process.env.FIGMA_BRIDGE_PORT) || 3055;
 const CHANNEL = process.env.FIGMA_BRIDGE_CHANNEL || "default";
 const OUT_DIR = process.env.FIGMA_BRIDGE_OUT || join(tmpdir(), "figma-bridge");
@@ -46,12 +48,13 @@ function json(value: unknown): string {
   return JSON.stringify({
     truncated: true,
     totalChars: text.length,
-    note: "Output too large; return a smaller result (e.g. ids and names only).",
+    note: "Output too large; ask for less (smaller depth, a filter, or ids and names only).",
     preview: text.slice(0, MAX_OUTPUT_CHARS),
   });
 }
 
 const ok = (value: unknown): ToolResult => ({ content: [{ type: "text", text: json(value) }] });
+const plain = (text: string): ToolResult => ({ content: [{ type: "text", text }] });
 
 function failure(e: unknown): ToolResult {
   const out: Record<string, unknown> = { ok: false, error: (e as Error)?.message ?? String(e) };
@@ -76,20 +79,57 @@ async function track(name: string, summary: string, fn: () => Promise<ToolResult
 
 const oneLine = (s: string, max = 120) => s.replace(/\s+/g, " ").trim().slice(0, max);
 
-async function readImageSource(path?: string, url?: string): Promise<{ bytes: Uint8Array; label: string }> {
-  if (!!path === !!url) throw new BridgeError("Give exactly one of `path` or `url`.", "BAD_ARGS");
-  if (path) {
-    const file = Bun.file(path);
-    if (!(await file.exists())) throw new BridgeError(`File not found: ${path}`, "BAD_ARGS");
-    if (file.size > MAX_IMAGE_BYTES) throw new BridgeError(`Image is larger than ${MAX_IMAGE_BYTES >> 20} MB`, "TOO_LARGE");
-    return { bytes: new Uint8Array(await file.arrayBuffer()), label: path };
+async function readImageSource(source: string): Promise<Uint8Array> {
+  if (/^https?:\/\//i.test(source)) {
+    const res = await fetch(source, { signal: AbortSignal.timeout(30_000), redirect: "follow" });
+    if (!res.ok) throw new BridgeError(`Download failed: HTTP ${res.status} for ${source}`, "DOWNLOAD");
+    if (Number(res.headers.get("content-length")) > MAX_IMAGE_BYTES) throw new BridgeError("Remote image is too large", "TOO_LARGE");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length > MAX_IMAGE_BYTES) throw new BridgeError("Remote image is too large", "TOO_LARGE");
+    return bytes;
   }
-  const res = await fetch(url!, { signal: AbortSignal.timeout(30_000), redirect: "follow" });
-  if (!res.ok) throw new BridgeError(`Download failed: HTTP ${res.status} for ${url}`, "DOWNLOAD");
-  if (Number(res.headers.get("content-length")) > MAX_IMAGE_BYTES) throw new BridgeError("Remote image is too large", "TOO_LARGE");
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length > MAX_IMAGE_BYTES) throw new BridgeError("Remote image is too large", "TOO_LARGE");
-  return { bytes, label: url! };
+  const file = Bun.file(source);
+  if (!(await file.exists())) throw new BridgeError(`File not found: ${source}`, "BAD_ARGS");
+  if (file.size > MAX_IMAGE_BYTES) throw new BridgeError(`Image is larger than ${MAX_IMAGE_BYTES >> 20} MB`, "TOO_LARGE");
+  return new Uint8Array(await file.arrayBuffer());
+}
+
+/** Image bytes as the bridge payload; the plugin UI converts WEBP and oversized images. */
+async function imagePayload(source: string) {
+  const bytes = await readImageSource(source);
+  const info = imageInfo(bytes);
+  if (!info) throw new BridgeError(`Unsupported image (expected PNG, JPG, WEBP or GIF): ${source}`, "BAD_IMAGE");
+  const needsTranscode = info.format === "webp" || Math.max(info.width, info.height) > FIGMA_MAX_IMAGE_DIM;
+  return {
+    b64: Buffer.from(bytes).toString("base64"),
+    mime: info.mime,
+    transcode: needsTranscode ? { maxDim: FIGMA_MAX_IMAGE_DIM } : undefined,
+  };
+}
+
+/** Resolves icons and image sources of a build spec on the server (the plugin has no network access). */
+async function prepareSpec(spec: unknown, defaultColor: string) {
+  const images: Record<string, Awaited<ReturnType<typeof imagePayload>>> = {};
+  const jobs: Promise<void>[] = [];
+  let n = 0;
+  const walk = (node: any) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.icon && !node.svg) {
+      const size = typeof node.size === "number" ? node.size : 24;
+      jobs.push(iconSvg(String(node.icon), size, typeof node.color === "string" ? node.color : defaultColor).then((svg) => void (node.svg = svg)));
+    }
+    if (node.src && !node.imageKey) {
+      const key = `img${n++}`;
+      jobs.push(imagePayload(String(node.src)).then((img) => void (images[key] = img)));
+      node.imageKey = key;
+      delete node.src;
+    }
+    if (Array.isArray(node.children)) node.children.forEach(walk);
+  };
+  walk(spec);
+  await Promise.all(jobs);
+  return images;
 }
 
 const safeName = (s: string) => s.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "node";
@@ -101,12 +141,16 @@ const server = new McpServer(
   {
     instructions: [
       "Figma Bridge drives the user's Figma desktop app through a local plugin. No rate limits: iterate freely.",
-      "Workflow: get_context → run_script (batch MANY edits in ONE script) → screenshot to check the result visually.",
-      "run_script body: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
-      "Script helpers: utils.loadFonts('Inter:Bold', 'Inter:Regular' | textNode | FontName…), utils.node(id), utils.page(nameOrId),",
-      "utils.hex('#RRGGBB[AA]') → RGB(A), utils.solid('#hex', opacity?) → Paint[]. console.log output is returned as `logs`.",
-      "Rules: load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync);",
-      "figma.skipInvisibleInstanceChildren is true; use auto-layout frames for UI; return ids of what you create to reuse them.",
+      "Workflow:",
+      "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values.",
+      "2. New UI → build (one call per screen or section, with auto-layout). Editing existing design → describe it first, then build into it (parentId) or run_script.",
+      "3. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again.",
+      "4. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
+      "run_script: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
+      "Script helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?),",
+      "utils.build(spec, {parentId}), utils.describe(nodeOrId, depth); lib.<name>(args) runs a saved snippet; console.log is returned as `logs`.",
+      "Save helpers you will reuse with the snippets tool. Icons: search_icons, then insert_icon or {icon:'set:name'} in build.",
+      "Rules: load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync); keep results small.",
       "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it).",
     ].join("\n"),
   },
@@ -119,8 +163,8 @@ server.registerTool(
     description:
       "Execute JavaScript in the Figma plugin main thread (full Plugin API via `figma`). The code is the body of an async " +
       "function: use top-level await and `return` the output (JSON-serialized; a single expression is returned automatically). " +
-      "Helpers: utils.loadFonts, utils.node, utils.page, utils.hex, utils.solid; console.log is captured. " +
-      "On error returns {ok:false, error, line, stack}. Prefer one script that does a whole step over many small calls.",
+      "Helpers: utils.loadFonts, utils.node, utils.page, utils.hex, utils.solid, utils.build, utils.describe; lib.<snippet>(args); " +
+      "console.log is captured. On error returns {ok:false, error, line, stack}. Prefer build for creating new layouts.",
     inputSchema: {
       code: z.string().min(1).describe("Script body, e.g. `const f = figma.createFrame(); f.name = 'Card'; return f.id`"),
       timeoutMs: z.number().int().min(1_000).max(120_000).optional().describe("Default 30000, max 120000"),
@@ -129,9 +173,99 @@ server.registerTool(
   ({ code, timeoutMs }) =>
     track("run_script", oneLine(code), async () => {
       const t0 = performance.now();
-      const out = await bridge.request<{ result: unknown; logs?: string[] }>("run_script", { code }, timeoutMs ?? 30_000);
+      const { hash, lib } = loadLibrary();
+      const out = await bridge.request<{ result: unknown; logs?: string[] }>("run_script", { code, lib, libHash: hash }, timeoutMs ?? 30_000);
       return ok({ ok: true, result: out.result ?? null, ...(out.logs ? { logs: out.logs } : {}), ms: Math.round(performance.now() - t0) });
     }),
+);
+
+server.registerTool(
+  "build",
+  {
+    title: "Build a layout from a JSON spec",
+    description: `Create a whole layout in ONE call from a declarative spec. Fonts load automatically, icons are fetched, images loaded. Much faster and safer than run_script for new UI.
+Node: {type?, name?, ...props, children?: Node[]}. type is inferred (text→text, icon→icon, src→image, component→instance, else frame). Types: frame, component, text, rect, ellipse, line, icon, image, svg, instance.
+FRAME: layout "row"|"column" (auto-layout; omit for free positioning), gap (number|"auto"), padding (n | [v,h] | [t,r,b,l]), align (cross axis: start|center|end|baseline), justify (main axis: start|center|end|between), wrap, rowGap, clip. Frames have no fill unless set.
+SIZE: w / h: number (fixed) | "fill" (stretch inside an auto-layout parent) | "hug". Auto-layout frames hug by default. grow:true. absolute:true with x/y inside auto-layout; x/y for children of free frames.
+TEXT: text, font ("Inter" | "Inter:Bold"), weight (400|500|600|700 or style name), size, color, lineHeight (1.5 | 24 | "150%"), letterSpacing (px | "2%"), align (left|center|right|justify), case (upper|lower|title), decoration (underline|strike), maxLines, textStyle "style:Name". Give w:"fill" or a number to wrap text.
+PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color variable>", {gradient:["#a","#b"], angle:90, type?:"radial"}, null. stroke + strokeWidth + strokeAlign (inside|center|outside).
+EFFECTS: radius (n | [tl,tr,br,bl] | "var:x"), opacity, shadow (true | {x,y,blur,spread,color} | [...] | "style:Name"), blur, backgroundBlur, rotation, visible.
+ICON: {icon:"lucide:house", size:20, color:"#111"} (any Iconify set). IMAGE: {src:"C:/img.png" | "https://…", w, h, fit:"fill"|"fit"|"crop"|"tile"}. SVG: {svg:"<svg…>"}.
+INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary", Label:"Buy"}, text:{"Label layer name":"Buy"}}.
+gap/padding/radius accept "var:<number variable>".
+Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
+Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`,
+    inputSchema: {
+      spec: z.union([z.record(z.string(), z.any()), z.array(z.record(z.string(), z.any()))]).describe("Node or array of nodes"),
+      parentId: z.string().optional().describe("Parent frame (default: current page)"),
+      x: z.number().optional().describe("Position of the root on the page (default: viewport center)"),
+      y: z.number().optional(),
+      defaults: z
+        .object({ font: z.string().optional(), color: z.string().optional(), size: z.number().optional() })
+        .optional()
+        .describe('Default text font family, color and size, e.g. {"font":"Inter","color":"#111111","size":14}'),
+      select: z.boolean().optional().describe("Select and zoom to the result (default true)"),
+    },
+  },
+  (args) =>
+    track("build", typeof (args.spec as any).name === "string" ? (args.spec as any).name : "spec", async () => {
+      const images = await prepareSpec(args.spec, args.defaults?.color ?? "#111111");
+      return ok(await bridge.request("build", { ...args, images }, 90_000));
+    }),
+);
+
+server.registerTool(
+  "describe",
+  {
+    title: "Outline a node tree",
+    description:
+      "Compact outline of a node and its children, one line per layer: type, name, id, size, auto-layout, fills, text, font, " +
+      "styles, variables, component info. Default target: selection, else the current page. Use it before editing an existing design.",
+    inputSchema: {
+      nodeId: z.string().optional(),
+      depth: z.number().int().min(0).max(12).optional().describe("Levels of children, default 3"),
+      maxNodes: z.number().int().min(10).max(2000).optional().describe("Default 300"),
+    },
+  },
+  (args) =>
+    track("describe", args.nodeId ?? "(selection)", async () => {
+      const r = await bridge.request<{ outline: string; nodes: number; truncated: boolean }>("describe", args, 30_000);
+      return plain(r.outline + (r.truncated ? `\n(truncated after ${r.nodes} layers: use a nodeId, lower depth or raise maxNodes)` : ""));
+    }),
+);
+
+server.registerTool(
+  "get_design_system",
+  {
+    title: "List styles, variables and components",
+    description:
+      "The file's local color/text/effect styles, variables (with default-mode values) and components (with variant props). " +
+      "Reuse them in build via \"style:Name\", \"var:Name\" and {component:\"Name\"}.",
+    inputSchema: {
+      include: z.array(z.enum(["colors", "text", "effects", "variables", "components"])).optional().describe("Default: all"),
+      limit: z.number().int().min(1).max(2000).optional().describe("Max items per list, default 300"),
+    },
+  },
+  (args) => track("get_design_system", (args.include ?? ["all"]).join(","), async () => ok(await bridge.request("get_design_system", args, 60_000))),
+);
+
+server.registerTool(
+  "audit",
+  {
+    title: "Check a design for common issues",
+    description:
+      "Lint a node (default: selection, else the page): low text contrast (WCAG AA), text overflowing its container, clipped layers, " +
+      "missing fonts, tiny text, frames without auto-layout, spacing off the 4 px grid, fractional sizes, default layer names, " +
+      "too many fonts or font sizes. Returns issues with nodeId, severity and message.",
+    inputSchema: {
+      nodeId: z.string().optional(),
+      rules: z
+        .array(z.string())
+        .optional()
+        .describe("Only these rules: contrast, text-overflow, clipped, missing-font, tiny-text, no-auto-layout, off-grid, fractional, default-name, empty, font-sprawl, type-scale"),
+    },
+  },
+  (args) => track("audit", args.nodeId ?? "(selection)", async () => ok(await bridge.request("audit", args, 60_000))),
 );
 
 server.registerTool(
@@ -169,6 +303,16 @@ server.registerTool(
 );
 
 server.registerTool(
+  "get_css",
+  {
+    title: "CSS of a node",
+    description: "CSS properties Figma generates for a node (default: selection), optionally for its direct children too. Useful for design → code.",
+    inputSchema: { nodeId: z.string().optional(), children: z.boolean().optional() },
+  },
+  (args) => track("get_css", args.nodeId ?? "(selection)", async () => ok(await bridge.request("get_css", args, 30_000))),
+);
+
+server.registerTool(
   "place_image",
   {
     title: "Place a local or remote image",
@@ -190,22 +334,10 @@ server.registerTool(
   },
   (args) =>
     track("place_image", args.path ?? args.url ?? "", async () => {
-      const { bytes, label } = await readImageSource(args.path, args.url);
-      const info = imageInfo(bytes);
-      if (!info) throw new BridgeError(`Unsupported image (expected PNG, JPG, WEBP or GIF): ${label}`, "BAD_IMAGE");
-      const needsTranscode = info.format === "webp" || Math.max(info.width, info.height) > FIGMA_MAX_IMAGE_DIM;
+      if (!!args.path === !!args.url) throw new BridgeError("Give exactly one of `path` or `url`.", "BAD_ARGS");
+      const img = await imagePayload((args.path ?? args.url)!);
       const { path, url, ...rest } = args;
-      const r = await bridge.request(
-        "place_image",
-        {
-          ...rest,
-          bytesB64: Buffer.from(bytes).toString("base64"),
-          mime: info.mime,
-          transcode: needsTranscode ? { maxDim: FIGMA_MAX_IMAGE_DIM } : undefined,
-        },
-        60_000,
-      );
-      return ok(r);
+      return ok(await bridge.request("place_image", { ...rest, bytesB64: img.b64, mime: img.mime, transcode: img.transcode }, 60_000));
     }),
 );
 
@@ -232,17 +364,53 @@ server.registerTool(
 );
 
 server.registerTool(
+  "insert_icon",
+  {
+    title: "Insert an icon",
+    description:
+      'Insert an icon as editable vectors from any Iconify set: "lucide:house", "tabler:user", "ph:heart", "material-symbols:search", ' +
+      '"heroicons:bell", "mdi:github", "simple-icons:figma" (brand logos). Use search_icons to find names. Inside build, use {icon:"set:name"} instead.',
+    inputSchema: {
+      name: z.string().describe('"set:name", e.g. "lucide:settings" (a bare name uses Lucide)'),
+      size: z.number().int().min(8).max(512).optional().describe("Height in px, default 24"),
+      color: z.string().optional().describe("Hex color for monochrome icons, default #111111"),
+      parentId: z.string().optional(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      layerName: z.string().optional().describe('Default "icon/<name>"'),
+    },
+  },
+  (args) =>
+    track("insert_icon", args.name, async () => {
+      const svg = await iconSvg(args.name, args.size ?? 24, args.color ?? "#111111");
+      return ok(await bridge.request("import_svg", { svg, name: args.layerName ?? `icon/${args.name}`, parentId: args.parentId, x: args.x, y: args.y }));
+    }),
+);
+
+server.registerTool(
+  "search_icons",
+  {
+    title: "Search icons",
+    description:
+      "Search 200 000+ open-source icons (Iconify). Returns names like \"lucide:shopping-cart\" to use with insert_icon or build. " +
+      "Pass prefix to stay in one consistent set (lucide, tabler, ph, material-symbols, heroicons, mdi, simple-icons).",
+    inputSchema: {
+      query: z.string().min(1),
+      prefix: z.string().optional().describe("Icon set, e.g. lucide"),
+      limit: z.number().int().min(1).max(100).optional().describe("Default 24"),
+    },
+  },
+  (args) => track("search_icons", args.query, async () => ok({ icons: await searchIcons(args.query, args.prefix, args.limit ?? 24) })),
+);
+
+server.registerTool(
   "get_context",
   {
     title: "Current Figma context",
     description: "File name, pages (id/name), current page, selection (ids, names, bounds) and viewport of the connected file.",
     inputSchema: {},
   },
-  () =>
-    track("get_context", "", async () => {
-      const ctx = await bridge.request("get_context", {}, 15_000);
-      return ok(ctx);
-    }),
+  () => track("get_context", "", async () => ok(await bridge.request("get_context", {}, 15_000))),
 );
 
 server.registerTool(
@@ -257,6 +425,61 @@ server.registerTool(
   },
   ({ filter, limit }) =>
     track("list_fonts", filter ?? "", async () => ok(await bridge.request("list_fonts", { filter, limit: limit ?? 100 }, 30_000))),
+);
+
+server.registerTool(
+  "checkpoint",
+  {
+    title: "Save or restore a copy of layers",
+    description:
+      'Safety net for edits. action "save": copies nodeIds (default: selection) to a "⟲ Bridge checkpoints" page and returns a checkpointId. ' +
+      '"restore": puts the saved copies back in place of the current layers (id, default "latest"; restored layers get new ids). ' +
+      '"list": saved checkpoints. "delete": removes one (id) or all (id:"all", also removes the page).',
+    inputSchema: {
+      action: z.enum(["save", "restore", "list", "delete"]),
+      nodeIds: z.array(z.string()).optional(),
+      id: z.string().optional(),
+      label: z.string().optional().describe("Short note, e.g. 'before dark mode'"),
+    },
+  },
+  (args) => track("checkpoint", `${args.action} ${args.id ?? args.label ?? ""}`, async () => ok(await bridge.request("checkpoint", args, 60_000))),
+);
+
+server.registerTool(
+  "snippets",
+  {
+    title: "Manage reusable script functions",
+    description:
+      "A library of your own helpers, available in every run_script as `await lib.<name>(args)`. A snippet is the body of an async " +
+      "function with figma, utils, lib, console and args in scope; `return` its result. Actions: list, get (name), save (name, code, " +
+      "description, usage), delete (name). Save anything you write twice (buttons, cards, naming passes…). Stored in " +
+      SNIPPETS_DIR,
+    inputSchema: {
+      action: z.enum(["list", "get", "save", "delete"]),
+      name: z.string().optional().describe("JS identifier, e.g. primaryButton"),
+      code: z.string().optional(),
+      description: z.string().optional(),
+      usage: z.string().optional().describe('e.g. await lib.primaryButton({ label: "Buy", parentId })'),
+    },
+  },
+  (args) =>
+    track("snippets", `${args.action} ${args.name ?? ""}`, async () => {
+      const need = (v: string | undefined, what: string) => {
+        if (!v) throw new BridgeError(`\`${what}\` is required for ${args.action}.`, "BAD_ARGS");
+        return v;
+      };
+      switch (args.action) {
+        case "list":
+          return ok({ snippets: listSnippets(), folder: SNIPPETS_DIR });
+        case "get":
+          return plain(getSnippet(need(args.name, "name")));
+        case "save":
+          return ok({ saved: need(args.name, "name"), path: saveSnippet(args.name!, need(args.code, "code"), args.description, args.usage) });
+        case "delete":
+          deleteSnippet(need(args.name, "name"));
+          return ok({ deleted: args.name });
+      }
+    }),
 );
 
 server.registerTool(
@@ -276,6 +499,7 @@ server.registerTool(
           id: s.id,
           fileName: s.fileName,
           page: s.page,
+          pluginVersion: s.version,
           connectedSeconds: Math.round((Date.now() - s.connectedAt) / 1000),
           selected: s.id === selected || undefined,
         })),

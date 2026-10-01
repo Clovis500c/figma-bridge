@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["code.ts"]
+  "include": ["code.ts", "lib"]
 }

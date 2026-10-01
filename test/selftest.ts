@@ -2,6 +2,8 @@
 // then round-trips a script, a screenshot, an image and an SVG. Leaves the file unchanged.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const WAIT_PLUGIN_MS = 120_000;
@@ -12,7 +14,8 @@ const transport = new StdioClientTransport({
   command: process.execPath,
   args: ["run", serverPath],
   stderr: "ignore",
-  env: { ...process.env } as Record<string, string>,
+  // Snippets go to a throwaway folder so the test never touches the user's library.
+  env: { ...process.env, FIGMA_BRIDGE_SNIPPETS: join(tmpdir(), `figma-bridge-selftest-${process.pid}`) } as Record<string, string>,
 });
 
 let failures = 0;
@@ -21,7 +24,13 @@ async function call(name: string, args: Record<string, unknown> = {}) {
   const t0 = performance.now();
   const res = (await client.callTool({ name, arguments: args })) as { content: { type: string; text?: string }[]; isError?: boolean };
   const text = res.content.find((c) => c.type === "text")?.text ?? "null";
-  return { data: JSON.parse(text), isError: !!res.isError, ms: Math.round(performance.now() - t0), images: res.content.filter((c) => c.type === "image").length };
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { text }; // describe and snippets.get return plain text
+  }
+  return { data, isError: !!res.isError, ms: Math.round(performance.now() - t0), images: res.content.filter((c) => c.type === "image").length };
 }
 
 function check(label: string, pass: boolean, detail: unknown) {
@@ -31,7 +40,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 8, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 17, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -110,10 +119,64 @@ check("get_context", !ctx.isError && Array.isArray(ctx.data.pages), `${ctx.data.
 const fonts = await call("list_fonts", { filter: "inter", limit: 3 });
 check("list_fonts", !fonts.isError && fonts.data.totalFamilies >= 1, fonts.data.families?.map((f: any) => f.family));
 
+// ─── 1.2 tools ──────────────────────────────────────────────────────────────
+const built = await call("build", {
+  x: made.data.result.x,
+  y: made.data.result.y + 200,
+  select: false,
+  spec: {
+    name: "selftest card",
+    layout: "column",
+    w: 280,
+    padding: 20,
+    gap: 10,
+    fill: "#FFFFFF",
+    radius: 12,
+    stroke: "#E5E7EB",
+    shadow: true,
+    children: [
+      { name: "Title", text: "Pro plan", size: 18, weight: 600 },
+      { name: "Body", text: "Everything you need to ship faster.", color: "#6B7280", w: "fill" },
+      { name: "Feature", layout: "row", gap: 8, align: "center", children: [{ icon: "lucide:check", size: 16, color: "#16A34A" }, { text: "Unlimited projects" }] },
+      { name: "Button", layout: "row", justify: "center", w: "fill", padding: [10, 16], radius: 8, fill: "#0D99FF", children: [{ text: "Upgrade", color: "#FFFFFF", weight: 600 }] },
+    ],
+  },
+});
+const cardId: string = built.data.rootId;
+check("build", !built.isError && !!cardId && built.data.created >= 8, { created: built.data.created, warnings: built.data.warnings ?? [] });
+
+const outline = await call("describe", { nodeId: cardId, depth: 2 });
+check("describe", !outline.isError && /FRAME "selftest card"/.test(outline.data.text) && /column/.test(outline.data.text), outline.data.text?.split("\n")[0]);
+
+const lint = await call("audit", { nodeId: cardId });
+check("audit", !lint.isError && typeof lint.data.summary?.error === "number", { ...lint.data.summary, rules: lint.data.countsByRule });
+
+const ds = await call("get_design_system", { limit: 5 });
+check("get_design_system", !ds.isError && !!ds.data.counts, ds.data.counts);
+
+const css = await call("get_css", { nodeId: cardId });
+check("get_css", !css.isError && !!css.data.css, Object.keys(css.data.css ?? {}).slice(0, 5));
+
+const icon = await call("insert_icon", { name: "lucide:star", size: 32, color: "#F59E0B", x: made.data.result.x + 620, y: made.data.result.y });
+check("insert_icon", !icon.isError && icon.data.height === 32, icon.data);
+
+const saved = await call("checkpoint", { action: "save", nodeIds: [cardId], label: "selftest" });
+await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(cardId)})).name = "changed"` });
+const restored = await call("checkpoint", { action: "restore", id: saved.data.checkpointId });
+const newCardId: string = restored.data.restored?.[cardId];
+const restoredName = await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(newCardId)})).name` });
+await call("checkpoint", { action: "delete", id: saved.data.checkpointId });
+check("checkpoint save/restore", !saved.isError && !restored.isError && restoredName.data.result === "selftest card", { id: saved.data.checkpointId, restored: newCardId });
+
+const snip = await call("snippets", { action: "save", name: "selftestDouble", code: "return args * 2", description: "test" });
+const usesLib = await call("run_script", { code: "await lib.selftestDouble(21)" });
+check("snippets + lib", !snip.isError && usesLib.data.result === 42, usesLib.data.result ?? usesLib.data);
+
 const cleanup = await call("run_script", {
-  code: `for (const id of ${JSON.stringify([frameId, img.data.nodeId, svg.data.nodeId])}) { const n = await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,
+  code: `for (const id of ${JSON.stringify([frameId, img.data.nodeId, svg.data.nodeId, newCardId ?? cardId, icon.data.nodeId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,
 });
 check("cleanup", !cleanup.isError, cleanup.data.result);
+rmSync(join(tmpdir(), `figma-bridge-selftest-${process.pid}`), { recursive: true, force: true });
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed.");
 await client.close();

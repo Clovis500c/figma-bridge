@@ -17,10 +17,12 @@
     --ok: #16a34a;
     --warn: #d97706;
     --err: #e5484d;
-    --accent: #7c5cff;
-    --accent-soft: rgba(124, 92, 255, .12);
-    --shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 6px 16px -6px rgba(0, 0, 0, .12);
-    --brand: linear-gradient(135deg, #e0845f 0%, #a259ff 60%, #6d7bff 100%);
+    --accent: #0d99ff;
+    --accent-hover: #0b8ae6;
+    --accent-soft: rgba(13, 153, 255, .12);
+    --on-accent: #ffffff;
+    --claude: #d97757;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .06);
     --r: 10px;
     --ease: cubic-bezier(.2, .8, .2, 1);
     color-scheme: light;
@@ -38,9 +40,10 @@
     --ok: #34d399;
     --warn: #fbbf24;
     --err: #f87171;
-    --accent: #a08cff;
-    --accent-soft: rgba(160, 140, 255, .15);
-    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 20px -8px rgba(0, 0, 0, .6);
+    --accent: #0d99ff;
+    --accent-hover: #2aa5ff;
+    --accent-soft: rgba(13, 153, 255, .16);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .35);
     color-scheme: dark;
   }
   @media (prefers-color-scheme: dark) {
@@ -48,8 +51,8 @@
       --bg: #1a1a1d; --surface: #222226; --surface-2: #2b2b30; --hover: rgba(255,255,255,.045);
       --border: rgba(255,255,255,.08); --border-strong: rgba(255,255,255,.15);
       --text: #f4f4f5; --text-2: #a8a8b3; --text-3: #6e6e78;
-      --ok: #34d399; --warn: #fbbf24; --err: #f87171; --accent: #a08cff; --accent-soft: rgba(160,140,255,.15);
-      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 20px -8px rgba(0,0,0,.6);
+      --ok: #34d399; --warn: #fbbf24; --err: #f87171; --accent: #0d99ff; --accent-hover: #2aa5ff; --accent-soft: rgba(13,153,255,.16);
+      --shadow: 0 1px 2px rgba(0,0,0,.35);
       color-scheme: dark;
     }
   }
@@ -71,8 +74,8 @@
   /* ── Top bar ────────────────────────────────────────────────────────────── */
   .top { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); flex: none; }
   .mark {
-    width: 22px; height: 22px; border-radius: 7px; background: var(--brand); display: grid; place-items: center; flex: none;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.18), 0 2px 6px -1px rgba(162,89,255,.5); position: relative;
+    width: 22px; height: 22px; border-radius: 6px; background: var(--text); color: var(--bg);
+    display: grid; place-items: center; flex: none; position: relative;
   }
   .name { font-weight: 650; font-size: 12.5px; letter-spacing: -.01em; flex: 1; }
   .pill {
@@ -98,19 +101,18 @@
   .bridge-row { display: flex; align-items: center; }
   .tile {
     width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; position: relative;
-    background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); color: var(--text-2);
+    background: var(--surface); border: 1px solid var(--border); color: var(--text-2);
     transition: border-color .3s, color .3s;
   }
-  .tile.claude { color: #e0845f; }
+  .tile.claude { color: var(--claude); }
   .s-connected .tile { border-color: var(--border-strong); }
   .s-connected .tile.figma { color: var(--accent); }
-  .tile.hit { animation: hit .45s var(--ease); }
-  @keyframes hit { 40% { transform: scale(1.08); } }
+  .tile.hit { animation: hit .4s var(--ease); }
+  @keyframes hit { 40% { border-color: var(--accent); } }
   .link { flex: 1; height: 40px; position: relative; margin: 0 6px; }
-  .wire { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; border-radius: 2px; transition: opacity .3s; }
-  .s-connected .wire { background: linear-gradient(90deg, #e0845f, var(--accent)); opacity: .55; }
-  .s-connected.busy .wire { opacity: 1; background: linear-gradient(90deg, #e0845f, var(--accent), #e0845f); background-size: 200% 100%; animation: flow 1s linear infinite; }
-  @keyframes flow { to { background-position: -200% 0; } }
+  .wire { position: absolute; left: 0; right: 0; top: 50%; height: 1.5px; margin-top: -.75px; transition: background .3s; }
+  .s-connected .wire { background: var(--border-strong); }
+  .s-connected.busy .wire { background: var(--accent); }
   .s-connecting .wire, .s-offline .wire, .s-foreign .wire {
     background: repeating-linear-gradient(90deg, var(--state) 0 5px, transparent 5px 10px); opacity: .6;
   }
@@ -124,7 +126,7 @@
   .s-connected:not(.busy) .badge { display: none; }
   .packet {
     position: absolute; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
-    background: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 25%, transparent), 0 0 10px var(--c);
+    background: var(--c); box-shadow: 0 0 0 2px var(--bg);
   }
   .labels { display: flex; justify-content: space-between; gap: 12px; margin-top: 9px; }
   .lbl { display: flex; flex-direction: column; min-width: 0; max-width: 50%; }
@@ -150,10 +152,10 @@
   .cmd code { flex: 1; }
   .setup-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .btn {
-    height: 28px; padding: 0 12px; border-radius: 8px; font-weight: 600; color: #fff; background: var(--brand);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.16), 0 1px 2px rgba(0,0,0,.2); transition: filter .15s, transform .06s;
+    height: 28px; padding: 0 12px; border-radius: 6px; font-weight: 600; color: var(--on-accent); background: var(--accent);
+    transition: background .15s, transform .06s;
   }
-  .btn:hover { filter: brightness(1.07); }
+  .btn:hover { background: var(--accent-hover); }
   .btn:active { transform: translateY(1px); }
   .btn.quiet { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
   .mini {
@@ -179,7 +181,7 @@
   .act-head h2 { font-size: 11px; font-weight: 650; color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; flex: 1; }
   .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
   .seg button { height: 20px; padding: 0 8px; border-radius: 6px; font-size: 11px; font-weight: 550; color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; }
-  .seg button.on { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12), inset 0 0 0 1px var(--border); }
+  .seg button.on { background: var(--bg); color: var(--text); box-shadow: var(--shadow), inset 0 0 0 1px var(--border); }
   .count { font-size: 10px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 99px; background: var(--err); color: #fff; display: none; place-items: center; }
   .count.show { display: inline-grid; }
 
@@ -193,12 +195,12 @@
   @keyframes rowin { from { opacity: 0; transform: translateY(-5px); } }
   .ic {
     width: 26px; height: 26px; border-radius: 8px; flex: none; display: grid; place-items: center; position: relative;
-    color: var(--c); background: color-mix(in srgb, var(--c) 13%, transparent);
+    color: var(--text-2); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border);
   }
-  .row.err .ic { --c: var(--err) !important; }
+  .row.err .ic { color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent); box-shadow: none; }
   .row.run .ic::after {
     content: ""; position: absolute; inset: -3px; border-radius: 10px; border: 2px solid transparent;
-    border-top-color: var(--c); border-right-color: var(--c); animation: spin .8s linear infinite;
+    border-top-color: var(--accent); animation: spin .8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .main { flex: 1; min-width: 0; }
@@ -228,7 +230,7 @@
   .empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 28px 24px; color: var(--text-3); }
   .empty .art { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; background: var(--surface); border: 1px solid var(--border); color: var(--text-3); margin-bottom: 4px; }
   .empty b { color: var(--text); font-size: 12.5px; font-weight: 600; }
-  .quote { margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+  .quote { margin-top: 6px; padding: 5px 10px; border-radius: 6px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); color: var(--text-2); font-weight: 500; }
 
   /* ── Footer + resize grip ───────────────────────────────────────────────── */
   .foot {
@@ -290,7 +292,7 @@
 <body class="s-connecting">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
-      <symbol id="i-mark" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <symbol id="i-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="5" cy="15.5" r="2.4"/><circle cx="19" cy="15.5" r="2.4"/><path d="M5 13c1.6-6 12.4-6 14 0"/>
       </symbol>
       <symbol id="i-spark" viewBox="0 0 24 24" fill="currentColor">
@@ -306,6 +308,12 @@
       <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5"/><path d="m3.5 16.5 8.5 4.5 8.5-4.5" opacity=".5"/></symbol>
       <symbol id="i-type" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h11v2M9.5 5v14M7.5 19h4M14 13v-1.5h7V13M17.5 11.5V19M16 19h3"/></symbol>
       <symbol id="i-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 5 12 2.5-6h4"/></symbol>
+      <symbol id="i-build" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M3.5 9h17M9 9v11.5"/></symbol>
+      <symbol id="i-tree" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h6M8 12h8M8 19h8M6 5v14h2M6 12h2"/></symbol>
+      <symbol id="i-swatch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4"/><circle cx="16" cy="8" r="4"/><circle cx="12" cy="16" r="4"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19.5 6v5.5c0 4.5-3.2 7.7-7.5 9-4.3-1.3-7.5-4.5-7.5-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+      <symbol id="i-braces" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H7a2 2 0 0 0-2 2v3.5a2 2 0 0 1-2 2 2 2 0 0 1 2 2V18a2 2 0 0 0 2 2h1M16 4h1a2 2 0 0 1 2 2v3.5a2 2 0 0 0 2 2 2 2 0 0 0-2 2V18a2 2 0 0 1-2 2h-1"/></symbol>
+      <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5"/><path d="M3.5 4v4.5H8M12 8v4.5l3 2"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5.5 12.5 4 4 9-9"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     </defs>
@@ -425,6 +433,12 @@ const HANDSHAKE_MS = 3000;
 const SLOW_MS = 3000;
 const METHODS = {
   run_script: { label: "Script", color: "#8b5cf6", icon: "i-script" },
+  build: { label: "Build", color: "#0d99ff", icon: "i-build" },
+  describe: { label: "Describe", color: "#64748b", icon: "i-tree" },
+  get_design_system: { label: "Design system", color: "#64748b", icon: "i-swatch" },
+  audit: { label: "Audit", color: "#16a34a", icon: "i-shield" },
+  get_css: { label: "CSS", color: "#64748b", icon: "i-braces" },
+  checkpoint: { label: "Checkpoint", color: "#64748b", icon: "i-history" },
   screenshot: { label: "Screenshot", color: "#0ea5e9", icon: "i-shot" },
   place_image: { label: "Image", color: "#10b981", icon: "i-image" },
   import_svg: { label: "SVG", color: "#f59e0b", icon: "i-pen" },
@@ -565,9 +579,21 @@ function summarize(msg) {
     }
     case "screenshot": return (p.nodeId ? "Node " + p.nodeId : "Selection") + (p.scale ? " · " + p.scale + "×" : "") + (p.format === "JPG" ? " · JPG" : "");
     case "place_image": return p.name || (p.nodeId ? "Fill on " + p.nodeId : "New image layer");
-    case "import_svg": return p.name || (p.svg ? (Math.round(p.svg.length / 102.4) / 10) + " KB of SVG" : "SVG");
+    case "import_svg": return p.name ? p.name.replace(/^icon\//, "Icon · ") : (p.svg ? (Math.round(p.svg.length / 102.4) / 10) + " KB of SVG" : "SVG");
     case "list_fonts": return p.filter ? "Matching “" + p.filter + "”" : "All fonts";
     case "get_context": return "File, pages and selection";
+    case "build": {
+      let count = 0;
+      const walk = (n) => { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(walk); count++; if (Array.isArray(n.children)) n.children.forEach(walk); };
+      walk(p.spec);
+      const root = Array.isArray(p.spec) ? p.spec[0] : p.spec;
+      return ((root && root.name) || "Layout") + " · " + count + " layer" + (count === 1 ? "" : "s");
+    }
+    case "describe": return (p.nodeId ? "Node " + p.nodeId : "Selection") + (p.depth !== undefined ? " · depth " + p.depth : "");
+    case "get_design_system": return p.include ? p.include.join(", ") : "Styles, variables and components";
+    case "audit": return p.nodeId ? "Node " + p.nodeId : "Selection";
+    case "get_css": return p.nodeId ? "Node " + p.nodeId : "Selection";
+    case "checkpoint": return p.action.charAt(0).toUpperCase() + p.action.slice(1) + (p.label ? " · " + p.label : p.id ? " · " + p.id : "");
     default: return "";
   }
 }
@@ -576,6 +602,7 @@ function summarize(msg) {
 function resultNode(method, result) {
   if (!result) return null;
   if (typeof result.nodeId === "string") return result.nodeId;
+  if (typeof result.rootId === "string") return result.rootId;
   if (method !== "run_script") return null;
   const r = result.result;
   if (r && typeof r.id === "string" && /^[\dI;:]+$/.test(r.id)) return r.id;
@@ -592,6 +619,17 @@ async function onRequest(msg) {
   render();
   let params = msg.params || {};
   try {
+    if (params.images) {
+      const bytes = {};
+      for (const key of Object.keys(params.images)) {
+        const img = params.images[key];
+        let b = b64ToBytes(img.b64);
+        if (img.transcode) b = await transcode(b, img.mime, img.transcode.maxDim);
+        bytes[key] = b;
+      }
+      params = Object.assign({}, params, { imageBytes: bytes });
+      delete params.images;
+    }
     if (params.bytesB64) {
       let bytes = b64ToBytes(params.bytesB64);
       if (params.transcode) bytes = await transcode(bytes, params.mime, params.transcode.maxDim);
@@ -695,7 +733,7 @@ function renderSpark() {
   const bw = w / done.length;
   svg.innerHTML = done.map((e, i) => {
     const bh = Math.max(2, (Math.sqrt(e.ms) / max) * h);
-    const color = e.status === "err" ? "var(--err)" : "var(--accent)";
+    const color = e.status === "err" ? "var(--err)" : i === done.length - 1 ? "var(--accent)" : "var(--text-3)";
     return '<rect x="' + (i * bw + 0.6).toFixed(2) + '" y="' + (h - bh).toFixed(2) + '" width="' + Math.max(1, bw - 1.2).toFixed(2) + '" height="' + bh.toFixed(2) + '" rx="1" fill="' + color + '" opacity=".75"/>';
   }).join("");
 }
@@ -707,7 +745,7 @@ function renderLog() {
     log.innerHTML = filter === "err"
       ? '<li class="empty"><div class="art">' + icon("i-check", 18) + "</div><b>No errors</b>Everything Claude ran worked.</li>"
       : state === "connected"
-        ? '<li class="empty"><div class="art">' + icon("i-spark", 20) + '</div><b>Ready when you are</b>Ask Claude to design something in this file.<span class="quote">“Design a pricing card on a new page”</span></li>'
+        ? '<li class="empty"><div class="art">' + icon("i-spark", 20) + '</div><b>Ready when you are</b>Ask Claude to design something in this file.<span class="quote">“Build a pricing card with 3 plans”</span></li>'
         : '<li class="empty"><div class="art">' + icon("i-pulse", 18) + "</div><b>No activity yet</b>Commands from Claude will show up here.</li>";
     return;
   }
