@@ -1,12 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { appendFileSync, mkdirSync, statSync, truncateSync } from "node:fs";
+import { appendFileSync, mkdirSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { Bridge, BridgeError } from "./bridge";
 import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
+import { generateCode, type IrNode } from "./codegen";
 import { normalizeTokens } from "./tokens";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 
@@ -485,6 +486,56 @@ server.registerTool(
     },
   },
   (args) => track("annotate", `${args.action ?? (args.label ? "add" : "list")} ${args.nodeId ?? ""}`, async () => ok(await bridge.request("annotate", args, 30_000))),
+);
+
+server.registerTool(
+  "export_code",
+  {
+    title: "Export a layer to code",
+    description:
+      "Generate front-end code from a frame or component (default: selection). framework html (a standalone page) or react (a component); " +
+      "styling css (classes named after the layers) or tailwind. Auto-layout becomes flexbox, grid auto-layout CSS grid, fill/hug sizing flex rules, " +
+      "text semantic tags (h1–h3, p, a), layers named button/nav/header/footer/section… the matching tags; colors, borders, radii and shadows " +
+      "come from Figma's own CSS (variables stay var(--…)). Images and icons are saved as files in an assets folder. " +
+      "Returns the code as text plus the folder where everything was written. Name layers well before exporting: names become class names.",
+    inputSchema: {
+      nodeId: z.string().optional(),
+      framework: z.enum(["html", "react"]).optional().describe("Default html"),
+      styling: z.enum(["css", "tailwind"]).optional().describe("Default css"),
+    },
+  },
+  ({ nodeId, framework = "html", styling = "css" }) =>
+    track("export_code", `${nodeId ?? "(selection)"} ${framework}/${styling}`, async () => {
+      const r = await bridge.request<{ tree: IrNode; assets: Record<string, { b64?: string; svg?: string }>; nodes: number; truncated: boolean; warnings: string[] }>(
+        "export_tree",
+        { nodeId },
+        120_000,
+      );
+      const dir = join(OUT_DIR, `export-${safeName(r.tree.name)}-${Date.now()}`);
+      mkdirSync(join(dir, "assets"), { recursive: true });
+      const finalName: Record<string, string> = {};
+      for (const [file, a] of Object.entries(r.assets)) {
+        const bytes = a.svg !== undefined ? Buffer.from(a.svg) : Buffer.from(a.b64 ?? "", "base64");
+        const ext = a.svg !== undefined ? "svg" : imageInfo(bytes)?.format.replace("jpeg", "jpg") ?? "png";
+        finalName[file] = file.replace(/\.[a-z]+$/, `.${ext}`);
+        writeFileSync(join(dir, "assets", finalName[file]!), bytes);
+      }
+      const code = generateCode(r.tree, { framework, styling, assetPath: (f) => `assets/${finalName[f] ?? f}` });
+      for (const f of code.files) writeFileSync(join(dir, f.path), f.content);
+      const warnings = [...r.warnings, ...code.warnings];
+      if (r.truncated) warnings.push(`Stopped after ${r.nodes} layers: export a smaller frame for the rest.`);
+      const meta = {
+        dir,
+        files: code.files.map((f) => f.path),
+        assets: Object.values(finalName).map((f) => `assets/${f}`),
+        fonts: code.fonts,
+        layers: r.nodes,
+        ...(warnings.length ? { warnings } : {}),
+      };
+      let text = code.files.map((f) => `=== ${f.path} ===\n${f.content}`).join("\n");
+      if (text.length > MAX_OUTPUT_CHARS) text = text.slice(0, MAX_OUTPUT_CHARS) + `\n… truncated: the full code is in ${dir}`;
+      return { content: [{ type: "text", text: json(meta) }, { type: "text", text }] };
+    }),
 );
 
 server.registerTool(

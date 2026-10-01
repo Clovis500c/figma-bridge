@@ -5,6 +5,7 @@ import { audit } from "./lib/audit";
 import { build } from "./lib/build";
 import { checkpoint } from "./lib/checkpoint";
 import { describe } from "./lib/describe";
+import { exportTree } from "./lib/export";
 import { getDesignSystem } from "./lib/design-system";
 import { designTokens } from "./lib/tokens";
 import { find } from "./lib/find";
@@ -148,6 +149,7 @@ const HANDLERS: { [method: string]: Handler } = {
   wait_for_selection: waitForSelection,
   prototype: prototype,
   annotate: annotate,
+  export_tree: exportTree,
   ping: function () {
     return Promise.resolve({ pong: true, session: sessionInfo() });
   },
@@ -164,6 +166,7 @@ const READ_ONLY: { [method: string]: boolean } = {
   get_context: true,
   list_fonts: true,
   wait_for_selection: true,
+  export_tree: true,
   ping: true,
 };
 

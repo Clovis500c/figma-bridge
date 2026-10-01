@@ -476,6 +476,7 @@ const METHODS = {
   wait_for_selection: { label: "Wait for selection", color: "#0d99ff", icon: "i-pointer" },
   prototype: { label: "Prototype", color: "#8b5cf6", icon: "i-play" },
   annotate: { label: "Annotate", color: "#f59e0b", icon: "i-note" },
+  export_tree: { label: "Export code", color: "#64748b", icon: "i-braces" },
   ping: { label: "Ping", color: "#64748b", icon: "i-pulse" },
 };
 const methodOf = (m) => METHODS[m] || { label: m, color: "#64748b", icon: "i-pulse" };
@@ -757,6 +758,7 @@ function summarize(msg) {
       if (action === "add") return (p.label ? "“" + p.label.split("\n")[0] + "”" : (p.properties || []).join(", ")) + (p.nodeId ? " on " + p.nodeId : "");
       return action.charAt(0).toUpperCase() + action.slice(1) + (p.nodeId ? " · " + p.nodeId : "");
     }
+    case "export_tree": return p.nodeId ? "Node " + p.nodeId : "Selection";
     case "wait_for_selection": return p.message || "Select layers";
     case "build": {
       let count = 0;

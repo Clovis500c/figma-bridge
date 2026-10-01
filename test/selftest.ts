@@ -40,7 +40,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 23, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 24, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -183,6 +183,15 @@ check(
   !note.isError && notes.data.nodes?.[0]?.annotations?.[0]?.properties?.length === 2 && cleared.data.removed === 1,
   notes.data.nodes?.[0] ?? note.data,
 );
+
+const exported = (await client.callTool({ name: "export_code", arguments: { nodeId: cardId, framework: "react", styling: "tailwind" } })) as { content: { text: string }[]; isError?: boolean };
+const exportMeta = JSON.parse(exported.content[0]?.text ?? "{}");
+check(
+  "export_code",
+  !exported.isError && /Pro plan/.test(exported.content[1]?.text ?? "") && exportMeta.assets?.some((a: string) => a.endsWith(".svg")),
+  { files: exportMeta.files, assets: exportMeta.assets?.length, error: exportMeta.error },
+);
+if (exportMeta.dir) rmSync(exportMeta.dir, { recursive: true, force: true });
 
 const saved = await call("checkpoint", { action: "save", nodeIds: [cardId], label: "selftest" });
 await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(cardId)})).name = "changed"` });
