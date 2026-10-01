@@ -17,9 +17,11 @@ const ENUMS: Record<string, Record<string, number>> = {
   ApplyStrokeMode: { Contextual: 0, Border: 1 },
   LineJoinMode: { Round: 0, Bevel: 1, Miter: 2 },
   TextTruncate: { None: 0, AtEnd: 1, SplitWord: 2 },
+  StrokeSizingMode: { FixedSize: 0, ScaledSize: 1 },
+  BorderStrokePosition: { Outer: 0, Center: 1, Inner: 2 },
 };
 
-const n = (v: number) => String(Math.round(v * 1000) / 1000);
+const n = (v: number) => String(Math.round(v * 10000) / 10000);
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 function xmlProp(name: string, v: RbxValue): string {

@@ -202,7 +202,7 @@ const INSTRUCTIONS = [
   "The user can cancel a command from the plugin (code CANCELLED): build stops, a script may still finish, so check the file before retrying.",
   "With FIGMA_TOKEN set: comments reads and posts file comments pinned to layers, versions lists the history and diffs a version against now.",
   "Names: give every layer you create a professional name for its role, as a design system or a developer would: Screen, Header, Navbar, Sidebar, Section, Container, Card, CardList, Row, Grid, Title, Subtitle, Description, Label, Price, PrimaryButton, Icon, Avatar, Badge, Input, Divider, Background. Never leave Frame 12, Rectangle 3 or a text named after its content; build names unnamed layers by role and audit {fix:true} renames default names.",
-  "Roblox: export_roblox turns a frame into a ScreenGui (.rbxmx + Luau for execute_luau + PNG assets); with a Roblox Studio MCP, upload the assets, run the Luau and check a Studio screenshot.",
+  "Roblox: export_roblox turns a frame into a ScreenGui (.rbxmx + Luau for execute_luau + PNG assets), in scale only (no offsets) with PascalCase names (ShopGui, ItemCard, TitleLabel, BuyButton); with a Roblox Studio MCP, upload the assets, run the Luau and check a Studio screenshot. Any Roblox UI you write by hand follows the same rules: UDim2.fromScale, scale padding and gaps, UIStroke ScaledSize, TextScaled + UITextSizeConstraint, UIAspectRatioConstraint on the root.",
   "Prompts new-screen, apply-design-system, reproduce-screenshot, import-website, figma-to-code, audit-and-fix and figma-to-roblox are ready-made workflows; the resources figma-bridge://docs/build-spec and figma-bridge://docs/workflow are the full reference.",
   "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it). If list_sessions reports versionMismatch, ask them to reopen or update the plugin.",
 ];
@@ -1002,29 +1002,32 @@ server.registerTool(
     description:
       "Turn a Figma frame (default: selection) into Roblox UI that looks the same: a .rbxmx model (a ScreenGui, or a Frame with asRootFrame), an equivalent Luau builder " +
       "script for execute_luau (creates the UI under PARENT, default StarterGui, replaces a previous copy with the same name, returns the root), and the PNG assets.\n" +
-      "Frames become Frames with UICorner, UIStroke, UIGradient, UIPadding; auto-layout becomes UIListLayout (UIFlexItem for fill, AutomaticSize for hug) or UIGridLayout; " +
-      "constraints become AnchorPoint + UDim2; text becomes TextLabel with FontFace (Inter → Builder Sans…), RichText for mixed styles, UITextSizeConstraint; clickable or " +
+      "Everything is in SCALE by default: sizes, positions, UIPadding, list gaps, grid cells, UICorner, UIStroke (StrokeSizingMode ScaledSize) and UIShadow are relative, " +
+      "text uses TextScaled with a UITextSizeConstraint, and nothing is in offset. Instances get professional PascalCase names (ShopGui, ItemCard, TitleLabel, BuyButton, CoinIcon, " +
+      "CardList, Header): the layer's own name, or its role when Figma named it (Frame 12 → Card, Container, Row…).\n" +
+      "Frames become Frames with UICorner, UIStroke, UIGradient, UIShadow, UIPadding; auto-layout becomes UIListLayout (UIFlexItem for fill) or UIGridLayout; " +
+      "constraints become AnchorPoint + UDim2; text becomes TextLabel with FontFace (Inter → Builder Sans…), RichText for mixed styles; clickable or " +
       "*Button layers become TextButton/ImageButton. What Roblox can't draw (vectors, icons, blurs, several fills, radial gradients) is rasterized at 2×; panels whose background " +
-      "can't be native become 9-slice images with their content on top; drop shadows become a 9-slice image behind the panel.\n" +
-      "mode: scale (UDim2 scale everywhere), offset (pixels), hybrid (default: scale for free-positioned layers, pixels inside auto-layout). " +
+      "can't be native become 9-slice images with their content on top.\n" +
+      "mode: scale (default, recommended); offset (pixels) or hybrid (pixels inside auto-layout) only when the user asks for them. " +
       "Assets: with upload:true and ROBLOX_API_KEY + ROBLOX_CREATOR_ID set, pictures are uploaded through Open Cloud and their ids written in; otherwise each asset has a " +
       "placeholder (rbxassetid://PENDING_n): upload the files with your Roblox Studio tools (e.g. upload_image), replace the placeholders in the Luau, run it with execute_luau and check a Studio screenshot. " +
-      'Example: {"nodeId":"12:34","mode":"hybrid"}',
+      'When writing Roblox UI yourself, follow the same rules: scale only, PascalCase role names. Example: {"nodeId":"12:34"}',
     inputSchema: {
       nodeId: z.string().optional(),
-      mode: z.enum(["scale", "offset", "hybrid"]).optional().describe("Default hybrid"),
+      mode: z.enum(["scale", "offset", "hybrid"]).optional().describe("Default scale (no offsets); offset or hybrid only if the user asks"),
       targetResolution: z.array(z.number().int().min(100).max(8000)).length(2).optional().describe("Screen size the UI is designed for, default [1920, 1080]"),
       rasterize: z.enum(["auto", "none", "all"]).optional().describe("auto (default): pictures only where Roblox can't draw it; none: approximate instead; all: every styled layer"),
       outDir: z.string().optional().describe("Folder for the files (default: a new temp folder)"),
       upload: z.boolean().optional().describe("Upload the pictures through Open Cloud (needs ROBLOX_API_KEY and ROBLOX_CREATOR_ID)"),
       asRootFrame: z.boolean().optional().describe("Root is a Frame instead of a ScreenGui"),
-      textScaled: z.boolean().optional().describe("TextScaled on labels (UITextSizeConstraint keeps the design size as the maximum)"),
+      textScaled: z.boolean().optional().describe("TextScaled on labels in offset or hybrid mode (always on in scale mode)"),
       fonts: z.object({}).passthrough().optional().describe('Figma family → Roblox family or rbxasset URL, e.g. {"Inter":"GothamSSm"}'),
       parent: z.string().optional().describe('Luau expression for the parent, default game:GetService("StarterGui")'),
     },
   },
   (args) =>
-    track("export_roblox", `${args.nodeId ?? "(selection)"} ${args.mode ?? "hybrid"}`, async () => {
+    track("export_roblox", `${args.nodeId ?? "(selection)"} ${args.mode ?? "scale"}`, async () => {
       const r = await exportRoblox(
         { ...args, targetResolution: args.targetResolution as [number, number] | undefined, fonts: args.fonts as Record<string, string> | undefined },
         { request: (m, p, t) => bridge.request(m, p, t), outDir: OUT_DIR },
