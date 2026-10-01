@@ -40,7 +40,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 20, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 21, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -120,6 +120,13 @@ const svg = await call("import_svg", {
   name: "selftest svg",
 });
 check("import_svg", !svg.isError && svg.data.width === 64, svg.data);
+
+// Selecting from a script resolves the wait like a user click would.
+const waiting = call("wait_for_selection", { message: "selftest: selecting automatically", timeoutMs: 10_000 });
+await Bun.sleep(500);
+await call("run_script", { code: `figma.currentPage.selection = [await figma.getNodeByIdAsync(${JSON.stringify(frameId)})]` });
+const waited = await waiting;
+check("wait_for_selection", !waited.isError && waited.data.selection?.[0]?.id === frameId && !waited.data.timedOut, { count: waited.data.count, timedOut: waited.data.timedOut });
 
 const ctx = await call("get_context");
 check("get_context", !ctx.isError && Array.isArray(ctx.data.pages), `${ctx.data.fileName} · ${ctx.data.pages?.length} page(s) · ${ctx.data.selectionCount} selected`);

@@ -134,6 +134,20 @@
   .lbl b { font-weight: 600; font-size: 12px; }
   .lbl span { color: var(--text-3); font-size: 11px; }
 
+  /* ── Banners (agent waiting, version mismatch) ──────────────────────────── */
+  .banner {
+    display: none; align-items: center; gap: 10px; margin: 12px 12px 0; padding: 9px 8px 9px 10px; border-radius: var(--r); flex: none;
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .banner .bico { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; flex: none; color: var(--accent); background: var(--bg); }
+  .banner .main b { display: block; font-weight: 600; }
+  .banner .main span { display: block; color: var(--text-2); }
+  .waiting #waitBar { display: flex; }
+  .banner.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+  .banner.warn .bico { color: var(--warn); }
+  .mismatch #verBar { display: flex; }
+  .waiting #bar { background: var(--accent-soft); }
+
   /* ── Setup checklist ────────────────────────────────────────────────────── */
   .setup { margin: 0 12px 12px; padding: 12px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--border); display: none; flex: none; }
   .s-offline .setup, .s-foreign .setup { display: block; }
@@ -316,6 +330,7 @@
       <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5"/><path d="M3.5 4v4.5H8M12 8v4.5l3 2"/></symbol>
       <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></symbol>
       <symbol id="i-diff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="10" height="14" rx="2"/><path d="M17 5h1.5A2 2 0 0 1 20.5 7v10a2 2 0 0 1-2 2H17" stroke-dasharray="2 2.5"/><path d="M8.5 9.5v5M6 12h5"/></symbol>
+      <symbol id="i-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 3.5 13.5 6-5.8 1.9-2 5.9z"/><path d="m13 13 5.5 5.5"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5.5 12.5 4 4 9-9"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     </defs>
@@ -333,6 +348,13 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
       </button>
     </header>
+
+    <section class="banner" id="waitBar">
+      <span class="bico"><svg width="14" height="14"><use href="#i-pointer"/></svg></span>
+      <div class="main"><b>Your agent is waiting</b><span id="waitMsg">Select one or more layers</span></div>
+      <span class="countdown" id="waitLeft"></span>
+      <button class="mini" id="btnWaitCancel">Cancel</button>
+    </section>
 
     <section class="bridge">
       <div class="bridge-row">
@@ -449,6 +471,7 @@ const METHODS = {
   import_svg: { label: "SVG", color: "#f59e0b", icon: "i-pen" },
   get_context: { label: "Context", color: "#64748b", icon: "i-layers" },
   list_fonts: { label: "Fonts", color: "#ec4899", icon: "i-type" },
+  wait_for_selection: { label: "Wait for selection", color: "#0d99ff", icon: "i-pointer" },
   ping: { label: "Ping", color: "#64748b", icon: "i-pulse" },
 };
 const methodOf = (m) => METHODS[m] || { label: m, color: "#64748b", icon: "i-pulse" };
@@ -467,6 +490,7 @@ let retryAt = 0;
 let retryTimer = 0;
 let handshakeTimer = 0;
 let filter = "all";
+const waits = new Map();
 let openId = null;
 const entries = [];
 const running = new Map();
@@ -695,6 +719,7 @@ function scheduleRetry(nextState) {
 
 setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('{"t":"ping"}'); }, 20000);
 setInterval(() => {
+  if (waits.size) renderWait();
   if (state !== "offline" && state !== "foreign") return;
   const s = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
   $("countdown").textContent = s > 0 ? "Retrying in " + s + " s" : "Trying…";
@@ -716,6 +741,7 @@ function summarize(msg) {
     case "compare_images": return "Design vs reference" + (p.sideBySide ? " · side by side" : "");
     case "list_fonts": return p.filter ? "Matching “" + p.filter + "”" : "All fonts";
     case "get_context": return "File, pages and selection";
+    case "wait_for_selection": return p.message || "Select layers";
     case "build": {
       let count = 0;
       const walk = (n) => { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(walk); count++; if (Array.isArray(n.children)) n.children.forEach(walk); if (Array.isArray(n.variants)) n.variants.forEach(walk); };
@@ -928,7 +954,24 @@ function renderLog() {
   }).join("");
 }
 
+function renderWait() {
+  const w = [...waits.values()].pop();
+  document.body.classList.toggle("waiting", !!w);
+  if (w) {
+    $("waitMsg").textContent = w.message;
+    const s = Math.max(0, Math.ceil((w.until - Date.now()) / 1000));
+    $("waitLeft").textContent = s + " s";
+  }
+  renderBar();
+}
+
 function renderBar() {
+  const w = [...waits.values()].pop();
+  if (w) {
+    $("barTitle").textContent = "Your agent is waiting";
+    $("barSub").textContent = w.message;
+    return;
+  }
   $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connected") : PILL[state] + (state === "offline" ? ": waiting for your agent" : "");
   const last = entries[0];
   $("barSub").textContent = last
@@ -994,6 +1037,10 @@ $("filter").addEventListener("click", (ev) => {
   renderLog();
 });
 
+$("btnWaitCancel").onclick = () => {
+  const w = [...waits.values()].pop();
+  if (w) toPlugin({ t: "cancelWait", id: w.id });
+};
 $("btnClear").onclick = () => { entries.length = 0; openId = null; render(); };
 $("btnRetry").onclick = () => { retryDelay = 400; connect(); };
 $("btnCopyCmd").onclick = () => copy("Get-NetTCPConnection -LocalPort 3055");
@@ -1069,6 +1116,12 @@ window.onmessage = (ev) => {
     send({ t: "info", fileName: session.fileName, page: session.page });
   } else if (msg.t === "res") {
     onResult(msg);
+  } else if (msg.t === "wait") {
+    waits.set(msg.id, msg);
+    renderWait();
+  } else if (msg.t === "waitDone") {
+    waits.delete(msg.id);
+    renderWait();
   }
 };
 

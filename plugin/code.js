@@ -2150,6 +2150,75 @@
     return out;
   }
 
+  // plugin/lib/selection.ts
+  var MAX_WAIT_MS = 120000;
+  var waiters = {};
+  var listening = false;
+  function selectionSummary() {
+    const sel = figma.currentPage.selection;
+    return {
+      page: { id: figma.currentPage.id, name: figma.currentPage.name },
+      count: sel.length,
+      selection: sel.slice(0, 100).map(function(n) {
+        const b = n.absoluteBoundingBox;
+        return {
+          id: n.id,
+          name: n.name,
+          type: n.type,
+          bounds: b ? { x: round(b.x), y: round(b.y), width: round(b.width), height: round(b.height) } : null
+        };
+      })
+    };
+  }
+  function onSelectionChange() {
+    if (!figma.currentPage.selection.length)
+      return;
+    const ids = Object.keys(waiters);
+    for (let i = 0;i < ids.length; i++)
+      finish(ids[i], null);
+  }
+  function finish(id, error, timedOut) {
+    const w = waiters[id];
+    if (!w)
+      return;
+    delete waiters[id];
+    clearTimeout(w.timer);
+    figma.ui.postMessage({ t: "waitDone", id });
+    if (!Object.keys(waiters).length && listening) {
+      figma.off("selectionchange", onSelectionChange);
+      listening = false;
+    }
+    if (error)
+      w.reject(error);
+    else {
+      const out = selectionSummary();
+      out.timedOut = !!timedOut;
+      w.resolve(out);
+    }
+  }
+  function waitForSelection(p, timeoutMs, requestId) {
+    const ms = Math.max(1000, Math.min(MAX_WAIT_MS, Number(p.timeoutMs) || timeoutMs || 60000));
+    const message = String(p.message || "Select one or more layers");
+    return new Promise(function(resolve, reject) {
+      waiters[requestId] = {
+        resolve,
+        reject,
+        timer: setTimeout(function() {
+          finish(requestId, null, true);
+        }, ms)
+      };
+      if (!listening) {
+        figma.on("selectionchange", onSelectionChange);
+        listening = true;
+      }
+      figma.ui.postMessage({ t: "wait", id: requestId, message, until: Date.now() + ms });
+      figma.notify("Your agent is waiting: " + message, { timeout: 4000 });
+    });
+  }
+  function cancelWait(id) {
+    finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
+  }
+
   // plugin/code.ts
   var VERSION = "1.3.0";
   var DEFAULT_SIZE = { width: 340, height: 540 };
@@ -2232,6 +2301,8 @@
       figma.notify(String(msg.text), { timeout: 2500 });
     else if (msg.t === "focus")
       focusNode(String(msg.nodeId));
+    else if (msg.t === "cancelWait")
+      cancelWait(String(msg.id));
   };
   async function focusNode(id) {
     const node = await figma.getNodeByIdAsync(id);
@@ -2262,6 +2333,7 @@
     import_svg: importSvg,
     get_context: getContext,
     list_fonts: listFonts,
+    wait_for_selection: waitForSelection,
     ping: function() {
       return Promise.resolve({ pong: true, session: sessionInfo() });
     }
@@ -2275,6 +2347,7 @@
     screenshot: true,
     get_context: true,
     list_fonts: true,
+    wait_for_selection: true,
     ping: true
   };
   async function handleRequest(msg) {
@@ -2287,7 +2360,7 @@
       const handler = HANDLERS[msg.method];
       if (!handler)
         throw codeError("Unknown method: " + msg.method + " (reopen the plugin after updating it)", "UNKNOWN_METHOD");
-      const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000));
+      const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000), String(msg.id));
       reply = { t: "res", id: msg.id, ok: true, result };
     } catch (e) {
       reply = Object.assign({ t: "res", id: msg.id, ok: false }, describeError(e));

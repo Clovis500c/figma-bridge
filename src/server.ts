@@ -549,6 +549,26 @@ server.registerTool(
 );
 
 server.registerTool(
+  "wait_for_selection",
+  {
+    title: "Wait for the user to select layers",
+    description:
+      "Ask the user to select something in Figma and wait for it. The plugin shows a banner \"Your agent is waiting: <message>\" " +
+      "with a Cancel button. Resolves as soon as the selection changes to a non-empty one, with {page, count, selection:[{id, name, type, bounds}], timedOut}. " +
+      "Use it when the target is ambiguous (\"which card should I restyle?\") instead of guessing.",
+    inputSchema: {
+      message: z.string().max(200).optional().describe('Shown to the user, e.g. "Select the card to restyle"'),
+      timeoutMs: z.number().int().min(1_000).max(120_000).optional().describe("Default 60000, max 120000"),
+    },
+  },
+  ({ message, timeoutMs }) =>
+    track("wait_for_selection", message ?? "", async () => {
+      const ms = timeoutMs ?? 60_000;
+      return ok(await bridge.request("wait_for_selection", { message, timeoutMs: ms }, ms));
+    }),
+);
+
+server.registerTool(
   "list_fonts",
   {
     title: "List available fonts",

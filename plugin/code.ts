@@ -7,6 +7,7 @@ import { describe } from "./lib/describe";
 import { getDesignSystem } from "./lib/design-system";
 import { designTokens } from "./lib/tokens";
 import { find } from "./lib/find";
+import { cancelWait, waitForSelection } from "./lib/selection";
 import {
   codeError,
   fontNamesOf,
@@ -106,6 +107,7 @@ figma.ui.onmessage = function (msg: any) {
     void figma.clientStorage.setAsync("size", size);
   } else if (msg.t === "notify") figma.notify(String(msg.text), { timeout: 2500 });
   else if (msg.t === "focus") void focusNode(String(msg.nodeId));
+  else if (msg.t === "cancelWait") cancelWait(String(msg.id));
 };
 
 /** Selects a node and zooms to it, switching page if needed ("Show" in the activity log). */
@@ -124,7 +126,7 @@ async function focusNode(id: string) {
 
 // ─── Request dispatch ───────────────────────────────────────────────────────
 
-type Handler = (params: any, timeoutMs: number) => Promise<any>;
+type Handler = (params: any, timeoutMs: number, requestId: string) => Promise<any>;
 
 const HANDLERS: { [method: string]: Handler } = {
   run_script: runScript,
@@ -141,6 +143,7 @@ const HANDLERS: { [method: string]: Handler } = {
   import_svg: importSvg,
   get_context: getContext,
   list_fonts: listFonts,
+  wait_for_selection: waitForSelection,
   ping: function () {
     return Promise.resolve({ pong: true, session: sessionInfo() });
   },
@@ -156,6 +159,7 @@ const READ_ONLY: { [method: string]: boolean } = {
   screenshot: true,
   get_context: true,
   list_fonts: true,
+  wait_for_selection: true,
   ping: true,
 };
 
@@ -168,7 +172,7 @@ async function handleRequest(msg: any) {
   try {
     const handler = HANDLERS[msg.method];
     if (!handler) throw codeError("Unknown method: " + msg.method + " (reopen the plugin after updating it)", "UNKNOWN_METHOD");
-    const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000));
+    const result = await handler(msg.params || {}, Math.min(Number(msg.timeoutMs) || 30000, 120000), String(msg.id));
     reply = { t: "res", id: msg.id, ok: true, result: result };
   } catch (e) {
     reply = Object.assign({ t: "res", id: msg.id, ok: false }, describeError(e));
