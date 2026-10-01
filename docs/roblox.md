@@ -4,7 +4,7 @@
 can match the design, and pictures only for what Roblox can't draw.
 
 ```json
-{ "nodeId": "12:34", "mode": "hybrid", "targetResolution": [1920, 1080], "rasterize": "auto" }
+{ "nodeId": "12:34", "mode": "scale", "targetResolution": [1920, 1080], "rasterize": "auto" }
 ```
 
 It writes to a new folder (or `outDir`):
@@ -57,7 +57,7 @@ an unchanged picture is never uploaded twice. Rate limits (429) and server error
 
 | Option | Default | Effect |
 |---|---|---|
-| `mode` | `hybrid` | `scale`: UDim2 scale everywhere. `offset`: pixels everywhere. `hybrid`: scale for free-positioned layers, pixels inside auto-layout (lists keep their spacing, screens adapt). |
+| `mode` | `scale` | `scale`: every size, position, padding, gap and corner radius is a share of its parent (no offsets, no `AutomaticSize`), labels use `TextScaled`, and the root keeps the design ratio with a `UIAspectRatioConstraint` sized from the screen height. `fit`: Figma pixels plus a `UIScale` and a `FitToScreen` LocalScript. `offset`: pixels, no scaling. `hybrid`: scale for free-positioned layers, pixels inside auto-layout. |
 | `targetResolution` | `[1920, 1080]` | The screen the UI is designed for: sizes the root and scales text (below). |
 | `rasterize` | `auto` | `auto`: pictures only where needed. `none`: never, approximate instead (with a warning). `all`: every styled layer becomes a picture (pixel-exact, not editable). |
 | `asRootFrame` | `false` | The root is a `Frame` instead of a `ScreenGui` (to insert into an existing GUI). |
@@ -65,13 +65,36 @@ an unchanged picture is never uploaded twice. Rate limits (429) and server error
 | `fonts` | | Figma family → Roblox family name or `rbxasset`/`rbxassetid` URL, e.g. `{"Inter":"GothamSSm"}`. |
 | `parent` | `game:GetService("StarterGui")` | Luau expression for the parent of the UI in the script. |
 
+### Why `scale` is the default
+
+Everything is relative: a layer's size and position are shares of its parent, the root's size is a share of the screen
+height and its `UIAspectRatioConstraint` keeps the design ratio. The whole UI grows and shrinks in one piece on PC,
+mobile and console, with no script, and it looks the same in Studio's edit mode as in play. Pictures (panels, shadows,
+icons) are stretched rather than 9-sliced, because their box keeps the design proportions.
+
+Only `UIStroke.Thickness` stays in pixels (Roblox has no scale for it).
+
+### Names
+
+Instances get PascalCase names that say what they are, so scripts can use `gui.Popup.CloseButton`:
+
+| Figma layer | Roblox name |
+|---|---|
+| `Gift popup v2.2` | `GiftPopup` (its ScreenGui: `GiftPopupGui`) |
+| `Button · GIFT FOR 899`, `Icon · search` | `GiftFor899Button`, `SearchIcon` (role last) |
+| Text layer named after its text (`@clovis500c`) | `Clovis500cLabel` |
+| `Frame 12`, `Group 3` | `Row`, `Column`, `Grid` or `Container`, from its layout |
+
+Siblings with the same name get `2`, `3`… A frame with a drop shadow is a wrapper with the layer's name holding
+`Shadow` and `Panel` (or `Button`).
+
 ## Mapping
 
 ### Root
 
 - `ScreenGui` with `ResetOnSpawn = false`, `ZIndexBehavior = Sibling`, `IgnoreGuiInset = true`.
 - The frame inside it is centered: `AnchorPoint (0.5, 0.5)`, `Position {0.5, 0}, {0.5, 0}`.
-- Size: `offset` mode keeps the design size in pixels. Otherwise a frame with the target's aspect ratio (within 10%)
+- Size: `scale` sizes the root from the screen height with the design ratio. `fit` and `offset` keep the design size in pixels (`fit` then scales it with `FitScale`). Otherwise a frame with the target's aspect ratio (within 10%)
   and at least 40% of its width is a full screen (`{1, 0}, {1, 0}`); anything else is sized as a fraction of the target
   resolution.
 - A `UIAspectRatioConstraint` keeps the frame's proportions.

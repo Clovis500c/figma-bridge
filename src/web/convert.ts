@@ -14,6 +14,8 @@ export interface Asset {
   box: Box;
   /** A layer of its own (can be rasterized), not a background fill. */
   layer: boolean;
+  /** Element to picture on its own (RawNode.ref). */
+  ref?: number;
 }
 
 export interface ConvertResult {
@@ -29,6 +31,9 @@ export interface ConvertOptions {
   fonts: FontIndex;
   maxNodes: number;
   name?: string;
+  /** Use Figma's grid auto-layout for CSS grids. Off by default: its track API is unreliable in Figma, so grid
+   *  items are placed where the page shows them. */
+  grid?: boolean;
 }
 
 const TOL = 1.5;
@@ -93,11 +98,11 @@ class Converter {
     if (this.warnings.size < 40) this.warnings.add(msg);
   }
 
-  private asset(url: string | undefined, box: Box, layer: boolean): string {
+  private asset(url: string | undefined, box: Box, layer: boolean, ref?: number): string {
     if (url && !layer && this.urlKeys.has(url)) return this.urlKeys.get(url)!;
     if (url && layer && this.urlKeys.has(url) && this.assets[this.urlKeys.get(url)!]!.layer) return this.urlKeys.get(url)!;
     const key = `w${this.n++}`;
-    this.assets[key] = { url, box, layer };
+    this.assets[key] = ref === undefined ? { url, box, layer } : { url, box, layer, ref };
     if (url) this.urlKeys.set(url, key);
     return key;
   }
@@ -149,7 +154,7 @@ class Converter {
     if (n.kind === "image" || n.kind === "raster") {
       this.stats.images++;
       const fits: Record<string, string> = { contain: "fit", cover: "fill", none: "crop", "scale-down": "fit" };
-      const key = this.asset(n.kind === "image" ? n.src : undefined, n.box, true);
+      const key = this.asset(n.kind === "image" ? n.src : undefined, n.box, true, n.ref);
       return {
         type: "image",
         name: n.name || TAG_NAMES[n.tag] || "Image",
@@ -195,7 +200,8 @@ class Converter {
 
     const flow = n.children.filter((c) => !outOfFlow(c));
     const positioned = n.children.filter(outOfFlow);
-    const layout = flow.length ? this.layout(n, flow) : null;
+    let layout = flow.length ? this.layout(n, flow) : null;
+    if (layout && layout.dir === "grid" && !this.opts.grid) layout = null;
     const children: Spec[] = [];
     if (layout) {
       this.stats.autoLayout++;
@@ -214,6 +220,8 @@ class Converter {
         if (item.fillCross) child[layout.dir === "column" ? "w" : "h"] = "fill";
         if (item.colSpan && item.colSpan > 1) child.colSpan = item.colSpan;
         if (item.rowSpan && item.rowSpan > 1) child.rowSpan = item.rowSpan;
+        // Measured box, used by the plugin when Figma's grid auto-layout fails.
+        if (layout.dir === "grid") child.place = [r1(item.node!.box.x - n.box.x), r1(item.node!.box.y - n.box.y), r1(item.node!.box.w), r1(item.node!.box.h)];
         if (item.wrap) {
           this.stats.layers++;
           children.push({
@@ -229,23 +237,27 @@ class Converter {
       // A container with fill children (or space distribution) keeps its size instead of hugging.
       spec.w = layout.fixedW || children.some((c) => c.w === "fill") ? n.box.w : "hug";
       spec.h = layout.fixedH || children.some((c) => c.h === "fill") ? n.box.h : "hug";
+      if (layout.dir === "grid") spec.gridSize = [r1(n.box.w), r1(n.box.h)];
     } else {
       if (flow.length) this.stats.free++;
       spec.w = n.box.w;
       spec.h = n.box.h;
-      for (const c of paintOrder(flow)) {
-        const child = this.node(c);
-        if (!child) break;
-        children.push(this.placeAt(child, c, n));
-      }
     }
-    for (const c of paintOrder(positioned)) {
+    // Free frames paint every child in CSS stacking order. Auto-layout keeps its flow order, so positioned layers
+    // that CSS paints under the flow (a background behind z-index:1 content) go first and the others last.
+    const free = layout ? positioned : n.children;
+    const floor = layout ? Math.min(...flow.map(stackLevel)) : Infinity;
+    const below: Spec[] = [];
+    for (const c of paintOrder(free)) {
       const child = this.node(c);
       if (!child) break;
-      children.push({ ...this.placeAt(child, c, n), ...(layout ? { absolute: true } : {}) });
+      const placed = { ...this.placeAt(child, c, n), ...(layout ? { absolute: true } : {}) };
+      if (layout && stackLevel(c) < floor) below.push(placed);
+      else children.push(placed);
     }
+    children.unshift(...below);
     if (children.length) spec.children = children;
-    if (!spec.name) spec.name = layout ? (layout.dir === "grid" ? "Grid" : layout.dir === "row" ? "Row" : "Column") : "Frame";
+    if (!spec.name) spec.name = layout ? (layout.dir === "grid" ? "Grid" : layout.dir === "row" ? "Row" : "Column") : "Container";
     return spec;
   }
 
@@ -302,7 +314,8 @@ class Converter {
       });
     }
     // One line that sizes itself (flex item, nowrap) hugs; block text wraps at its container's width.
-    if (!n.autoWidth || (n.lines ?? 1) > 1) spec.w = n.box.w;
+    // Left-aligned single lines hug too: a substituted font is often wider and would wrap at the measured width.
+    if ((n.lines ?? 1) > 1 || (!n.autoWidth && align)) spec.w = n.box.w;
     return spec;
   }
 
@@ -366,9 +379,16 @@ function label(n: RawNode) {
 function decorationOf(v: string): string | undefined {
   return /underline/.test(v) ? "underline" : /line-through/.test(v) ? "strike" : undefined;
 }
+/** CSS painting order: negative z-index, then in-flow boxes, then positioned boxes (z-index auto or 0), then positive z-index. */
+function stackLevel(n: RawNode): number {
+  const z = n.css.zIndex && n.css.zIndex !== "auto" ? Number(n.css.zIndex) || 0 : null;
+  if (z !== null && z < 0) return z - 1;
+  const positioned = !!n.css.position && n.css.position !== "static";
+  if (!positioned && z === null) return 0;
+  return 1 + Math.max(0, z ?? 0);
+}
 function paintOrder(list: RawNode[]): RawNode[] {
-  const z = (n: RawNode) => (n.css.zIndex && n.css.zIndex !== "auto" ? Number(n.css.zIndex) || 0 : 0);
-  return list.map((n, i) => ({ n, i })).sort((a, b) => z(a.n) - z(b.n) || a.i - b.i).map((x) => x.n);
+  return list.map((n, i) => ({ n, i })).sort((a, b) => stackLevel(a.n) - stackLevel(b.n) || a.i - b.i).map((x) => x.n);
 }
 function padOf(n: RawNode): number[] {
   const b = borderWidths(n.css);

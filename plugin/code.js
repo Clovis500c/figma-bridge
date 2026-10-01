@@ -2173,6 +2173,8 @@
       node.name = String(s.name);
     else if (type === "icon")
       node.name = "icon/" + s.icon;
+    else if (type === "frame" || type === "component")
+      node.name = roleName(s);
     if (type === "frame" || type === "component")
       await setupFrame(node, s, ctx, path);
     else if (type === "slide")
@@ -2240,6 +2242,16 @@
         ctx.ids[key] = node.id;
     }
     return node;
+  }
+  function roleName(s) {
+    const layout = String(s.layout || s.direction || "").toLowerCase();
+    if (layout === "grid")
+      return "Grid";
+    if (layout === "row" || layout === "horizontal")
+      return "Row";
+    if (layout === "column" || layout === "col" || layout === "vertical")
+      return "Column";
+    return Array.isArray(s.children) && s.children.length ? "Container" : "Box";
   }
   var FIXED_LOOK = ["sticky", "shape", "table", "codeblock"];
   async function setupFrame(f, s, ctx, path, keepFills) {
@@ -2325,6 +2337,8 @@
     if (mode === "GRID") {
       if (await setupGrid(f, s, ctx, path))
         return;
+      if (Array.isArray(s.gridSize))
+        return placeGridItems(f, s);
       mode = "HORIZONTAL";
       s = Object.assign({}, s, { wrap: true, rowGap: s.rowGap !== undefined ? s.rowGap : s.gap, gap: s.columnGap !== undefined ? s.columnGap : s.gap });
     }
@@ -2369,7 +2383,28 @@
       return { type: "FIXED", value: parseFloat(px[1]) };
     return fallback === "FLEX" ? { type: "FLEX", value: 1 } : { type: "HUG" };
   }
+  var GRID_FALLBACK = `Figma's grid track API failed (a Figma bug: "invalid id"): grids were built as wrapping rows, or at their measured positions for imported pages.`;
+  var gridTracksBroken = false;
+  function tracksReadable(f) {
+    try {
+      const t = f.gridColumnSizes[0];
+      return !!t && typeof t.type === "string";
+    } catch (e) {
+      return false;
+    }
+  }
   async function setupGrid(f, s, ctx, path) {
+    const fallback = function() {
+      gridTracksBroken = true;
+      try {
+        f.layoutMode = "NONE";
+      } catch (e) {}
+      if (ctx.warnings.indexOf(GRID_FALLBACK) === -1)
+        ctx.warnings.push(GRID_FALLBACK);
+      return false;
+    };
+    if (gridTracksBroken)
+      return fallback();
     try {
       f.layoutMode = "GRID";
     } catch (e) {
@@ -2399,14 +2434,16 @@
     set("rows", function() {
       f.gridRowCount = rowCount;
     });
-    set("column sizes", function() {
+    if (!tracksReadable(f))
+      return fallback();
+    try {
       for (let i = 0;i < colCount; i++)
-        applyTrack(f.gridColumnSizes[i], track(cols ? cols[i] : undefined, fixedW ? "FLEX" : "HUG"));
-    });
-    set("row sizes", function() {
+        applyTrack(f, "gridColumnSizes", i, track(cols ? cols[i] : undefined, fixedW ? "FLEX" : "HUG"));
       for (let i = 0;i < rowCount; i++)
-        applyTrack(f.gridRowSizes[i], track(rows ? rows[i] : undefined, fixedH ? "FLEX" : "HUG"));
-    });
+        applyTrack(f, "gridRowSizes", i, track(rows ? rows[i] : undefined, fixedH ? "FLEX" : "HUG"));
+    } catch (e) {
+      return fallback();
+    }
     if (!fixedW)
       set("sizing", function() {
         f.layoutSizingHorizontal = "HUG";
@@ -2429,12 +2466,30 @@
       await setPadding(f, s.padding);
     return true;
   }
-  function applyTrack(t, spec) {
-    if (!t)
+  function placeGridItems(f, s) {
+    if (s.w === "hug" || s.w === undefined)
+      s.w = s.gridSize[0];
+    if (s.h === "hug" || s.h === undefined)
+      s.h = s.gridSize[1];
+    const kids = Array.isArray(s.children) ? s.children : [];
+    for (let i = 0;i < kids.length; i++) {
+      const p = kids[i] && kids[i].place;
+      if (!Array.isArray(p))
+        continue;
+      kids[i].x = p[0];
+      kids[i].y = p[1];
+      kids[i].w = p[2];
+      if (kids[i].type !== "text" || kids[i].h !== undefined)
+        kids[i].h = p[3];
+    }
+  }
+  function applyTrack(f, field, i, spec) {
+    if (!f[field][i])
       return;
-    t.type = spec.type;
-    if (spec.value !== undefined && spec.type !== "HUG")
-      t.value = spec.value;
+    if (f[field][i].type !== spec.type)
+      f[field][i].type = spec.type;
+    if (spec.value !== undefined && spec.type !== "HUG" && f[field][i].value !== spec.value)
+      f[field][i].value = spec.value;
   }
   function spanOf(s, axis) {
     if (!s || typeof s !== "object")
@@ -2853,10 +2908,13 @@
     const right = v[1] === undefined ? v[0] : v[1];
     const bottom = v[2] === undefined ? v[0] : v[2];
     const left = v[3] === undefined ? right : v[3];
-    await setNumber(f, "paddingTop", top);
-    await setNumber(f, "paddingRight", right);
-    await setNumber(f, "paddingBottom", bottom);
-    await setNumber(f, "paddingLeft", left);
+    const clamp = function(x) {
+      return typeof x === "number" ? Math.max(0, x) : x;
+    };
+    await setNumber(f, "paddingTop", clamp(top));
+    await setNumber(f, "paddingRight", clamp(right));
+    await setNumber(f, "paddingBottom", clamp(bottom));
+    await setNumber(f, "paddingLeft", clamp(left));
   }
   function lineHeight(v) {
     if (v === "auto")
@@ -4040,7 +4098,13 @@
       const image = figma.getImageByHash(h);
       if (!image)
         continue;
-      const bytes = await image.getBytesAsync();
+      let bytes;
+      try {
+        bytes = await image.getBytesAsync();
+      } catch (e) {
+        out.rasterize = true;
+        continue;
+      }
       if (ctx.imageBytes + bytes.length > 40 << 20)
         continue;
       ctx.imageBytes += bytes.length;
@@ -4112,22 +4176,39 @@
       })
     };
   }
+  function withTimeout(p, ms, message) {
+    return new Promise(function(resolve, reject) {
+      const timer = setTimeout(function() {
+        reject(new Error(message));
+      }, ms);
+      p.then(function(v) {
+        clearTimeout(timer);
+        resolve(v);
+      }, function(e) {
+        clearTimeout(timer);
+        reject(e);
+      });
+    });
+  }
   async function robloxImages(p) {
     const items = Array.isArray(p.items) ? p.items : [];
     const out = [];
     for (let i = 0;i < items.length; i++) {
       const it = items[i];
-      const scale = Math.max(1, Math.min(4, Number(it.scale) || 2));
+      let scale = Math.max(1, Math.min(4, Number(it.scale) || 2));
       let temp = null;
       try {
         let node = await getNode(it.id);
         if (it.mode === "panel" || it.mode === "shadow") {
           temp = node.clone();
+          figma.currentPage.appendChild(temp);
           if ("children" in temp)
             for (let k = temp.children.length - 1;k >= 0; k--)
               temp.children[k].remove();
           if (it.mode === "panel")
-            temp.effects = [];
+            temp.effects = node.effects.filter(function(e) {
+              return e.type !== "DROP_SHADOW";
+            });
           else {
             temp.effects = node.effects.filter(function(e) {
               return e.type === "DROP_SHADOW" && e.visible !== false;
@@ -4136,7 +4217,10 @@
           }
           node = temp;
         }
-        const bytes = await node.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: scale } });
+        const box = node.absoluteRenderBounds || node.absoluteBoundingBox;
+        if (box)
+          scale = Math.min(scale, Math.floor(1024 / Math.max(1, box.width, box.height) * 1000) / 1000);
+        const bytes = await withTimeout(node.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: scale } }), 20000, "export timed out");
         const rb = node.absoluteRenderBounds || node.absoluteBoundingBox;
         const bb = node.absoluteBoundingBox;
         out.push({
@@ -4226,7 +4310,7 @@
     finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
   }
   // package.json
-  var version = "1.13.0";
+  var version = "1.14.2";
 
   // plugin/code.ts
   var DEFAULT_SIZE = { width: 340, height: 540 };

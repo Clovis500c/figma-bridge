@@ -5,7 +5,7 @@ import { join } from "node:path";
 import luaparse from "luaparse";
 import { exportRoblox } from "../src/roblox/export";
 import { robloxFamily, robloxWeight } from "../src/roblox/fonts";
-import { decide, mapToRoblox, pictureRequests, type RbxInstance, type RbxValue, type RNode, type RobloxOptions } from "../src/roblox/map";
+import { decide, mapToRoblox, pictureRequests, robloxName, type RbxInstance, type RbxValue, type RNode, type RobloxOptions } from "../src/roblox/map";
 import { luauString, substituteAssets, toLuau, toRbxmx } from "../src/roblox/output";
 import { creatorFrom, RobloxUploader } from "../src/roblox/upload";
 
@@ -54,7 +54,63 @@ describe("mapping", () => {
     expect(decide(card, OPTS)).toMatchObject({ kind: "frame", shadow: true });
     expect(decide(card.children![2]!, OPTS).kind).toBe("image");
     expect(pictureRequests(card, { ...OPTS, rasterize: "none" })).toEqual([]);
-    expect(pictureRequests(card, { ...OPTS, rasterize: "all" }).map((p) => p.mode)).toEqual(["panel", "full", "full", "panel", "panel"]);
+    expect(pictureRequests(card, { ...OPTS, rasterize: "all" }).map((p) => p.mode)).toEqual(["panel", "shadow", "full", "full", "panel", "panel"]);
+    // A 9-slice panel keeps its drop shadow as a separate picture.
+    const all = mapCard({ rasterize: "all" }).root.children[0]!;
+    expect(kids(all).slice(0, 2)).toEqual(["ImageLabel", "ImageLabel"]);
+    expect(prop(all.children[0], "Name")).toEqual({ t: "string", v: "Shadow" });
+  });
+
+  test("9-slice centers follow the picture's real scale and pixel size", () => {
+    const { root } = mapToRoblox(card, { ...OPTS, rasterize: "all" }, (key) => ({ url: `rbxassetid://${key}`, scale: 1.5, px: { w: 600, h: 450 } }));
+    const panel = root.children[0]!.children.find((c) => c.className === "ImageLabel" && (prop(c, "Name") as any).v !== "Shadow")!;
+    expect(prop(panel, "SliceScale")).toEqual({ t: "float", v: 0.667 });
+    const rect = prop(panel, "SliceCenter") as any;
+    expect([600 - rect.x1, 450 - rect.y1]).toEqual([rect.x0, rect.y0]);
+  });
+
+  test("fit mode: fixed-size panels are stretched pictures (exact), not 9-slices", () => {
+    const fixed = { ...card, sizing: { h: "FIXED", v: "FIXED" } };
+    const { root } = mapToRoblox(fixed, { ...OPTS, mode: "fit", rasterize: "all" }, (key) => ({ url: `rbxassetid://${key}` }));
+    const panel = root.children[0]!.children.find((c) => c.className === "ImageLabel" && (prop(c, "Name") as any).v !== "Shadow")!;
+    expect(prop(panel, "ScaleType")).toEqual({ t: "enum", e: "ScaleType", v: "Stretch" });
+    expect(prop(panel, "SliceCenter")).toBeUndefined();
+  });
+
+  test("scale mode: every size, position, padding, gap and radius is scale, never offset", () => {
+    const { root } = mapToRoblox(card, { ...OPTS, mode: "scale" }, (key) => ({
+      url: `rbxassetid://${key}`,
+      ...(key.endsWith(":shadow") ? { offset: { x: -24, y: -16 }, size: { w: 448, h: 356 } } : {}),
+    }));
+    const offsets: string[] = [];
+    const walk = (i: RbxInstance) => {
+      for (const [k, v] of i.props) {
+        if (v.t === "UDim2" && (v.xo !== 0 || v.yo !== 0)) offsets.push(`${i.name}.${k}`);
+        if (v.t === "UDim" && v.o !== 0) offsets.push(`${i.name}.${k}`);
+        if (k === "AutomaticSize") offsets.push(`${i.name}.AutomaticSize`);
+      }
+      i.children.forEach(walk);
+    };
+    walk(root);
+    expect(offsets).toEqual([]);
+    const title = find(root, "Title")!;
+    expect(prop(title, "TextScaled")).toEqual({ t: "bool", v: true });
+    // The root keeps the design's proportions on every screen.
+    expect(root.children[0]!.children.some((c) => c.className === "UIAspectRatioConstraint")).toBe(true);
+  });
+
+  test("professional names: PascalCase, role last, buttons by name", () => {
+    const box = (name: string, extra: Partial<RNode> = {}): RNode => ({ id: name, name, type: "FRAME", x: 0, y: 0, w: 1, h: 1, ...extra });
+    const text = (name: string, characters: string): RNode =>
+      box(name, { type: "TEXT", text: { characters, align: "LEFT", valign: "TOP", autoResize: "WIDTH_AND_HEIGHT", maxLines: 0, segments: [] } });
+    expect(robloxName(box("Gift popup v2.2"), "Frame")).toBe("GiftPopup");
+    expect(robloxName(box("Icon · search", { type: "VECTOR" }), "ImageLabel")).toBe("SearchIcon");
+    expect(robloxName(box("Button / Primary"), "TextButton")).toBe("PrimaryButton");
+    expect(robloxName(box("Close"), "ImageButton")).toBe("CloseButton");
+    expect(robloxName(box("Frame 12", { layout: { mode: "HORIZONTAL" } as any }), "Frame")).toBe("Row");
+    expect(robloxName(text("@clovis500c", "@clovis500c"), "TextLabel")).toBe("Clovis500cLabel");
+    expect(robloxName(text("899", "899"), "TextLabel")).toBe("Value899Label");
+    expect(robloxName(text("Title", "GIFT"), "TextLabel")).toBe("Title");
   });
 
   test("ScreenGui root, centered card with its shadow behind", () => {
@@ -105,13 +161,13 @@ describe("mapping", () => {
     expect(prop(title, "Size")).toEqual({ t: "UDim2", xs: 0, xo: 0, ys: 0, yo: 0 });
     expect(prop(title, "AutomaticSize")).toEqual({ t: "enum", e: "AutomaticSize", v: "XY" });
     expect(prop(title, "LayoutOrder")).toEqual({ t: "int", v: 1 });
-    const price = find(panel, "Price")!;
+    const price = find(panel, "PriceLabel")!;
     expect(prop(price, "Size")).toEqual({ t: "UDim2", xs: 1, xo: 0, ys: 0, yo: 0 });
     expect(prop(price, "AutomaticSize")).toEqual({ t: "enum", e: "AutomaticSize", v: "Y" });
     const actions = find(panel, "Actions")!;
     expect(prop(find(actions, "UIListLayout"), "HorizontalFlex")).toEqual({ t: "enum", e: "UIFlexAlignment", v: "SpaceBetween" });
     expect(prop(find(actions, "UIListLayout"), "VerticalAlignment")).toEqual({ t: "enum", e: "VerticalAlignment", v: "Center" });
-    const buy = find(actions, "Buy button")!;
+    const buy = find(actions, "BuyButton")!;
     expect(buy.className).toBe("TextButton");
     expect(prop(buy, "AutoButtonColor")).toEqual({ t: "bool", v: false });
     expect(prop(buy, "Text")).toEqual({ t: "string", v: "" });
@@ -135,14 +191,14 @@ describe("mapping", () => {
     expect(prop(title, "LineHeight")).toEqual({ t: "float", v: 1.042 });
     expect(prop(title, "TextWrapped")).toBeUndefined();
     expect(prop(find(title, "UITextSizeConstraint"), "MaxTextSize")).toEqual({ t: "int", v: 24 });
-    const price = find(panel, "Price")!;
+    const price = find(panel, "PriceLabel")!;
     expect(prop(price, "RichText")).toEqual({ t: "bool", v: true });
     expect(prop(price, "Text")).toEqual({ t: "string", v: '<font color="#6B7280" weight="400">Only </font>250 coins' });
     expect(prop(price, "TextWrapped")).toEqual({ t: "bool", v: true });
     const label = find(panel, "Label")!;
     expect(prop(label, "FontFace")).toMatchObject({ family: "rbxasset://fonts/families/Montserrat.json", weightName: "SemiBold" });
     expect(prop(label, "TextXAlignment")).toEqual({ t: "enum", e: "TextXAlignment", v: "Center" });
-    const badgeText = find(panel, "New")!;
+    const badgeText = find(panel, "NewLabel")!;
     expect(prop(badgeText, "TextTruncate")).toEqual({ t: "enum", e: "TextTruncate", v: "AtEnd" });
     expect(prop(find(mapCard({ textScaled: true }).root, "Title"), "TextScaled")).toEqual({ t: "bool", v: true });
   });
@@ -160,16 +216,16 @@ describe("mapping", () => {
     const box = (id: string, h: string, v: string): RNode => ({ id, name: id, type: "FRAME", x: 100, y: 50, w: 200, h: 100, constraints: { h, v }, fills: [{ type: "SOLID", opacity: 1, color: "#123456" }] });
     const screen: RNode = { id: "0", name: "Screen", type: "FRAME", x: 0, y: 0, w: 1000, h: 500, children: [box("max", "MAX", "MAX"), box("center", "CENTER", "CENTER"), box("stretch", "STRETCH", "MIN")] };
     const off = mapCard({ mode: "offset" }, screen).root.children[0]!;
-    expect(prop(find(off, "max"), "AnchorPoint")).toEqual({ t: "Vector2", x: 1, y: 1 });
-    expect(prop(find(off, "max"), "Position")).toEqual({ t: "UDim2", xs: 1, xo: -700, ys: 1, yo: -350 });
-    expect(prop(find(off, "center"), "Position")).toEqual({ t: "UDim2", xs: 0.5, xo: -300, ys: 0.5, yo: -150 });
-    expect(prop(find(off, "stretch"), "Size")).toEqual({ t: "UDim2", xs: 1, xo: -800, ys: 0, yo: 100 });
+    expect(prop(find(off, "Max"), "AnchorPoint")).toEqual({ t: "Vector2", x: 1, y: 1 });
+    expect(prop(find(off, "Max"), "Position")).toEqual({ t: "UDim2", xs: 1, xo: -700, ys: 1, yo: -350 });
+    expect(prop(find(off, "Center"), "Position")).toEqual({ t: "UDim2", xs: 0.5, xo: -300, ys: 0.5, yo: -150 });
+    expect(prop(find(off, "Stretch"), "Size")).toEqual({ t: "UDim2", xs: 1, xo: -800, ys: 0, yo: 100 });
     expect(prop(off, "Size")).toEqual({ t: "UDim2", xs: 0, xo: 1000, ys: 0, yo: 500 });
     const scale = mapCard({ mode: "scale" }, screen).root.children[0]!;
-    expect(prop(find(scale, "max"), "Position")).toEqual({ t: "UDim2", xs: 0.3, xo: 0, ys: 0.3, yo: 0 });
-    expect(prop(find(scale, "center"), "Position")).toEqual({ t: "UDim2", xs: 0.2, xo: 0, ys: 0.2, yo: 0 });
-    expect(prop(find(scale, "stretch"), "Size")).toEqual({ t: "UDim2", xs: 0.2, xo: 0, ys: 0.2, yo: 0 });
-    expect(prop(find(scale, "max"), "ZIndex")).toEqual({ t: "int", v: 1 });
+    expect(prop(find(scale, "Max"), "Position")).toEqual({ t: "UDim2", xs: 0.3, xo: 0, ys: 0.3, yo: 0 });
+    expect(prop(find(scale, "Center"), "Position")).toEqual({ t: "UDim2", xs: 0.2, xo: 0, ys: 0.2, yo: 0 });
+    expect(prop(find(scale, "Stretch"), "Size")).toEqual({ t: "UDim2", xs: 0.2, xo: 0, ys: 0.2, yo: 0 });
+    expect(prop(find(scale, "Max"), "ZIndex")).toEqual({ t: "int", v: 1 });
   });
 
   test("rasterize none approximates and says so", () => {
@@ -253,7 +309,7 @@ describe("rbxmx", () => {
     expect(doc.attrs.version).toBe("4");
     const gui = items(doc)[0]!;
     expect(gui.attrs.class).toBe("ScreenGui");
-    expect(propOf(gui, "Name")!.text).toBe("Shop card");
+    expect(propOf(gui, "Name")!.text).toBe("ShopCardGui");
     const count = (x: XmlNode): number => items(x).reduce((a, c) => a + 1 + count(c), 0);
     const countI = (i: RbxInstance): number => 1 + i.children.reduce((a, c) => a + countI(c), 0);
     expect(count(doc)).toBe(countI(root));
@@ -272,7 +328,7 @@ describe("rbxmx", () => {
     expect(size.children.map((c) => `${c.tag}=${c.text}`)).toEqual(["XS=0.208", "XO=0", "YS=0.278", "YO=0"]);
     const panel = items(wrapper)[1]!;
     const content = items(panel).find((i) => propOf(i, "Name")!.text === "Content")!;
-    const price = items(content).find((i) => propOf(i, "Name")!.text === "Price")!;
+    const price = items(content).find((i) => propOf(i, "Name")!.text === "PriceLabel")!;
     // Rich text survives the XML escaping.
     expect(propOf(price, "Text")!.text).toBe('<font color="#6B7280" weight="400">Only </font>250 coins');
     const font = propOf(price, "FontFace")!;
@@ -291,9 +347,9 @@ describe("Luau", () => {
 
   test("parses, replaces a previous copy, returns the root", () => {
     expect(() => luaparse.parse(luau, { luaVersion: "5.3" })).not.toThrow();
-    expect(luau).toContain('local existing = PARENT:FindFirstChild("Shop card")');
+    expect(luau).toContain('local existing = PARENT:FindFirstChild("ShopCardGui")');
     expect(luau).toContain("existing:Destroy()");
-    expect(luau.trimEnd().endsWith("return shopCard")).toBe(true);
+    expect(luau.trimEnd().endsWith("return shopCardGui")).toBe(true);
     // One local per instance, parents set after properties.
     const countI = (i: RbxInstance): number => 1 + i.children.reduce((a, c) => a + countI(c), 0);
     expect(luau.match(/= Instance\.new\(/g)).toHaveLength(countI(root));

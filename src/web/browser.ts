@@ -39,7 +39,8 @@ export interface RenderOptions {
 
 export interface PageTools {
   fetch(url: string): Promise<Uint8Array>;
-  picture(box: { x: number; y: number; w: number; h: number }): Promise<Uint8Array>;
+  /** ref: picture only that element (see RawNode.ref), without what overlaps it. */
+  picture(box: { x: number; y: number; w: number; h: number }, ref?: number): Promise<Uint8Array>;
 }
 
 type Playwright = typeof import("playwright-core");
@@ -134,14 +135,31 @@ export async function render(source: PageSource, opts: RenderOptions): Promise<R
           screenshot = opts.selector ? await page.locator(opts.selector).first().screenshot() : await page.screenshot({ fullPage: true, clip });
         } catch {}
         const r: Rendered = { viewport: width, snap, screenshot };
+        let queue: Promise<unknown> = Promise.resolve();
         await opts.withPage(r, {
           fetch: async (u) => {
             const res = await context.request.get(u, { timeout: 20_000 });
             if (!res.ok()) throw new Error(`HTTP ${res.status()}`);
             return new Uint8Array(await res.body());
           },
-          picture: async (b) =>
-            new Uint8Array(await page.screenshot({ fullPage: true, clip: { x: b.x, y: b.y, width: Math.max(1, b.w), height: Math.max(1, b.h) }, omitBackground: true })),
+          picture: (b, ref) => {
+            // One at a time: isolating an element restyles the whole page.
+            const shot = queue.then(async () => {
+              const clip = { x: b.x, y: b.y, width: Math.max(1, b.w), height: Math.max(1, b.h) };
+              if (ref === undefined) return new Uint8Array(await page.screenshot({ fullPage: true, clip, omitBackground: true }));
+              const sel = `[data-fb-pic="${ref}"]`;
+              const style = await page.addStyleTag({
+                content: `html,body{background:transparent!important}body *{visibility:hidden!important}${sel},${sel} *{visibility:visible!important}`,
+              });
+              try {
+                return new Uint8Array(await page.screenshot({ fullPage: true, clip, omitBackground: true }));
+              } finally {
+                await style.evaluate((el) => (el as Element).remove()).catch(() => {});
+              }
+            });
+            queue = shot.catch(() => {});
+            return shot;
+          },
         });
         out.push(r);
       } finally {

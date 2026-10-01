@@ -3,6 +3,7 @@ import type { RbxInstance, RbxValue } from "./map";
 
 /** Enum item values used in .rbxmx files (token properties). */
 const ENUMS: Record<string, Record<string, number>> = {
+  DominantAxis: { Width: 0, Height: 1 },
   ZIndexBehavior: { Global: 0, Sibling: 1 },
   FillDirection: { Horizontal: 0, Vertical: 1 },
   HorizontalAlignment: { Center: 0, Left: 1, Right: 2 },
@@ -55,6 +56,8 @@ function xmlProp(name: string, v: RbxValue): string {
       return `<NumberSequence name="${name}">${v.keys.map((k) => `${n(k.time)} ${n(k.value)} 0 `).join("")}</NumberSequence>`;
     case "Font":
       return `<Font name="${name}"><Family><url>${xml(v.family)}</url></Family><Weight>${v.weight}</Weight><Style>${v.style}</Style></Font>`;
+    case "Source":
+      return `<ProtectedString name="${name}">${xml(v.v)}</ProtectedString>`;
   }
 }
 
@@ -118,6 +121,13 @@ function luauValue(v: RbxValue): string {
       return `NumberSequence.new({\n${v.keys.map((k) => `\t\tNumberSequenceKeypoint.new(${n(k.time)}, ${n(k.value)}),`).join("\n")}\n\t})`;
     case "Font":
       return `Font.new(${luauString(v.family)}, Enum.FontWeight.${v.weightName}, Enum.FontStyle.${v.style})`;
+    case "Source": {
+      // Long bracket string with enough "=" to never close early.
+      let eq = "";
+      while (v.v.includes(`]${eq}]`)) eq += "=";
+      return `[${eq}[
+${v.v}]${eq}]`;
+    }
   }
 }
 

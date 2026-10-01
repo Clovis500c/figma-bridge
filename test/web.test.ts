@@ -95,10 +95,10 @@ function txt(box: [number, number, number, number], text: string, autoWidth = fa
   return { kind: "text", tag: "#text", name: "", box: { x: box[0], y: box[1], w: box[2], h: box[3] }, css: { textAlign: "start" }, children: [], runs: [{ text, style }], lines: 1, autoWidth };
 }
 const visible = { backgroundColor: "#FFFFFF" };
-function run(root: RawNode, maxNodes = 500): ReturnType<typeof convert> {
+function run(root: RawNode, maxNodes = 500, grid = true): ReturnType<typeof convert> {
   root.tag = "body";
   const snap: Snapshot = { title: "Test", url: "https://example.com/", width: root.box.w, height: root.box.h, root, nodes: 0, truncated: false, warnings: [] };
-  return convert(snap, { fonts, maxNodes });
+  return convert(snap, { fonts, maxNodes, grid });
 }
 const child = (s: Spec, ...path: number[]) => path.reduce((n, i) => n.children[i], s);
 
@@ -152,6 +152,19 @@ describe("layout inference", () => {
     expect(badge).toMatchObject({ absolute: true, x: 200, y: -10, w: 60, h: 20 });
   });
 
+  test("positioned backgrounds stay under content that has a higher z-index", () => {
+    const bg = el([0, 0, 400, 200], { ...visible, position: "absolute" }, [], "Background");
+    const content = el([0, 0, 400, 200], { display: "block", position: "relative", zIndex: "1" }, [el([20, 20, 100, 40], visible, [], "Card")], "Content");
+    const { spec } = run(el([0, 0, 400, 200], { display: "block" }, [bg, content]));
+    const parent = find(spec, (n) => Array.isArray(n.children) && n.children.some((c: Spec) => c.name === "Background"))!;
+    const names = parent.children.map((c: Spec) => c.name);
+    expect(names.indexOf("Background")).toBe(0);
+    // Without z-index, a positioned box paints over in-flow content.
+    const top = run(el([0, 0, 400, 200], { display: "block" }, [el([0, 0, 400, 200], { ...visible, position: "absolute" }, [], "Overlay"), el([0, 0, 400, 200], visible, [], "Flow")])).spec;
+    const p2 = find(top, (n) => Array.isArray(n.children) && n.children.some((c: Spec) => c.name === "Overlay"))!;
+    expect(p2.children.map((c: Spec) => c.name)).toEqual(["Flow", "Overlay"]);
+  });
+
   test("CSS grid becomes a grid with spans", () => {
     const grid = el([0, 0, 420, 220], { ...visible, display: "grid", gridTemplateColumns: "200px 200px", gridTemplateRows: "100px 100px", columnGap: "20px", rowGap: "20px" }, [
       el([0, 0, 420, 100], visible),
@@ -162,6 +175,13 @@ describe("layout inference", () => {
     const g = child(spec, 0);
     expect(g).toMatchObject({ layout: "grid", columns: ["1fr", "1fr"], rows: [100, 100], columnGap: 20, rowGap: 20 });
     expect(child(g, 0)).toMatchObject({ colSpan: 2, w: "fill", h: "fill" });
+    // Measured boxes for when Figma's grid API fails.
+    expect(g.gridSize).toEqual([420, 220]);
+    expect(child(g, 2).place).toEqual([220, 120, 200, 100]);
+    // Default import: grid items at their measured positions.
+    const free = child(run(el([0, 0, 420, 220], { display: "block" }, [JSON.parse(JSON.stringify(grid))]), 500, false).spec, 0);
+    expect(free.layout).toBeUndefined();
+    expect(child(free, 2)).toMatchObject({ x: 220, y: 120, w: 200, h: 100 });
   });
 
   test("empty wrappers collapse and names carry over", () => {
@@ -214,7 +234,11 @@ describe.skipIf(!browserAvailable)("import_web in a browser", () => {
     expect(spec).toMatchObject({ name: "Acme · 1440", w: 1440, clip: true });
     expect(find(spec, (s) => s.name === "Site header")).toMatchObject({ layout: "row", justify: "between", align: "center" });
     expect(find(spec, (s) => s.name === "Hero")).toMatchObject({ layout: "column", align: "center", fill: { angle: 90 } });
-    expect(find(spec, (s) => s.name === "Pricing")).toMatchObject({ layout: "grid", columns: ["1fr", "1fr", "1fr"], columnGap: 24 });
+    // CSS grid: items where the page shows them (Figma's grid API is unreliable).
+    const pricing = find(spec, (s) => s.name === "Pricing")!;
+    expect(pricing.layout).toBeUndefined();
+    const xs = pricing.children.map((c: Spec) => c.x);
+    expect(xs[1] - xs[0]).toBeCloseTo(xs[2] - xs[1], 0);
     expect(find(spec, (s) => s.text === "Popular" || s.name === "Decoration")).toBeTruthy();
     const badge = find(spec, (s) => s.name === "Decoration")!;
     expect(badge).toMatchObject({ absolute: true, fill: "#4F46E5" });
@@ -248,6 +272,7 @@ describe.skipIf(!browserAvailable)("import_web in a browser", () => {
     const bundled = (await import(join(out, "import.js"))) as typeof import("../src/web/import");
     const r = await bundled.importWeb({ html: readFileSync(join(FIXTURES, "landing.html"), "utf8"), selector: "#pricing", viewports: [1024] }, deps);
     rmSync(out, { recursive: true, force: true });
-    expect(r.viewports[0]!.spec).toMatchObject({ layout: "grid", w: 1024 });
+    expect(r.viewports[0]!.spec).toMatchObject({ w: 1024 });
+    expect(r.viewports[0]!.spec.children.length).toBe(3);
   }, 60_000);
 });

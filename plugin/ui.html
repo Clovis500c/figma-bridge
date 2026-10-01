@@ -523,7 +523,8 @@ const partials = new Map();
 function encode(msg) {
   const text = JSON.stringify(msg);
   if (text.length <= CHUNK) return [text];
-  const cid = crypto.randomUUID();
+  // Not crypto.randomUUID: the plugin iframe is not a secure context, where it is undefined.
+  const cid = Date.now().toString(36) + Math.random().toString(36).slice(2);
   const n = Math.ceil(text.length / CHUNK);
   const frames = [];
   for (let i = 0; i < n; i++) frames.push(JSON.stringify({ t: "chunk", cid, i, n, d: text.slice(i * CHUNK, (i + 1) * CHUNK) }));
@@ -541,7 +542,15 @@ function decode(raw) {
 }
 function send(msg) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  for (const f of encode(msg)) ws.send(f);
+  let frames;
+  try {
+    frames = encode(msg);
+  } catch (e) {
+    // A reply that can't be encoded still answers the request, so the agent doesn't wait for a timeout.
+    if (msg.t !== "res") return false;
+    frames = encode({ t: "res", id: msg.id, ok: false, error: "Could not send the result: " + ((e && e.message) || e), code: "PLUGIN_ERROR" });
+  }
+  for (const f of frames) ws.send(f);
   return true;
 }
 

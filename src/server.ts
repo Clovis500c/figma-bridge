@@ -188,6 +188,7 @@ const INSTRUCTIONS = [
   "Workflow:",
   "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
   "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
+  "Name every layer by its role, like a design system would: Header, NavBar, HeroSection, Content, PricingCard, CardTitle, Price, PrimaryButton, Avatar & Info, Icon/Search; components as Category/Variant (Button/Primary). Never leave Frame 12 or Rectangle 3: names become class names in code and instance names in Roblox.",
   "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
   "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again. audit {scope:'design-system'} scores the file's design system; audit {fix:true} binds raw values to variables and styles.",
   "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
@@ -1001,17 +1002,18 @@ server.registerTool(
     description:
       "Turn a Figma frame (default: selection) into Roblox UI that looks the same: a .rbxmx model (a ScreenGui, or a Frame with asRootFrame), an equivalent Luau builder " +
       "script for execute_luau (creates the UI under PARENT, default StarterGui, replaces a previous copy with the same name, returns the root), and the PNG assets.\n" +
-      "Frames become Frames with UICorner, UIStroke, UIGradient, UIPadding; auto-layout becomes UIListLayout (UIFlexItem for fill, AutomaticSize for hug) or UIGridLayout; " +
+      "Frames become Frames with UICorner, UIStroke, UIGradient, UIPadding; auto-layout becomes UIListLayout (UIFlexItem for fill) or UIGridLayout; " +
       "constraints become AnchorPoint + UDim2; text becomes TextLabel with FontFace (Inter → Builder Sans…), RichText for mixed styles, UITextSizeConstraint; clickable or " +
       "*Button layers become TextButton/ImageButton. What Roblox can't draw (vectors, icons, blurs, several fills, radial gradients) is rasterized at 2×; panels whose background " +
       "can't be native become 9-slice images with their content on top; drop shadows become a 9-slice image behind the panel.\n" +
-      "mode: scale (UDim2 scale everywhere), offset (pixels), hybrid (default: scale for free-positioned layers, pixels inside auto-layout). " +
+      "mode: scale (default: every size, position, padding, gap and corner radius in scale, nothing in pixels; TextScaled labels; the root keeps the design ratio with UIAspectRatioConstraint), fit (Figma pixels plus one UIScale and a LocalScript), offset (pixels), hybrid (scale for free-positioned layers, pixels inside auto-layout). " +
+      "Instances get PascalCase names that say what they are (CloseButton, TitleLabel, SearchIcon, PlayerList), so scripts can reach them by name. " +
       "Assets: with upload:true and ROBLOX_API_KEY + ROBLOX_CREATOR_ID set, pictures are uploaded through Open Cloud and their ids written in; otherwise each asset has a " +
       "placeholder (rbxassetid://PENDING_n): upload the files with your Roblox Studio tools (e.g. upload_image), replace the placeholders in the Luau, run it with execute_luau and check a Studio screenshot. " +
-      'Example: {"nodeId":"12:34","mode":"hybrid"}',
+      'Example: {"nodeId":"12:34"}',
     inputSchema: {
       nodeId: z.string().optional(),
-      mode: z.enum(["scale", "offset", "hybrid"]).optional().describe("Default hybrid"),
+      mode: z.enum(["scale", "fit", "offset", "hybrid"]).optional().describe("Default scale"),
       targetResolution: z.array(z.number().int().min(100).max(8000)).length(2).optional().describe("Screen size the UI is designed for, default [1920, 1080]"),
       rasterize: z.enum(["auto", "none", "all"]).optional().describe("auto (default): pictures only where Roblox can't draw it; none: approximate instead; all: every styled layer"),
       outDir: z.string().optional().describe("Folder for the files (default: a new temp folder)"),
@@ -1023,7 +1025,7 @@ server.registerTool(
     },
   },
   (args) =>
-    track("export_roblox", `${args.nodeId ?? "(selection)"} ${args.mode ?? "hybrid"}`, async () => {
+    track("export_roblox", `${args.nodeId ?? "(selection)"} ${args.mode ?? "scale"}`, async () => {
       const r = await exportRoblox(
         { ...args, targetResolution: args.targetResolution as [number, number] | undefined, fonts: args.fonts as Record<string, string> | undefined },
         { request: (m, p, t) => bridge.request(m, p, t), outDir: OUT_DIR },
