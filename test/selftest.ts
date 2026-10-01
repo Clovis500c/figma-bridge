@@ -2,7 +2,7 @@
 // then round-trips a script, a screenshot, an image and an SVG. Leaves the file unchanged.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -31,6 +31,11 @@ async function call(name: string, args: Record<string, unknown> = {}) {
     data = { text }; // describe and snippets.get return plain text
   }
   return { data, isError: !!res.isError, ms: Math.round(performance.now() - t0), images: res.content.filter((c) => c.type === "image").length };
+}
+
+/** Free Figma plans allow one mode per collection: design_tokens then warns instead of adding Dark. */
+function singleModeNote(r: { data: any }) {
+  return ((r.data.warnings ?? []) as string[]).some((w) => /limited to 1 modes?/i.test(w));
 }
 
 function check(label: string, pass: boolean, detail: unknown) {
@@ -227,6 +232,16 @@ check(
   !tk1.isError && tk1.data.counts?.variables.created === 4 && tk2.data.counts?.variables.updated === 4 && tk2.data.counts?.variables.created === 0,
   { first: tk1.data.counts?.variables, second: tk2.data.counts?.variables, warnings: tk1.data.warnings ?? tk1.data.error },
 );
+const exportDir = join(tmpdir(), `figma-bridge-selftest-tokens-${process.pid}`);
+const exp1 = await call("design_tokens", { action: "export", formats: ["dtcg", "css", "ts"], collections: ["selftest tokens"], path: exportDir });
+const exp2 = await call("design_tokens", { action: "export", formats: ["dtcg", "css", "ts"], collections: ["selftest tokens"], path: exportDir });
+const exportedCss = existsSync(join(exportDir, "tokens.css")) ? readFileSync(join(exportDir, "tokens.css"), "utf8") : "";
+check(
+  "design_tokens export",
+  !exp1.isError && /--color-surface: var\(--color-bg\);/.test(exportedCss) && (singleModeNote(tk1) || /\[data-theme="dark"\]/.test(exportedCss)) && exp2.data.files?.every((f: any) => f.status === "unchanged"),
+  { files: exp1.data.files?.map((f: any) => `${f.format}:${f.status}`), again: exp2.data.files?.map((f: any) => f.status), error: exp1.data.error },
+);
+rmSync(exportDir, { recursive: true, force: true });
 const w3c = await call("design_tokens", { tokens: { selftest: { $type: "dimension", gap: { $value: "8px" } } }, collection: "selftest tokens", mode: "Light" });
 check("design_tokens (W3C)", !w3c.isError && w3c.data.counts?.variables.created === 1, w3c.data.counts?.variables ?? w3c.data);
 const dark = await call("build", {
@@ -237,12 +252,21 @@ const darkFill = await call("run_script", {
   code: `const n = await figma.getNodeByIdAsync(${JSON.stringify(dark.data.rootId)}); return { mode: Object.values(n.explicitVariableModes)[0], pad: n.paddingTop }`,
 });
 // Free Figma plans allow a single mode per collection: then only the variable bindings can be checked.
-const singleModePlan = ((tk1.data.warnings ?? []) as string[]).some((w) => /limited to 1 modes?/i.test(w));
+const singleModePlan = singleModeNote(tk1);
 if (singleModePlan) {
   check("build modes", !dark.isError && darkFill.data.result?.pad === 16, "variables bound; mode switch skipped (this Figma plan allows 1 mode)");
 } else {
   check("build modes", !dark.isError && !dark.data.warnings && darkFill.data.result?.pad === 16, darkFill.data.result ?? dark.data);
 }
+const raw = await call("build", { select: false, spec: { name: "selftest raw", layout: "column", padding: 16, fill: "#FFFFFF", children: [{ text: "raw" }] } });
+const fixed = await call("audit", { fix: true, fixes: ["colors", "numbers"], nodeId: raw.data.rootId });
+const fixedInfo = await call("run_script", {
+  code: `const n = await figma.getNodeByIdAsync(${JSON.stringify(raw.data.rootId)}); return { fill: !!n.fills[0].boundVariables?.color, pad: !!n.boundVariables?.paddingTop }`,
+});
+check("audit fix", !fixed.isError && fixedInfo.data.result?.fill && fixedInfo.data.result.pad, { fixed: fixed.data.fixed, result: fixedInfo.data.result, error: fixed.data.error });
+const health = await call("audit", { scope: "design-system" });
+check("audit design-system", !health.isError && typeof health.data.score === "number" && !!health.data.categories?.tokens, { score: health.data.score, issues: health.data.totalIssues, error: health.data.error });
+await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(raw.data.rootId ?? "")}))?.remove()` });
 const tokenCleanup = await call("run_script", {
   code: `
     for (const c of await figma.variables.getLocalVariableCollectionsAsync()) if (c.name === "selftest tokens") c.remove();

@@ -1,5 +1,6 @@
 // Design lint: finds common mistakes so the agent can fix its own work.
-import { contrastRatio, getNode, isAutoLayout, round } from "./util";
+import { autoFix, designSystemHealth } from "./health";
+import { contrastRatio, getNode, invalidateCaches, isAutoLayout, round } from "./util";
 
 type Severity = "error" | "warning" | "info";
 interface Issue {
@@ -12,9 +13,21 @@ interface Issue {
 
 const MAX_NODES = 5000;
 const MAX_ISSUES = 120;
-const DEFAULT_NAME = /^(Frame|Rectangle|Ellipse|Group|Vector|Text|Line|Polygon|Star|Component|Instance|Section|Image)( \d+)?$/;
+export const DEFAULT_NAME = /^(Frame|Rectangle|Ellipse|Group|Vector|Text|Line|Polygon|Star|Component|Instance|Section|Image)( \d+)?$/;
 
-export async function audit(p: any) {
+export async function audit(p: any, _timeoutMs?: number, requestId?: string) {
+  if (p.fix === true || (Array.isArray(p.fixes) && p.fixes.length)) {
+    // Fix first, then report on the result.
+    const fixed = await autoFix(p, requestId);
+    invalidateCaches();
+    const after: any = p.scope === "design-system" ? await designSystemHealth(p, requestId) : await lint(p);
+    return Object.assign({ fixed: fixed.fixed, changes: fixed.changes, fixScope: fixed.scope }, after);
+  }
+  if (p.scope === "design-system") return designSystemHealth(p, requestId);
+  return lint(p);
+}
+
+async function lint(p: any) {
   let roots: BaseNode[];
   if (p.nodeId) roots = [await getNode(p.nodeId)];
   else if (figma.currentPage.selection.length) roots = figma.currentPage.selection.slice();
@@ -126,17 +139,21 @@ function checkText(n: TextNode, report: any, families: any, sizes: any, pageBg: 
     const tb = n.absoluteBoundingBox;
     if (tb.x + tb.width > pb.x + pb.width + 1 || tb.x < pb.x - 1) report("text-overflow", "warning", n, "Text extends outside its container");
   }
+  const c = textContrast(n, pageBg);
+  if (c && c.ratio < c.min) {
+    report("contrast", c.ratio < c.min - 1.5 ? "error" : "warning", n, "Contrast " + round(c.ratio) + ":1 is below " + c.min + ":1 (WCAG AA" + (c.large ? ", large text" : "") + ")");
+  }
+}
+
+/** WCAG contrast of a text layer against the solid background behind it, or null when it can't be judged. */
+export function textContrast(n: TextNode, pageBg: RGB): { ratio: number; min: number; large: boolean } | null {
   const fg = solidOf(n.fills);
-  if (!fg || n.fontSize === figma.mixed) return;
+  if (!fg || n.fontSize === figma.mixed) return null;
   const bg = backgroundOf(n, pageBg);
-  if (!bg) return;
-  const ratio = contrastRatio(fg, bg);
+  if (!bg) return null;
   const bold = n.fontName !== figma.mixed && /bold|black|heavy|semi/i.test(n.fontName.style);
   const large = n.fontSize >= 24 || (bold && n.fontSize >= 18.66);
-  const min = large ? 3 : 4.5;
-  if (ratio < min) {
-    report("contrast", ratio < min - 1.5 ? "error" : "warning", n, "Contrast " + round(ratio) + ":1 is below " + min + ":1 (WCAG AA" + (large ? ", large text" : "") + ")");
-  }
+  return { ratio: contrastRatio(fg, bg), min: large ? 3 : 4.5, large: large };
 }
 
 function solidOf(paints: any): RGB | null {
@@ -164,7 +181,7 @@ function backgroundOf(n: BaseNode, pageBg: RGB): RGB | null {
   return pageBg;
 }
 
-function pageBackground(): RGB {
+export function pageBackground(): RGB {
   const bg = solidOf(figma.currentPage.backgrounds);
   return bg || { r: 1, g: 1, b: 1 };
 }

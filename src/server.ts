@@ -1,9 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { appendFileSync, mkdirSync, statSync, truncateSync, writeFileSync } from "node:fs";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Bridge, BridgeError } from "./bridge";
@@ -11,6 +11,7 @@ import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { generateCode, type IrNode } from "./codegen";
 import { normalizeTokens } from "./tokens";
+import { type ExportData, exportTokenFiles, type Format, FORMATS } from "./tokens-export";
 import { importWeb } from "./web/import";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 import { version as VERSION } from "../package.json";
@@ -168,7 +169,7 @@ const server = new McpServer(
       "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
       "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
       "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
-      "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again.",
+      "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again. audit {scope:'design-system'} scores the file's design system; audit {fix:true} binds raw values to variables and styles.",
       "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
       "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
       "Existing website or HTML → import_web turns it into editable auto-layout frames (one per viewport); then compare against the returned reference screenshot.",
@@ -310,46 +311,90 @@ server.registerTool(
 server.registerTool(
   "design_tokens",
   {
-    title: "Write the design system",
-    description: `Create or update variable collections (with modes such as Light/Dark) and paint, text and effect styles. Idempotent: matched by name, so re-run it to change values. Returns counts of created and updated items.
+    title: "Write or export the design system",
+    description: `WRITE (give tokens): create or update variable collections (with modes such as Light/Dark) and paint, text and effect styles. Idempotent: matched by name, so re-run it to change values. Returns counts of created and updated items.
 Accepted formats (auto-detected, or set format):
 SIMPLE: {"collections":[{"name":"Theme","modes":["Light","Dark"],"variables":{"color/primary":{"Light":"#0D99FF","Dark":"#2AA5FF"},"space/md":16,"radius/card":12,"color/link":"{color/primary}","flag/beta":true,"font/body":"Inter"}}],
  "styles":{"colors":{"Brand/Primary":"var:color/primary","Brand/Hero":{"gradient":["#0D99FF","#7C3AED"]}},"text":{"Heading/H1":{"font":"Inter","weight":700,"size":32,"lineHeight":1.2,"letterSpacing":"-1%"}},"effects":{"Shadow/Card":{"y":4,"blur":16,"color":"#0000001F"}}}}
  A scalar applies to every mode; an object keys values by mode. "{name}" or "var:name" is an alias. Detailed form: {"type":"color|number|string|boolean","values":{...},"description","scopes":["FRAME_FILL",...]}.
 W3C: design tokens with $value/$type (color, dimension, number, fontFamily, fontWeight, duration, typography → text style, shadow → effect style, gradient → paint style). Values go to \`mode\`; $extensions.modes {"Dark": value} adds other modes.
 TAILWIND: {theme:{colors, spacing, borderRadius, fontSize, extend}} → color/*, spacing/*, radius/*, font-size/* variables and text/* styles.
-Use them in build with "var:color/primary", "style:Heading/H1", and modes:{"Theme":"Dark"} on a frame.`,
+Use them in build with "var:color/primary", "style:Heading/H1", and modes:{"Theme":"Dark"} on a frame.
+EXPORT (action:"export"): every local variable (all modes, aliases kept as references) and style → formats: dtcg (W3C DTCG JSON, re-importable with its collections and modes), css (custom properties, one block per mode: [data-theme="dark"]), tailwind (v3 preset + tokens.css), tailwind4 (@theme), scss, ts (typed const), json (the SIMPLE format above). Writes the files into path (a folder) or returns their text. Re-exporting an unchanged file gives identical files.
+Example: {"action":"export","formats":["css","tailwind4","ts"],"path":"C:/app/src/styles"}`,
     inputSchema: {
-      tokens: z.object({}).passthrough().describe("Tokens in one of the formats above"),
-      format: z.enum(["auto", "simple", "w3c", "tailwind"]).optional().describe("Default auto"),
+      tokens: z.object({}).passthrough().optional().describe("Tokens to write, in one of the formats above"),
+      action: z.enum(["write", "export"]).optional().describe("Default: write when tokens are given, else export"),
+      format: z.enum(["auto", "simple", "w3c", "tailwind"]).optional().describe("Input format for write, default auto"),
       collection: z.string().optional().describe('Collection for W3C/Tailwind tokens (default "Tokens" / "Tailwind")'),
       mode: z.string().optional().describe('Mode that receives W3C/Tailwind values (default "Default")'),
+      formats: z.array(z.enum(FORMATS)).optional().describe('Export formats, default ["dtcg","css"]'),
+      path: z.string().optional().describe("Export folder (created if missing), or a file path when exporting one format; omit to get the text back"),
+      collections: z.array(z.string()).optional().describe("Export only these collections"),
+      modeSelector: z.string().optional().describe('CSS selector for non-default modes, default [data-theme="{mode}"] ({collection} also works)'),
     },
   },
   (args) =>
-    track("design_tokens", args.format ?? "auto", async () => {
+    track("design_tokens", args.action ?? (args.tokens ? args.format ?? "auto" : "export"), async () => {
+      if ((args.action ?? (args.tokens ? "write" : "export")) === "export") {
+        const data = await bridge.request<ExportData>("export_tokens", { collections: args.collections }, 60_000);
+        const formats = args.formats?.length ? args.formats : (["dtcg", "css"] as Format[]);
+        const { files, warnings } = exportTokenFiles(data, formats, { modeSelector: args.modeSelector });
+        const counts = { collections: data.collections.length, variables: data.collections.reduce((n, c) => n + c.variables.length, 0), paintStyles: data.styles.colors.length, textStyles: data.styles.text.length, effectStyles: data.styles.effects.length };
+        if (!args.path) {
+          const text = files.map((f) => `=== ${f.path} ===\n${f.content}`).join("\n");
+          return { content: [{ type: "text", text: json({ counts, files: files.map((f) => f.path), ...(warnings.length ? { warnings } : {}) }) }, { type: "text", text: text.length > MAX_OUTPUT_CHARS ? text.slice(0, MAX_OUTPUT_CHARS) + "\n… truncated: give path to write the files" : text }] };
+        }
+        const single = files.length === 1 && /\.[a-z0-9]+$/i.test(args.path);
+        const written = [];
+        for (const f of files) {
+          const target = single ? args.path : join(args.path, f.path);
+          written.push({ format: f.format, path: target, status: await writeIfChanged(target, f.content) });
+        }
+        return ok({ counts, files: written, ...(warnings.length ? { warnings } : {}) });
+      }
+      if (!args.tokens) throw new BridgeError("Give tokens to write, or action:\"export\".", "BAD_ARGS");
       const set = normalizeTokens(args.tokens as Record<string, unknown>, args);
       return ok(await bridge.request("design_tokens", { collections: set.collections, styles: set.styles, warnings: set.warnings }, 120_000));
     }),
 );
 
+/** Writes a file only when its content changed; returns what happened. */
+async function writeIfChanged(path: string, content: string): Promise<"created" | "updated" | "unchanged"> {
+  const before = await readFile(path, "utf8").catch(() => null);
+  if (before === content) return "unchanged";
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content);
+  return before === null ? "created" : "updated";
+}
+
 server.registerTool(
   "audit",
   {
-    title: "Check a design for common issues",
+    title: "Check a design or the whole design system",
     description:
-      "Lint a node (default: selection, else the page): low text contrast (WCAG AA), text overflowing its container, clipped layers, " +
-      "missing fonts, tiny text, frames without auto-layout, spacing off the 4 px grid, fractional sizes, default layer names, " +
-      "too many fonts or font sizes. Returns issues with nodeId, severity and message.",
+      "scope \"layers\" (default) lints a node (default: selection, else the page): low text contrast (WCAG AA), text overflowing its container, clipped layers, " +
+      "missing fonts, tiny text, frames without auto-layout, spacing off the 4 px grid, fractional sizes, default layer names, too many fonts or font sizes. " +
+      "Returns issues with nodeId, severity and message.\n" +
+      "scope \"design-system\" scores the whole file (or nodeId) from 0 to 100, overall and per category: tokens (raw colors, spacing and radii vs variables and styles), " +
+      "contrast, typography (text using text styles), components (detached-looking frames, heavily overridden instances), styles (duplicate or unused styles, variables and components), " +
+      "naming (default layer names, token naming convention). Returns the scores and concrete issues.\n" +
+      "fix:true applies safe fixes to nodeId / the selection / the page, as one undo step: binds raw colors to the closest color variable (same value or ΔE < 2, as the layer's mode sees it), " +
+      "spacing, padding and radii to number variables with the same value, applies text styles that match exactly, and renames default layer names from their content. " +
+      'Returns {fixed, changes:[{nodeId, fix, from, to}]} plus the report after fixing. fixes limits it, e.g. ["colors","names"]. Example: {"scope":"design-system"} then {"fix":true}.',
     inputSchema: {
       nodeId: z.string().optional(),
+      scope: z.enum(["layers", "design-system"]).optional().describe("Default layers"),
       rules: z
         .array(z.string())
         .optional()
-        .describe("Only these rules: contrast, text-overflow, clipped, missing-font, tiny-text, no-auto-layout, off-grid, fractional, default-name, empty, font-sprawl, type-scale"),
+        .describe("layers scope only: contrast, text-overflow, clipped, missing-font, tiny-text, no-auto-layout, off-grid, fractional, default-name, empty, font-sprawl, type-scale"),
+      fix: z.boolean().optional().describe("Apply the safe fixes, then report"),
+      fixes: z.array(z.enum(["colors", "numbers", "textStyles", "names"])).optional().describe("Only these fixes (implies fix)"),
     },
   },
-  (args) => track("audit", args.nodeId ?? "(selection)", async () => ok(await bridge.request("audit", args, 60_000))),
+  (args) =>
+    track("audit", `${args.scope ?? "layers"}${args.fix || args.fixes ? " fix" : ""} ${args.nodeId ?? ""}`, async () => ok(await bridge.request("audit", args, 120_000))),
 );
 
 server.registerTool(

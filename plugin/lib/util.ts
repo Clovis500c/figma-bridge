@@ -283,3 +283,65 @@ export function pageOf(node: BaseNode): PageNode | null {
   while (p && p.type !== "PAGE") p = p.parent;
   return p as PageNode | null;
 }
+
+// ─── Color difference (CIEDE2000) ───────────────────────────────────────────
+
+function toLab(c: RGB): number[] {
+  const lin = function (v: number) {
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const r = lin(c.r);
+  const g = lin(c.g);
+  const b = lin(c.b);
+  const x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047;
+  const y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+  const z = (0.0193339 * r + 0.119192 * g + 0.9503041 * b) / 1.08883;
+  const f = function (t: number) {
+    return t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
+  };
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+}
+
+/** Perceptual distance between two colors; below 2 is hard to tell apart. */
+export function deltaE(a: RGB, b: RGB): number {
+  const l1 = toLab(a);
+  const l2 = toLab(b);
+  const rad = Math.PI / 180;
+  const c1 = Math.sqrt(l1[1] * l1[1] + l1[2] * l1[2]);
+  const c2 = Math.sqrt(l2[1] * l2[1] + l2[2] * l2[2]);
+  const cm = (c1 + c2) / 2;
+  const g = 0.5 * (1 - Math.sqrt(Math.pow(cm, 7) / (Math.pow(cm, 7) + Math.pow(25, 7))));
+  const a1 = l1[1] * (1 + g);
+  const a2 = l2[1] * (1 + g);
+  const cp1 = Math.sqrt(a1 * a1 + l1[2] * l1[2]);
+  const cp2 = Math.sqrt(a2 * a2 + l2[2] * l2[2]);
+  const hue = function (x: number, y: number) {
+    if (x === 0 && y === 0) return 0;
+    const h = Math.atan2(y, x) / rad;
+    return h < 0 ? h + 360 : h;
+  };
+  const h1 = hue(a1, l1[2]);
+  const h2 = hue(a2, l2[2]);
+  const dl = l2[0] - l1[0];
+  const dc = cp2 - cp1;
+  let dh = 0;
+  if (cp1 * cp2 !== 0) {
+    dh = h2 - h1;
+    if (dh > 180) dh -= 360;
+    else if (dh < -180) dh += 360;
+  }
+  const dH = 2 * Math.sqrt(cp1 * cp2) * Math.sin((dh / 2) * rad);
+  const lm = (l1[0] + l2[0]) / 2;
+  const cpm = (cp1 + cp2) / 2;
+  let hm = h1 + h2;
+  if (cp1 * cp2 !== 0) {
+    if (Math.abs(h1 - h2) > 180) hm += h1 + h2 < 360 ? 360 : -360;
+    hm /= 2;
+  }
+  const t = 1 - 0.17 * Math.cos((hm - 30) * rad) + 0.24 * Math.cos(2 * hm * rad) + 0.32 * Math.cos((3 * hm + 6) * rad) - 0.2 * Math.cos((4 * hm - 63) * rad);
+  const sl = 1 + (0.015 * Math.pow(lm - 50, 2)) / Math.sqrt(20 + Math.pow(lm - 50, 2));
+  const sc = 1 + 0.045 * cpm;
+  const sh = 1 + 0.015 * cpm * t;
+  const rt = -2 * Math.sqrt(Math.pow(cpm, 7) / (Math.pow(cpm, 7) + Math.pow(25, 7))) * Math.sin(60 * Math.exp(-Math.pow((hm - 275) / 25, 2)) * rad);
+  return Math.sqrt(Math.pow(dl / sl, 2) + Math.pow(dc / sc, 2) + Math.pow(dH / sh, 2) + rt * (dc / sc) * (dH / sh));
+}

@@ -135,8 +135,9 @@ function hasW3cTokens(v: unknown, depth = 0): boolean {
 const TAILWIND_KEYS = ["colors", "spacing", "borderRadius", "fontSize"];
 
 export function detectFormat(input: Obj): Exclude<TokenFormat, "auto"> {
-  if (Array.isArray(input.collections) || isObj(input.styles)) return "simple";
+  if (Array.isArray(input.collections)) return "simple";
   if (hasW3cTokens(input)) return "w3c";
+  if (isObj(input.styles)) return "simple";
   const theme = isObj(input.theme) ? input.theme : input;
   if (TAILWIND_KEYS.some((k) => k in theme) || isObj(theme.extend)) return "tailwind";
   return "simple";
@@ -257,14 +258,18 @@ interface W3cToken {
   value: unknown;
   description?: string;
   modes?: Obj;
+  /** $extensions["figma-bridge"]: scopes, or style:"paint" for color styles. */
+  bridge?: Obj;
 }
+
+const bridgeExt = (node: Obj): Obj | undefined => (isObj(node.$extensions) && isObj(node.$extensions["figma-bridge"]) ? node.$extensions["figma-bridge"] : undefined);
 
 function flattenW3c(node: Obj, path: string[], inherited: string, out: W3cToken[]) {
   const type = typeof node.$type === "string" ? node.$type : inherited;
   if ("$value" in node) {
     const ext = isObj(node.$extensions) ? node.$extensions : {};
     const modes = isObj(ext.modes) ? ext.modes : isObj(ext.mode) ? ext.mode : undefined;
-    out.push({ path, type, value: node.$value, description: typeof node.$description === "string" ? node.$description : undefined, modes });
+    out.push({ path, type, value: node.$value, description: typeof node.$description === "string" ? node.$description : undefined, modes, bridge: bridgeExt(node) });
     return;
   }
   for (const [key, child] of Object.entries(node)) {
@@ -275,11 +280,21 @@ function flattenW3c(node: Obj, path: string[], inherited: string, out: W3cToken[
 
 function fromW3c(input: Obj, opts: NormalizeOptions): TokenSet {
   const warnings: string[] = [];
-  const collection = opts.collection || "Tokens";
-  const defaultMode = opts.mode || "Default";
   const tokens: W3cToken[] = [];
   flattenW3c(input, [], "", tokens);
   const byPath = new Map(tokens.map((t) => [t.path.join("/"), t]));
+  // Files exported by Figma Bridge keep one top-level group per collection (with its modes) and a styles group.
+  const groups = new Map<string, Obj>();
+  for (const [k, g] of Object.entries(input)) if (isObj(g) && bridgeExt(g)) groups.set(k, bridgeExt(g)!);
+  const collections = new Map<string, { modes: Set<string>; variables: VariableSpec[] }>();
+  const placeOf = (t: W3cToken) => {
+    const g = groups.get(t.path[0]!);
+    if (g && t.path.length > 1 && (g.collection || g.styles)) {
+      const modes = Array.isArray(g.modes) && g.modes.length ? g.modes.map(String) : [opts.mode || "Default"];
+      return { collection: g.styles ? "" : t.path[0]!, mode: modes[0]!, modes, path: t.path.slice(1) };
+    }
+    return { collection: opts.collection || "Tokens", mode: opts.mode || "Default", modes: [opts.mode || "Default"], path: t.path };
+  };
 
   // Composite tokens are styles: their aliases are resolved to literal values here.
   const resolve = (v: unknown, depth = 0): unknown => {
@@ -289,12 +304,17 @@ function fromW3c(input: Obj, opts: NormalizeOptions): TokenSet {
     return target ? resolve(target.value, depth + 1) : v;
   };
 
-  const variables: VariableSpec[] = [];
-  const modes = new Set<string>([defaultMode]);
   const styles: TokenSet["styles"] = { colors: [], text: [], effects: [] };
 
   for (const t of tokens) {
-    const name = cleanName(t.path.join("/"));
+    const place = placeOf(t);
+    const defaultMode = place.mode;
+    const name = cleanName(place.path.join("/"));
+    if (t.bridge?.style === "paint" && t.type === "color") {
+      const alias = aliasOf(t.value);
+      styles.colors.push({ name, value: alias ? `var:${cleanName(alias)}` : w3cColor(t.value) ?? t.value, description: t.description });
+      continue;
+    }
     const convert = (v: unknown): TokenValue | null => {
       const alias = aliasOf(v);
       if (alias) return { alias: cleanName(alias) };
@@ -329,10 +349,11 @@ function fromW3c(input: Obj, opts: NormalizeOptions): TokenSet {
       if (!isObj(v)) continue;
       const r = (x: unknown) => resolve(x);
       const family = r(v.fontFamily);
+      const exact = typeof t.bridge?.style === "string" ? t.bridge.style : undefined;
       styles.text.push({
         name,
-        font: Array.isArray(family) ? String(family[0]) : family,
-        weight: r(v.fontWeight),
+        font: (Array.isArray(family) ? String(family[0]) : family) + (exact ? `:${exact}` : ""),
+        weight: exact ? undefined : r(v.fontWeight),
         size: dimension(r(v.fontSize)) ?? undefined,
         lineHeight: typeof r(v.lineHeight) === "number" ? r(v.lineHeight) : dimension(r(v.lineHeight)) ?? undefined,
         letterSpacing: dimension(r(v.letterSpacing)) ?? undefined,
@@ -361,7 +382,8 @@ function fromW3c(input: Obj, opts: NormalizeOptions): TokenSet {
       const v = resolve(t.value);
       if (!Array.isArray(v)) continue;
       const stops = v.filter(isObj).map((s) => ({ color: w3cColor(resolve(s.color)) ?? "#000000", at: Number(resolve(s.position)) || 0 }));
-      styles.colors.push({ name, value: { gradient: stops }, description: t.description });
+      const angle = typeof t.bridge?.angle === "number" ? { angle: t.bridge.angle } : {};
+      styles.colors.push({ name, value: { gradient: stops, ...angle }, description: t.description });
       continue;
     }
     if (["border", "transition", "cubicBezier", "strokeStyle"].includes(t.type)) {
@@ -369,6 +391,12 @@ function fromW3c(input: Obj, opts: NormalizeOptions): TokenSet {
       continue;
     }
 
+    if (!place.collection) {
+      warnings.push(`${name}: a ${t.type || "untyped"} token in the styles group, skipped`);
+      continue;
+    }
+    let target = collections.get(place.collection);
+    if (!target) collections.set(place.collection, (target = { modes: new Set(place.modes), variables: [] }));
     const values: Record<string, TokenValue> = {};
     const main = convert(t.value);
     if (main !== null) values[defaultMode] = main;
@@ -376,7 +404,7 @@ function fromW3c(input: Obj, opts: NormalizeOptions): TokenSet {
       const out = convert(v);
       if (out !== null) {
         values[mode] = out;
-        modes.add(mode);
+        target.modes.add(mode);
       }
     }
     if (!Object.keys(values).length) {
@@ -385,9 +413,14 @@ function fromW3c(input: Obj, opts: NormalizeOptions): TokenSet {
     }
     const type =
       t.type === "color" ? "color" : t.type === "boolean" ? "boolean" : t.type === "string" || t.type === "fontFamily" ? "string" : inferType(Object.values(values));
-    variables.push({ name, type, values, description: t.description });
+    const scopes = Array.isArray(t.bridge?.scopes) ? t.bridge.scopes.map(String) : undefined;
+    target.variables.push({ name, type, values, description: t.description, ...(scopes ? { scopes } : {}) });
   }
-  return { collections: variables.length ? [{ name: collection, modes: [...modes], variables }] : [], styles, warnings };
+  return {
+    collections: [...collections].filter(([, c]) => c.variables.length).map(([name, c]) => ({ name, modes: [...c.modes], variables: c.variables })),
+    styles,
+    warnings,
+  };
 }
 
 // ─── Tailwind theme ─────────────────────────────────────────────────────────

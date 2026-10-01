@@ -16,7 +16,8 @@ and any other MCP client.
 
 - **Build whole layouts in one call** from a JSON spec: auto-layout and grid, rich text, icons, images, component sets with variants and properties, prototype links.
 - **Import any website or HTML** as editable auto-layout frames, one per viewport ([details](docs/import-web.md)).
-- **Write the design system**: variables with Light/Dark modes and styles, from simple JSON, W3C design tokens or a Tailwind theme.
+- **Round-trip the design system**: write variables with Light/Dark modes and styles from JSON, W3C tokens or Tailwind; export them to DTCG, CSS, Tailwind v3/v4, SCSS or TypeScript ([details](docs/design-system.md)).
+- **Score and fix design system health**: token coverage, contrast, text styles, detached instances, duplicates, naming, with safe automatic fixes.
 - **Read existing designs** compactly, search every page, and reuse the file's design system.
 - **Check its own work** with screenshots, a design audit, and a pixel diff against a mockup.
 - **Hand off**: Dev Mode annotations and export to HTML or React (CSS or Tailwind).
@@ -125,8 +126,8 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 | `describe` | Compact outline of existing layers |
 | `find` | Search layers on every page by name, text, type, style or component |
 | `get_design_system` | Local styles, variables and components |
-| `design_tokens` | Create or update variables (with modes) and styles from JSON, W3C tokens or Tailwind |
-| `audit` | Lint for contrast, overflow, fonts, spacing and naming |
+| `design_tokens` | Write variables (with modes) and styles from JSON, W3C tokens or Tailwind; export them to DTCG, CSS, Tailwind, SCSS or TS |
+| `audit` | Lint layers, score the design system's health, and apply safe fixes |
 | `screenshot` | Export a layer to an image (optionally shown to the agent) |
 | `compare` | Pixel-diff a layer against a reference image, with a heatmap |
 | `wait_for_selection` | Ask the user to select layers and wait for it |
