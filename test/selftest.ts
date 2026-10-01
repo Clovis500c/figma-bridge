@@ -258,6 +258,8 @@ if (singleModePlan) {
 } else {
   check("build modes", !dark.isError && !dark.data.warnings && darkFill.data.result?.pad === 16, darkFill.data.result ?? dark.data);
 }
+const health = await call("audit", { scope: "design-system" });
+check("audit design-system", !health.isError && typeof health.data.score === "number" && !!health.data.categories?.tokens, { score: health.data.score, issues: health.data.totalIssues, error: health.data.error });
 const tokenCleanup = await call("run_script", {
   code: `
     for (const c of await figma.variables.getLocalVariableCollectionsAsync()) if (c.name === "selftest tokens") c.remove();

@@ -169,7 +169,7 @@ const server = new McpServer(
       "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
       "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
       "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
-      "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again.",
+      "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again. audit {scope:'design-system'} scores the file's design system.",
       "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
       "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
       "Existing website or HTML → import_web turns it into editable auto-layout frames (one per viewport); then compare against the returned reference screenshot.",
@@ -371,20 +371,25 @@ async function writeIfChanged(path: string, content: string): Promise<"created" 
 server.registerTool(
   "audit",
   {
-    title: "Check a design for common issues",
+    title: "Check a design or the whole design system",
     description:
-      "Lint a node (default: selection, else the page): low text contrast (WCAG AA), text overflowing its container, clipped layers, " +
-      "missing fonts, tiny text, frames without auto-layout, spacing off the 4 px grid, fractional sizes, default layer names, " +
-      "too many fonts or font sizes. Returns issues with nodeId, severity and message.",
+      "scope \"layers\" (default) lints a node (default: selection, else the page): low text contrast (WCAG AA), text overflowing its container, clipped layers, " +
+      "missing fonts, tiny text, frames without auto-layout, spacing off the 4 px grid, fractional sizes, default layer names, too many fonts or font sizes. " +
+      "Returns issues with nodeId, severity and message.\n" +
+      "scope \"design-system\" scores the whole file (or nodeId) from 0 to 100, overall and per category: tokens (raw colors, spacing and radii vs variables and styles), " +
+      "contrast, typography (text using text styles), components (detached-looking frames, heavily overridden instances), styles (duplicate or unused styles, variables and components), " +
+      'naming (default layer names, token naming convention). Returns the scores and concrete issues. Example: {"scope":"design-system"}.',
     inputSchema: {
       nodeId: z.string().optional(),
+      scope: z.enum(["layers", "design-system"]).optional().describe("Default layers"),
       rules: z
         .array(z.string())
         .optional()
-        .describe("Only these rules: contrast, text-overflow, clipped, missing-font, tiny-text, no-auto-layout, off-grid, fractional, default-name, empty, font-sprawl, type-scale"),
+        .describe("layers scope only: contrast, text-overflow, clipped, missing-font, tiny-text, no-auto-layout, off-grid, fractional, default-name, empty, font-sprawl, type-scale"),
     },
   },
-  (args) => track("audit", args.nodeId ?? "(selection)", async () => ok(await bridge.request("audit", args, 60_000))),
+  (args) =>
+    track("audit", `${args.scope ?? "layers"} ${args.nodeId ?? ""}`, async () => ok(await bridge.request("audit", args, 120_000))),
 );
 
 server.registerTool(
