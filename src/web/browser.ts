@@ -1,5 +1,7 @@
 // import_web: renders a page in the user's Chrome or Edge with playwright-core (an optional
 // dependency loaded on first use, so the server starts fast and nothing is downloaded).
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { snapshot, type Snapshot } from "./dom";
 
@@ -55,12 +57,47 @@ async function loadPlaywright(): Promise<Playwright> {
   }
 }
 
-/** FIGMA_BRIDGE_BROWSER (a Chromium-based executable), else Chrome, Edge, then Playwright's own Chromium. */
+/** Other Chromium-based browsers Playwright has no channel for, at their usual install paths. */
+function otherChromiumBrowsers(): { label: string; path: string }[] {
+  const env = process.env;
+  const roots =
+    process.platform === "win32"
+      ? [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA, "C:\\Program Files", "C:\\Program Files (x86)"].filter(Boolean)
+      : [];
+  const candidates: { label: string; paths: string[] }[] =
+    process.platform === "win32"
+      ? [
+          { label: "Brave", paths: roots.map((r) => join(r!, "BraveSoftware", "Brave-Browser", "Application", "brave.exe")) },
+          { label: "Chromium", paths: roots.map((r) => join(r!, "Chromium", "Application", "chrome.exe")) },
+          { label: "Vivaldi", paths: roots.map((r) => join(r!, "Vivaldi", "Application", "vivaldi.exe")) },
+          { label: "Opera", paths: roots.map((r) => join(r!, "Programs", "Opera", "opera.exe")) },
+        ]
+      : process.platform === "darwin"
+        ? [
+            { label: "Brave", paths: ["/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"] },
+            { label: "Chromium", paths: ["/Applications/Chromium.app/Contents/MacOS/Chromium"] },
+            { label: "Arc", paths: ["/Applications/Arc.app/Contents/MacOS/Arc"] },
+          ]
+        : [
+            { label: "Brave", paths: ["/usr/bin/brave-browser", "/usr/bin/brave"] },
+            { label: "Chromium", paths: ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/snap/bin/chromium"] },
+          ];
+  const found: { label: string; path: string }[] = [];
+  for (const c of candidates) {
+    const path = c.paths.find((p) => existsSync(p));
+    if (path) found.push({ label: c.label, path });
+  }
+  return found;
+}
+
+/** FIGMA_BRIDGE_BROWSER (a Chromium-based executable), else Chrome, Edge, Brave/Chromium/Vivaldi/Opera, then Playwright's own Chromium. */
 export async function launchBrowser(): Promise<Browser> {
   const { chromium } = await loadPlaywright();
   const tries: { label: string; opts: Parameters<typeof chromium.launch>[0] }[] = [];
   if (process.env.FIGMA_BRIDGE_BROWSER) tries.push({ label: process.env.FIGMA_BRIDGE_BROWSER, opts: { executablePath: process.env.FIGMA_BRIDGE_BROWSER } });
-  tries.push({ label: "Chrome", opts: { channel: "chrome" } }, { label: "Edge", opts: { channel: "msedge" } }, { label: "Playwright Chromium", opts: {} });
+  tries.push({ label: "Chrome", opts: { channel: "chrome" } }, { label: "Edge", opts: { channel: "msedge" } });
+  for (const b of otherChromiumBrowsers()) tries.push({ label: b.label, opts: { executablePath: b.path } });
+  tries.push({ label: "Playwright Chromium", opts: {} });
   const errors: string[] = [];
   for (const t of tries) {
     try {
@@ -70,7 +107,7 @@ export async function launchBrowser(): Promise<Browser> {
     }
   }
   throw new WebImportError(
-    `No browser found to render the page. Install Google Chrome or Microsoft Edge, or set FIGMA_BRIDGE_BROWSER to a Chromium-based browser. (${errors.join("; ")})`,
+    `No browser found to render the page. Install Chrome, Edge or Brave, or set FIGMA_BRIDGE_BROWSER to a Chromium-based browser. (${errors.join("; ")})`,
     "NO_BROWSER",
   );
 }

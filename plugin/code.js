@@ -721,10 +721,10 @@
     const varNames = vars.vars.map(function(v) {
       return v.name;
     });
-    const styleNames2 = styles.paint.concat(styles.text, styles.effect).map(function(s) {
+    const styleNames = styles.paint.concat(styles.text, styles.effect).map(function(s) {
       return s.name;
     });
-    const naming = namingConsistency(varNames.concat(styleNames2), "Token", issues);
+    const naming = namingConsistency(varNames.concat(styleNames), "Token", issues);
     const categories = {
       tokens: { score: score(colorBound + numberBound, colorTotal + numberTotal), colors: { bound: colorBound, total: colorTotal }, numbers: { bound: numberBound, total: numberTotal } },
       contrast: { score: score(contrastOk, contrastTotal), passing: contrastOk, total: contrastTotal },
@@ -760,11 +760,11 @@
     for (let pass = 0;picked.length < MAX_ISSUES && pass < MAX_ISSUES; pass++) {
       let added = false;
       for (let c = 0;c < names.length && picked.length < MAX_ISSUES; c++) {
-        const list2 = issues.filter(function(x) {
+        const list = issues.filter(function(x) {
           return x.category === names[c];
         });
-        if (list2[pass]) {
-          picked.push(list2[pass]);
+        if (list[pass]) {
+          picked.push(list[pass]);
           added = true;
         }
       }
@@ -1491,11 +1491,11 @@
     };
     for (let i = 0;i < pending.length; i++) {
       const item = pending[i];
-      const list2 = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
+      const list = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
       const out = [];
-      for (let k = 0;k < list2.length; k++) {
+      for (let k = 0;k < list.length; k++) {
         try {
-          out.push(await toReaction(list2[k] || {}, resolve));
+          out.push(await toReaction(list[k] || {}, resolve));
         } catch (e) {
           warnings.push(item.path + ".reactions[" + k + "]: " + (e.message || e));
         }
@@ -1800,10 +1800,10 @@
   }
   async function writeStyles(styles, counts, warnings) {
     const local = await localStyles();
-    const find = function(list2, name) {
-      for (let i = 0;i < list2.length; i++)
-        if (list2[i].name === name)
-          return list2[i];
+    const find = function(list, name) {
+      for (let i = 0;i < list.length; i++)
+        if (list[i].name === name)
+          return list[i];
       return null;
     };
     const colors = styles.colors || [];
@@ -1811,10 +1811,10 @@
       const s = colors[i];
       try {
         const value = s.value !== undefined ? s.value : s.color;
-        const list2 = Array.isArray(value) ? value : [value];
+        const list = Array.isArray(value) ? value : [value];
         const paints = [];
-        for (let k = 0;k < list2.length; k++)
-          paints.push(await toPaint(list2[k]));
+        for (let k = 0;k < list.length; k++)
+          paints.push(await toPaint(list[k]));
         let style = find(local.paint, s.name);
         if (style)
           counts.paintStyles.updated++;
@@ -1871,10 +1871,10 @@
       const s = effects[i];
       try {
         const value = s.value !== undefined ? s.value : s;
-        const list2 = Array.isArray(value) ? value : [value];
+        const list = Array.isArray(value) ? value : [value];
         const out = [];
-        for (let k = 0;k < list2.length; k++) {
-          const e = list2[k];
+        for (let k = 0;k < list.length; k++) {
+          const e = list[k];
           if (e && typeof e.blur === "number" && e.type === "layer")
             out.push({ type: "LAYER_BLUR", radius: e.blur, visible: true });
           else if (e && typeof e.blur === "number" && e.type === "background")
@@ -2002,10 +2002,10 @@
       out.warnings = ctx.warnings.slice(0, 50);
     return out;
   }
-  function countNodes(list2) {
+  function countNodes(list) {
     let n = 0;
-    for (let i = 0;i < list2.length; i++) {
-      const s = list2[i];
+    for (let i = 0;i < list.length; i++) {
+      const s = list[i];
       if (!s || typeof s !== "object")
         continue;
       n++;
@@ -2059,13 +2059,13 @@
     };
     roots.forEach(walk);
     const keys = Object.keys(wanted);
-    await Promise.all(keys.map(async function(key2) {
-      const f = wanted[key2];
+    await Promise.all(keys.map(async function(key) {
+      const f = wanted[key];
       const candidates = [f, { family: f.family, style: "Regular" }, { family: "Inter", style: f.style }, { family: "Inter", style: "Regular" }];
       for (let i = 0;i < candidates.length; i++) {
         try {
           await loadFont(candidates[i]);
-          ctx.fonts[key2] = candidates[i];
+          ctx.fonts[key] = candidates[i];
           if (i > 0)
             ctx.warnings.push('Font "' + f.family + " " + f.style + '" unavailable, used "' + candidates[i].family + " " + candidates[i].style + '"');
           return;
@@ -2233,11 +2233,11 @@
     if (s.reactions)
       ctx.reactions.push({ node, reactions: s.reactions, path });
     if (s.name) {
-      let key2 = String(s.name);
-      for (let n = 2;ctx.ids[key2]; n++)
-        key2 = s.name + " #" + n;
+      let key = String(s.name);
+      for (let n = 2;ctx.ids[key]; n++)
+        key = s.name + " #" + n;
       if (Object.keys(ctx.ids).length < 300)
-        ctx.ids[key2] = node.id;
+        ctx.ids[key] = node.id;
     }
     return node;
   }
@@ -2564,13 +2564,13 @@
     } else if (/^[0-9a-f]{40}$/i.test(ref)) {
       comp = await figma.importComponentByKeyAsync(ref);
     } else {
-      const list2 = await localComponents();
-      for (let i = 0;i < list2.length && !comp; i++)
-        if (list2[i].name === ref)
-          comp = list2[i];
-      for (let i = 0;i < list2.length && !comp; i++)
-        if (list2[i].name.toLowerCase() === ref.toLowerCase())
-          comp = list2[i];
+      const list = await localComponents();
+      for (let i = 0;i < list.length && !comp; i++)
+        if (list[i].name === ref)
+          comp = list[i];
+      for (let i = 0;i < list.length && !comp; i++)
+        if (list[i].name.toLowerCase() === ref.toLowerCase())
+          comp = list[i];
     }
     if (!comp)
       throw codeError(path + ': component "' + ref + '" not found. Use get_design_system to list components.', "NOT_FOUND");
@@ -2649,9 +2649,9 @@
           const comp = await findComponent(String(def.default), path + ".properties." + name);
           const main = comp.type === "COMPONENT_SET" ? comp.defaultVariant : comp;
           const preferred = [];
-          const list2 = Array.isArray(def.preferred) ? def.preferred : [];
-          for (let k = 0;k < list2.length; k++) {
-            const p = await findComponent(String(list2[k]), path + ".properties." + name);
+          const list = Array.isArray(def.preferred) ? def.preferred : [];
+          for (let k = 0;k < list.length; k++) {
+            const p = await findComponent(String(list[k]), path + ".properties." + name);
             preferred.push({ type: p.type === "COMPONENT_SET" ? "COMPONENT_SET" : "COMPONENT", key: p.key });
           }
           keys[name] = owner.addComponentProperty(name, "INSTANCE_SWAP", main.id, preferred.length ? { preferredValues: preferred } : undefined);
@@ -2791,10 +2791,10 @@
         await node.setStrokeStyleIdAsync(style.id);
       return;
     }
-    const list2 = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
+    const list = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
     const paints = [];
-    for (let i = 0;i < list2.length; i++)
-      paints.push(await toPaint(list2[i], images));
+    for (let i = 0;i < list.length; i++)
+      paints.push(await toPaint(list[i], images));
     node[field] = paints;
   }
   var FITS = { fill: "FILL", cover: "FILL", fit: "FIT", contain: "FIT", crop: "CROP", tile: "TILE" };
@@ -3340,8 +3340,8 @@
     }
     return { file, fit: paint.scaleMode === "FIT" ? "contain" : paint.scaleMode === "TILE" ? "tile" : "cover" };
   }
-  function tracks(list3) {
-    return (list3 || []).map(function(t) {
+  function tracks(list) {
+    return (list || []).map(function(t) {
       return t.type === "FIXED" ? round(t.value) + "px" : t.type === "HUG" ? "auto" : (t.value || 1) + "fr";
     });
   }
@@ -3575,9 +3575,9 @@
       });
     }
     if (include.indexOf("components") !== -1) {
-      const list3 = await localComponents();
-      counts.components = list3.length;
-      out.components = list3.slice(0, limit).map(function(c) {
+      const list = await localComponents();
+      counts.components = list.length;
+      out.components = list.slice(0, limit).map(function(c) {
         const item = { name: c.name, id: c.id, page: (pageOf(c) || { name: "?" }).name };
         if (c.type === "COMPONENT_SET") {
           const defs = c.componentPropertyDefinitions;
@@ -3665,10 +3665,10 @@
         }
         collName[v.variableCollectionId] = collection;
       }
-      const out2 = { alias: { collection, name: v.name } };
+      const out = { alias: { collection, name: v.name } };
       if (v.remote)
-        out2.alias.remote = true;
-      return out2;
+        out.alias.remote = true;
+      return out;
     };
     const value = async function(raw, type) {
       if (raw && typeof raw === "object" && raw.type === "VARIABLE_ALIAS")
@@ -3687,7 +3687,7 @@
       const modes = col.modes.slice().sort(function(a, b) {
         return (a.modeId === col.defaultModeId ? 0 : 1) - (b.modeId === col.defaultModeId ? 0 : 1);
       });
-      const list3 = [];
+      const list = [];
       for (let i = 0;i < vars.length; i++) {
         const v = vars[i];
         if (v.variableCollectionId !== col.id)
@@ -3702,14 +3702,14 @@
           item.scopes = v.scopes.slice();
         if (v.hiddenFromPublishing)
           item.hidden = true;
-        list3.push(item);
+        list.push(item);
       }
       outCollections.push({
         name: col.name,
         modes: modes.map(function(m) {
           return m.name;
         }),
-        variables: list3
+        variables: list
       });
     }
     const styles = await localStyles();
@@ -3779,7 +3779,7 @@
     const effect = [];
     for (let i = 0;i < styles.effect.length; i++) {
       const s = styles.effect[i];
-      const list3 = [];
+      const list = [];
       for (let k = 0;k < s.effects.length; k++) {
         const e = s.effects[k];
         if (e.visible === false)
@@ -3790,14 +3790,14 @@
             sh.inner = true;
           if (e.boundVariables && e.boundVariables.color)
             sh.colorVariable = (await aliasOf(e.boundVariables.color.id)).alias;
-          list3.push(sh);
+          list.push(sh);
         } else {
-          list3.push({ type: e.type === "LAYER_BLUR" ? "layer" : "background", blur: round(e.radius) });
+          list.push({ type: e.type === "LAYER_BLUR" ? "layer" : "background", blur: round(e.radius) });
         }
       }
-      if (!list3.length)
+      if (!list.length)
         continue;
-      const item = { name: s.name, value: list3 };
+      const item = { name: s.name, value: list };
       if (s.description)
         item.description = s.description;
       effect.push(item);
@@ -3933,12 +3933,12 @@
     const tree = await walk2(node, null, ctx);
     return { tree, images: ctx.images, nodes: ctx.count, truncated: ctx.truncated, fileName: figma.root.name };
   }
-  function paints(list3) {
-    if (!list3 || list3 === figma.mixed)
+  function paints(list) {
+    if (!list || list === figma.mixed)
       return [];
     const out = [];
-    for (let i = 0;i < list3.length; i++) {
-      const pt = list3[i];
+    for (let i = 0;i < list.length; i++) {
+      const pt = list[i];
       if (pt.visible === false)
         continue;
       const o = { type: pt.type, opacity: pt.opacity === undefined ? 1 : round(pt.opacity) };
@@ -4506,8 +4506,8 @@
       const m = /line (\d+)/i.exec(String(e && e.message));
       return m ? Number(m[1]) : undefined;
     }
-    const line2 = raw - lineBase - offset;
-    return line2 >= 1 ? line2 : undefined;
+    const line = raw - lineBase - offset;
+    return line >= 1 ? line : undefined;
   }
   async function runScript(p, timeoutMs) {
     const logs = [];

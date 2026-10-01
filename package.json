@@ -35,7 +35,8 @@
     "prepare": "bun run build",
     "check": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && tsc -p plugin/tsconfig.json && bun run scripts/check-plugin.ts",
     "test": "bun run build && bun run test/selftest.ts",
-    "test:unit": "bun test"
+    "test:unit": "bun test",
+    "preview": "bun run scripts/render-preview.ts"
   },
   "devDependencies": {
     "@figma/plugin-typings": "^1.139.0",

@@ -11,7 +11,7 @@ for the optional comments and version history tools.)
 Works with **Claude Code**, **Claude Desktop**, **Codex**, **Antigravity**, **Gemini CLI**, **Cursor**, **Windsurf**
 and any other MCP client.
 
-<p align="center"><img src="docs/plugin.jpg" alt="Figma Bridge plugin" width="620"></p>
+<p align="center"><img src="docs/plugin.png" alt="Figma Bridge plugin" width="620"></p>
 
 <!-- Demo: record it with docs/record-demo.md, save it as docs/demo.gif, then uncomment.
 <p align="center"><img src="docs/demo.gif" alt="An agent building, importing and exporting with Figma Bridge" width="720"></p>
