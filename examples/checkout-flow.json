@@ -1,0 +1,5 @@
+{
+  "type": "diagram",
+  "name": "Checkout flow",
+  "source": "flowchart LR\n  A([Cart]) --> B{Signed in?}\n  B -->|yes| C[Shipping]\n  B -.->|no| D[Sign in]\n  D --> C\n  C --> E[Payment]\n  E --> F{Paid?}\n  F -->|yes| G((Done))\n  F -->|no| E\n  subgraph Billing\n    E\n    F\n  end"
+}

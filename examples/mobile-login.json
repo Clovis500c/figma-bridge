@@ -1,0 +1,53 @@
+{
+  "name": "Sign in",
+  "layout": "column",
+  "w": 390,
+  "h": 844,
+  "padding": [72, 24, 40, 24],
+  "gap": 32,
+  "fill": "#FFFFFF",
+  "children": [
+    {
+      "name": "Brand",
+      "layout": "column",
+      "gap": 12,
+      "children": [
+        { "name": "Logo", "layout": "row", "justify": "center", "align": "center", "w": 48, "h": 48, "radius": 12, "fill": "#111827", "children": [{ "icon": "lucide:zap", "size": 24, "color": "#FFFFFF" }] },
+        { "name": "Title", "text": "Welcome back", "size": 28, "weight": 700, "lineHeight": 36 },
+        { "name": "Subtitle", "text": "Sign in to continue to your workspace.", "color": "#6B7280", "w": "fill" }
+      ]
+    },
+    {
+      "name": "Form",
+      "layout": "column",
+      "gap": 16,
+      "w": "fill",
+      "children": [
+        {
+          "name": "Email field",
+          "layout": "column",
+          "gap": 6,
+          "w": "fill",
+          "children": [
+            { "name": "Label", "text": "Email", "size": 14, "weight": 500 },
+            { "name": "Input", "layout": "row", "align": "center", "gap": 8, "w": "fill", "padding": [12, 14], "radius": 10, "stroke": "#D1D5DB", "children": [{ "icon": "lucide:mail", "size": 18, "color": "#9CA3AF" }, { "text": "you@company.com", "color": "#9CA3AF" }] }
+          ]
+        },
+        {
+          "name": "Password field",
+          "layout": "column",
+          "gap": 6,
+          "w": "fill",
+          "children": [
+            { "name": "Label", "text": "Password", "size": 14, "weight": 500 },
+            { "name": "Input", "layout": "row", "align": "center", "gap": 8, "w": "fill", "padding": [12, 14], "radius": 10, "stroke": "#D1D5DB", "children": [{ "icon": "lucide:lock", "size": 18, "color": "#9CA3AF" }, { "text": "••••••••", "color": "#9CA3AF", "w": "fill" }, { "icon": "lucide:eye", "size": 18, "color": "#9CA3AF" }] }
+          ]
+        },
+        { "name": "Forgot password", "spans": [{ "text": "Forgot password?", "color": "#4F46E5", "weight": 500, "link": "https://example.com/reset" }], "size": 14 }
+      ]
+    },
+    { "name": "Button", "layout": "row", "justify": "center", "w": "fill", "padding": [14, 20], "radius": 12, "fill": "#4F46E5", "children": [{ "text": "Sign in", "weight": 600, "color": "#FFFFFF" }] },
+    { "name": "Spacer", "w": 1, "h": 1, "grow": true },
+    { "name": "Footer", "layout": "row", "justify": "center", "gap": 4, "w": "fill", "children": [{ "text": "New here?", "color": "#6B7280" }, { "text": "Create an account", "weight": 600, "color": "#4F46E5" }] }
+  ]
+}

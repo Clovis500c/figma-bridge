@@ -197,18 +197,58 @@ export function installFigma(opts: {
     return n;
   };
   const frameProps = () => ({ layoutMode: "NONE", children: [], clipsContent: false, layoutSizingHorizontal: "FIXED", layoutSizingVertical: "FIXED", primaryAxisSizingMode: "AUTO", counterAxisSizingMode: "AUTO" });
+  /** Grid tracks follow their count, like Figma. */
+  const gridify = (n: MockNode) => {
+    for (const [count, sizes] of [["gridColumnCount", "gridColumnSizes"], ["gridRowCount", "gridRowSizes"]] as const) {
+      let v = 0;
+      n[sizes] = [];
+      Object.defineProperty(n, count, {
+        enumerable: true,
+        get: () => v,
+        set: (k: number) => {
+          v = k;
+          n[sizes] = Array.from({ length: k }, () => ({ type: "FLEX", value: 1 }));
+        },
+      });
+    }
+    return n;
+  };
+  const textRanges = () => {
+    const ranges: any[] = [];
+    const rec = (kind: string) => (start: number, end: number, value: unknown) => void ranges.push({ kind, start, end, value });
+    return {
+      ranges,
+      setRangeFontName: rec("font"),
+      setRangeFontSize: rec("size"),
+      setRangeFills: rec("fills"),
+      setRangeHyperlink: rec("link"),
+      setRangeTextDecoration: rec("decoration"),
+      setRangeTextCase: rec("case"),
+      setRangeFillStyleIdAsync: async (a: number, b: number, id: string) => void ranges.push({ kind: "fillStyle", start: a, end: b, value: id }),
+    };
+  };
   Object.assign(figma, {
     editorType: opts.editorType ?? "figma",
     viewport: { center: { x: 0, y: 0 }, zoom: 1, bounds: { x: 0, y: 0, width: 1000, height: 800 }, scrollAndZoomIntoView() {} },
     commitUndo() {},
     notify() {},
-    createFrame: () => created("FRAME", frameProps()),
-    createComponent: () => created("COMPONENT", frameProps()),
+    createFrame: () => gridify(created("FRAME", frameProps())),
+    createComponent: () => gridify(created("COMPONENT", frameProps())),
     createRectangle: () => created("RECTANGLE"),
     createEllipse: () => created("ELLIPSE"),
     createLine: () => created("LINE"),
-    createText: () => created("TEXT", { characters: "", fontName: { family: "Inter", style: "Regular" }, fontSize: 12, textAutoResize: "NONE", layoutSizingHorizontal: "FIXED", layoutSizingVertical: "FIXED" }),
+    createText: () => created("TEXT", { characters: "", fontName: { family: "Inter", style: "Regular" }, fontSize: 12, textAutoResize: "NONE", layoutSizingHorizontal: "FIXED", layoutSizingVertical: "FIXED", ...textRanges() }),
     createSection: () => created("SECTION", { children: [] }),
+    createNodeFromSvg: (svg: string) => {
+      const w = Number(/width="([\d.]+)"/.exec(svg)?.[1] ?? 24);
+      const h = Number(/height="([\d.]+)"/.exec(svg)?.[1] ?? 24);
+      const n = created("FRAME", { ...frameProps(), width: w, height: h, svg });
+      n.rescale = (k: number) => {
+        n.width *= k;
+        n.height *= k;
+      };
+      return n;
+    },
     createSticky: () => created("STICKY", { text: sublayer(), isWideWidth: false, authorVisible: true, width: 240, height: 240 }),
     createShapeWithText: () => created("SHAPE_WITH_TEXT", { text: sublayer(), shapeType: "SQUARE", strokeWeight: 1, width: 208, height: 208 }),
     createConnector: () => created("CONNECTOR", { text: sublayer(), connectorLineType: "ELBOWED", connectorStart: {}, connectorEnd: {}, dashPattern: [] }),
