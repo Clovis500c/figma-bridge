@@ -436,6 +436,7 @@ const METHODS = {
   build: { label: "Build", color: "#0d99ff", icon: "i-build" },
   describe: { label: "Describe", color: "#64748b", icon: "i-tree" },
   get_design_system: { label: "Design system", color: "#64748b", icon: "i-swatch" },
+  design_tokens: { label: "Design tokens", color: "#0d99ff", icon: "i-swatch" },
   audit: { label: "Audit", color: "#16a34a", icon: "i-shield" },
   get_css: { label: "CSS", color: "#64748b", icon: "i-braces" },
   checkpoint: { label: "Checkpoint", color: "#64748b", icon: "i-history" },
@@ -591,6 +592,12 @@ function summarize(msg) {
     }
     case "describe": return (p.nodeId ? "Node " + p.nodeId : "Selection") + (p.depth !== undefined ? " · depth " + p.depth : "");
     case "get_design_system": return p.include ? p.include.join(", ") : "Styles, variables and components";
+    case "design_tokens": {
+      const vars = (p.collections || []).reduce((n, c) => n + (c.variables || []).length, 0);
+      const st = p.styles || {};
+      const styles = (st.colors || []).length + (st.text || []).length + (st.effects || []).length;
+      return vars + " variable" + (vars === 1 ? "" : "s") + " · " + styles + " style" + (styles === 1 ? "" : "s");
+    }
     case "audit": return p.nodeId ? "Node " + p.nodeId : "Selection";
     case "get_css": return p.nodeId ? "Node " + p.nodeId : "Selection";
     case "checkpoint": return p.action.charAt(0).toUpperCase() + p.action.slice(1) + (p.label ? " · " + p.label : p.id ? " · " + p.id : "");

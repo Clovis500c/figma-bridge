@@ -7,6 +7,7 @@ import { z } from "zod";
 import { Bridge, BridgeError } from "./bridge";
 import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
+import { normalizeTokens } from "./tokens";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 
 const VERSION = "1.3.0";
@@ -192,7 +193,7 @@ PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color v
 EFFECTS: radius (n | [tl,tr,br,bl] | "var:x"), opacity, shadow (true | {x,y,blur,spread,color} | [...] | "style:Name"), blur, backgroundBlur, rotation, visible.
 ICON: {icon:"lucide:house", size:20, color:"#111"} (any Iconify set). IMAGE: {src:"C:/img.png" | "https://…", w, h, fit:"fill"|"fit"|"crop"|"tile"}. SVG: {svg:"<svg…>"}.
 INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary", Label:"Buy"}, text:{"Label layer name":"Buy"}}.
-gap/padding/radius accept "var:<number variable>".
+gap/padding/radius accept "var:<number variable>". MODES: modes:{"Theme":"Dark"} sets a collection's variable mode on a frame and its children.
 Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
 Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`,
     inputSchema: {
@@ -248,6 +249,32 @@ server.registerTool(
     },
   },
   (args) => track("get_design_system", (args.include ?? ["all"]).join(","), async () => ok(await bridge.request("get_design_system", args, 60_000))),
+);
+
+server.registerTool(
+  "design_tokens",
+  {
+    title: "Write the design system",
+    description: `Create or update variable collections (with modes such as Light/Dark) and paint, text and effect styles. Idempotent: matched by name, so re-run it to change values. Returns counts of created and updated items.
+Accepted formats (auto-detected, or set format):
+SIMPLE: {"collections":[{"name":"Theme","modes":["Light","Dark"],"variables":{"color/primary":{"Light":"#0D99FF","Dark":"#2AA5FF"},"space/md":16,"radius/card":12,"color/link":"{color/primary}","flag/beta":true,"font/body":"Inter"}}],
+ "styles":{"colors":{"Brand/Primary":"var:color/primary","Brand/Hero":{"gradient":["#0D99FF","#7C3AED"]}},"text":{"Heading/H1":{"font":"Inter","weight":700,"size":32,"lineHeight":1.2,"letterSpacing":"-1%"}},"effects":{"Shadow/Card":{"y":4,"blur":16,"color":"#0000001F"}}}}
+ A scalar applies to every mode; an object keys values by mode. "{name}" or "var:name" is an alias. Detailed form: {"type":"color|number|string|boolean","values":{...},"description","scopes":["FRAME_FILL",...]}.
+W3C: design tokens with $value/$type (color, dimension, number, fontFamily, fontWeight, duration, typography → text style, shadow → effect style, gradient → paint style). Values go to \`mode\`; $extensions.modes {"Dark": value} adds other modes.
+TAILWIND: {theme:{colors, spacing, borderRadius, fontSize, extend}} → color/*, spacing/*, radius/*, font-size/* variables and text/* styles.
+Use them in build with "var:color/primary", "style:Heading/H1", and modes:{"Theme":"Dark"} on a frame.`,
+    inputSchema: {
+      tokens: z.object({}).passthrough().describe("Tokens in one of the formats above"),
+      format: z.enum(["auto", "simple", "w3c", "tailwind"]).optional().describe("Default auto"),
+      collection: z.string().optional().describe('Collection for W3C/Tailwind tokens (default "Tokens" / "Tailwind")'),
+      mode: z.string().optional().describe('Mode that receives W3C/Tailwind values (default "Default")'),
+    },
+  },
+  (args) =>
+    track("design_tokens", args.format ?? "auto", async () => {
+      const set = normalizeTokens(args.tokens as Record<string, unknown>, args);
+      return ok(await bridge.request("design_tokens", { collections: set.collections, styles: set.styles, warnings: set.warnings }, 120_000));
+    }),
 );
 
 server.registerTool(

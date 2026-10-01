@@ -40,7 +40,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 17, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 18, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -171,6 +171,48 @@ check("checkpoint save/restore", !saved.isError && !restored.isError && restored
 const snip = await call("snippets", { action: "save", name: "selftestDouble", code: "return args * 2", description: "test" });
 const usesLib = await call("run_script", { code: "await lib.selftestDouble(21)" });
 check("snippets + lib", !snip.isError && usesLib.data.result === 42, usesLib.data.result ?? usesLib.data);
+
+// ─── 1.4 tools ──────────────────────────────────────────────────────────────
+const tokens = {
+  collections: [
+    {
+      name: "selftest tokens",
+      modes: ["Light", "Dark"],
+      variables: { "color/bg": { Light: "#FFFFFF", Dark: "#111111" }, "color/surface": "{color/bg}", "space/md": 16, "flag/beta": true },
+    },
+  ],
+  styles: {
+    colors: { "selftest/Primary": "var:color/bg" },
+    text: { "selftest/H1": { font: "Inter", weight: 700, size: 32, lineHeight: 1.2 } },
+    effects: { "selftest/Shadow": { y: 4, blur: 16, color: "#0000001F" } },
+  },
+};
+const tk1 = await call("design_tokens", { tokens });
+const tk2 = await call("design_tokens", { tokens });
+check(
+  "design_tokens (idempotent)",
+  !tk1.isError && tk1.data.counts?.variables.created === 4 && tk2.data.counts?.variables.updated === 4 && tk2.data.counts?.variables.created === 0,
+  { first: tk1.data.counts?.variables, second: tk2.data.counts?.variables, warnings: tk1.data.warnings ?? tk1.data.error },
+);
+const w3c = await call("design_tokens", { tokens: { selftest: { $type: "dimension", gap: { $value: "8px" } } }, collection: "selftest tokens", mode: "Light" });
+check("design_tokens (W3C)", !w3c.isError && w3c.data.counts?.variables.created === 1, w3c.data.counts?.variables ?? w3c.data);
+const dark = await call("build", {
+  select: false,
+  spec: { name: "selftest dark", modes: { "selftest tokens": "Dark" }, layout: "column", padding: "var:space/md", fill: "var:color/surface", children: [{ text: "Dark", color: "var:color/bg" }] },
+});
+const darkFill = await call("run_script", {
+  code: `const n = await figma.getNodeByIdAsync(${JSON.stringify(dark.data.rootId)}); return { mode: Object.values(n.explicitVariableModes)[0], pad: n.paddingTop }`,
+});
+check("build modes", !dark.isError && !dark.data.warnings && darkFill.data.result?.pad === 16, darkFill.data.result ?? dark.data);
+const tokenCleanup = await call("run_script", {
+  code: `
+    for (const c of await figma.variables.getLocalVariableCollectionsAsync()) if (c.name === "selftest tokens") c.remove();
+    const styles = [...await figma.getLocalPaintStylesAsync(), ...await figma.getLocalTextStylesAsync(), ...await figma.getLocalEffectStylesAsync()];
+    for (const s of styles) if (s.name.startsWith("selftest/")) s.remove();
+    (await figma.getNodeByIdAsync(${JSON.stringify(dark.data.rootId)}))?.remove();
+    return "removed"`,
+});
+check("design_tokens cleanup", !tokenCleanup.isError, tokenCleanup.data.result ?? tokenCleanup.data);
 
 const cleanup = await call("run_script", {
   code: `for (const id of ${JSON.stringify([frameId, img.data.nodeId, svg.data.nodeId, newCardId ?? cardId, icon.data.nodeId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,

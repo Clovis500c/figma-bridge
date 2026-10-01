@@ -417,6 +417,339 @@
     return a.x >= b.x - 0.5 && a.y >= b.y - 0.5 && a.x + a.width <= b.x + b.width + 0.5 && a.y + a.height <= b.y + b.height + 0.5;
   }
 
+  // plugin/lib/tokens.ts
+  var TYPES = { color: "COLOR", number: "FLOAT", string: "STRING", boolean: "BOOLEAN" };
+  function counter() {
+    return { created: 0, updated: 0 };
+  }
+  async function designTokens(p) {
+    const warnings = (p.warnings || []).slice();
+    const counts = {
+      collections: counter(),
+      modes: counter(),
+      variables: counter(),
+      paintStyles: counter(),
+      textStyles: counter(),
+      effectStyles: counter()
+    };
+    const collections = Array.isArray(p.collections) ? p.collections : [];
+    const styles = p.styles || {};
+    if (!collections.length && !(styles.colors || []).length && !(styles.text || []).length && !(styles.effects || []).length) {
+      throw codeError("No tokens found: give collections and/or styles (see the tool description for the accepted formats)", "BAD_ARGS");
+    }
+    if (collections.length)
+      await writeVariables(collections, counts, warnings);
+    invalidateCaches();
+    await writeStyles(styles, counts, warnings);
+    invalidateCaches();
+    const out = { counts };
+    if (warnings.length)
+      out.warnings = warnings.slice(0, 60);
+    return out;
+  }
+  async function writeVariables(specs, counts, warnings) {
+    const allCollections = await figma.variables.getLocalVariableCollectionsAsync();
+    const allVars = await figma.variables.getLocalVariablesAsync();
+    const byName = {};
+    const collName = {};
+    for (let i = 0;i < allCollections.length; i++)
+      collName[allCollections[i].id] = allCollections[i].name;
+    const index = function(v, collectionName) {
+      byName[collectionName + "/" + v.name] = v;
+      if (!byName[v.name])
+        byName[v.name] = v;
+    };
+    for (let i = 0;i < allVars.length; i++)
+      index(allVars[i], collName[allVars[i].variableCollectionId]);
+    const pending = [];
+    for (let c = 0;c < specs.length; c++) {
+      const spec = specs[c];
+      let collection = null;
+      for (let i = 0;i < allCollections.length; i++)
+        if (allCollections[i].name === spec.name)
+          collection = allCollections[i];
+      const fresh = !collection;
+      if (!collection) {
+        collection = figma.variables.createVariableCollection(String(spec.name));
+        counts.collections.created++;
+      } else {
+        counts.collections.updated++;
+      }
+      const modeIds = ensureModes(collection, spec.modes || [], fresh, counts, warnings);
+      const existing = {};
+      for (let i = 0;i < allVars.length; i++)
+        if (allVars[i].variableCollectionId === collection.id)
+          existing[allVars[i].name] = allVars[i];
+      const vars = spec.variables || [];
+      for (let i = 0;i < vars.length; i++) {
+        const v = vars[i];
+        const item = { variable: existing[v.name] || null, spec: v, collection, modeIds };
+        if (item.variable && v.type && TYPES[v.type] && item.variable.resolvedType !== TYPES[v.type]) {
+          warnings.push('"' + v.name + '" exists as ' + item.variable.resolvedType + ", cannot change it to " + TYPES[v.type] + ": skipped");
+          continue;
+        }
+        pending.push(item);
+      }
+    }
+    for (let pass = 0;pass < 4; pass++) {
+      for (let i = 0;i < pending.length; i++) {
+        const item = pending[i];
+        if (item.variable)
+          continue;
+        const type = item.spec.type ? TYPES[item.spec.type] : aliasTargetType(item.spec, item.collection.name, byName);
+        if (!type)
+          continue;
+        item.variable = figma.variables.createVariable(String(item.spec.name), item.collection, type);
+        index(item.variable, item.collection.name);
+        counts.variables.created++;
+        item.spec.created = true;
+      }
+    }
+    for (let i = 0;i < pending.length; i++) {
+      const item = pending[i];
+      const v = item.variable;
+      if (!v) {
+        warnings.push('"' + item.spec.name + '": alias target not found, skipped');
+        continue;
+      }
+      if (!item.spec.created)
+        counts.variables.updated++;
+      if (item.spec.description !== undefined)
+        v.description = String(item.spec.description);
+      if (Array.isArray(item.spec.scopes)) {
+        try {
+          v.scopes = item.spec.scopes;
+        } catch (e) {
+          warnings.push('"' + v.name + '": invalid scopes (' + (e.message || e) + ")");
+        }
+      }
+      const values = item.spec.values || {};
+      const modes = Object.keys(values);
+      for (let m = 0;m < modes.length; m++) {
+        const targets = [];
+        if (modes[m] === "*") {
+          for (let k = 0;k < item.collection.modes.length; k++)
+            targets.push(item.collection.modes[k].modeId);
+        } else if (item.modeIds[modes[m]]) {
+          targets.push(item.modeIds[modes[m]]);
+        } else {
+          warnings.push('"' + v.name + '": unknown mode "' + modes[m] + '"');
+          continue;
+        }
+        let value;
+        try {
+          value = toVariableValue(values[modes[m]], v, item.collection.name, byName);
+        } catch (e) {
+          warnings.push('"' + v.name + '": ' + (e.message || e));
+          continue;
+        }
+        for (let k = 0;k < targets.length; k++) {
+          try {
+            v.setValueForMode(targets[k], value);
+          } catch (e) {
+            warnings.push('"' + v.name + '": ' + (e.message || e));
+          }
+        }
+      }
+    }
+  }
+  function ensureModes(collection, names, fresh, counts, warnings) {
+    const ids = {};
+    if (fresh && names.length) {
+      collection.renameMode(collection.modes[0].modeId, String(names[0]));
+      counts.modes.created++;
+    }
+    for (let i = 0;i < collection.modes.length; i++)
+      ids[collection.modes[i].name] = collection.modes[i].modeId;
+    for (let i = 0;i < names.length; i++) {
+      const name = String(names[i]);
+      if (ids[name])
+        continue;
+      try {
+        ids[name] = collection.addMode(name);
+        counts.modes.created++;
+      } catch (e) {
+        warnings.push('Cannot add mode "' + name + '" to "' + collection.name + '": ' + (e.message || e) + " (the Figma plan may limit modes)");
+      }
+    }
+    return ids;
+  }
+  function findAlias(ref, collectionName, byName) {
+    return byName[collectionName + "/" + ref] || byName[ref] || null;
+  }
+  function aliasTargetType(spec, collectionName, byName) {
+    const values = spec.values || {};
+    const keys = Object.keys(values);
+    for (let i = 0;i < keys.length; i++) {
+      const v = values[keys[i]];
+      if (v && typeof v === "object" && v.alias) {
+        const target = findAlias(String(v.alias), collectionName, byName);
+        if (target)
+          return target.resolvedType;
+      }
+    }
+    return null;
+  }
+  function toVariableValue(raw, v, collectionName, byName) {
+    if (raw && typeof raw === "object" && raw.alias) {
+      const target = findAlias(String(raw.alias), collectionName, byName);
+      if (!target)
+        throw new Error('alias target "' + raw.alias + '" not found');
+      if (target.id === v.id)
+        throw new Error("a variable cannot alias itself");
+      return figma.variables.createVariableAlias(target);
+    }
+    switch (v.resolvedType) {
+      case "COLOR":
+        return parseHex(String(raw));
+      case "FLOAT":
+        if (typeof raw !== "number" && isNaN(Number(raw)))
+          throw new Error("expected a number, got " + JSON.stringify(raw));
+        return Number(raw);
+      case "BOOLEAN":
+        return raw === true || raw === "true";
+      default:
+        return String(raw);
+    }
+  }
+  async function writeStyles(styles, counts, warnings) {
+    const local = await localStyles();
+    const find = function(list, name) {
+      for (let i = 0;i < list.length; i++)
+        if (list[i].name === name)
+          return list[i];
+      return null;
+    };
+    const colors = styles.colors || [];
+    for (let i = 0;i < colors.length; i++) {
+      const s = colors[i];
+      try {
+        const value = s.value !== undefined ? s.value : s.color;
+        const list = Array.isArray(value) ? value : [value];
+        const paints = [];
+        for (let k = 0;k < list.length; k++)
+          paints.push(await toPaint(list[k]));
+        let style = find(local.paint, s.name);
+        if (style)
+          counts.paintStyles.updated++;
+        else {
+          style = figma.createPaintStyle();
+          style.name = String(s.name);
+          counts.paintStyles.created++;
+        }
+        style.paints = paints;
+        if (s.description !== undefined)
+          style.description = String(s.description);
+      } catch (e) {
+        warnings.push('Color style "' + s.name + '": ' + (e.message || e));
+      }
+    }
+    const texts = styles.text || [];
+    for (let i = 0;i < texts.length; i++) {
+      const s = texts[i];
+      try {
+        const font = await loadWithFallback(parseFont(s.font || "Inter", s.weight), warnings);
+        let style = find(local.text, s.name);
+        if (style)
+          counts.textStyles.updated++;
+        else {
+          style = figma.createTextStyle();
+          style.name = String(s.name);
+          counts.textStyles.created++;
+        }
+        style.fontName = font;
+        if (typeof s.size === "number")
+          style.fontSize = s.size;
+        if (s.lineHeight !== undefined && s.lineHeight !== null)
+          style.lineHeight = lineHeight(s.lineHeight);
+        if (s.letterSpacing !== undefined && s.letterSpacing !== null) {
+          const ls = String(s.letterSpacing);
+          style.letterSpacing = /%$/.test(ls) ? { value: parseFloat(ls), unit: "PERCENT" } : { value: Number(s.letterSpacing), unit: "PIXELS" };
+        }
+        if (typeof s.paragraphSpacing === "number")
+          style.paragraphSpacing = s.paragraphSpacing;
+        const cases = { upper: "UPPER", lower: "LOWER", title: "TITLE", none: "ORIGINAL" };
+        if (s.case && cases[s.case])
+          style.textCase = cases[s.case];
+        const deco = { underline: "UNDERLINE", strike: "STRIKETHROUGH", strikethrough: "STRIKETHROUGH", none: "NONE" };
+        if (s.decoration && deco[s.decoration])
+          style.textDecoration = deco[s.decoration];
+        if (s.description !== undefined)
+          style.description = String(s.description);
+      } catch (e) {
+        warnings.push('Text style "' + s.name + '": ' + (e.message || e));
+      }
+    }
+    const effects = styles.effects || [];
+    for (let i = 0;i < effects.length; i++) {
+      const s = effects[i];
+      try {
+        const value = s.value !== undefined ? s.value : s;
+        const list = Array.isArray(value) ? value : [value];
+        const out = [];
+        for (let k = 0;k < list.length; k++) {
+          const e = list[k];
+          if (e && typeof e.blur === "number" && e.type === "layer")
+            out.push({ type: "LAYER_BLUR", radius: e.blur, visible: true });
+          else if (e && typeof e.blur === "number" && e.type === "background")
+            out.push({ type: "BACKGROUND_BLUR", radius: e.blur, visible: true });
+          else
+            out.push(shadowEffect(e || {}));
+        }
+        let style = find(local.effect, s.name);
+        if (style)
+          counts.effectStyles.updated++;
+        else {
+          style = figma.createEffectStyle();
+          style.name = String(s.name);
+          counts.effectStyles.created++;
+        }
+        style.effects = out;
+        if (s.description !== undefined)
+          style.description = String(s.description);
+      } catch (e) {
+        warnings.push('Effect style "' + s.name + '": ' + (e.message || e));
+      }
+    }
+  }
+  async function loadWithFallback(f, warnings) {
+    const candidates = [f, { family: f.family, style: "Regular" }, { family: "Inter", style: "Regular" }];
+    for (let i = 0;i < candidates.length; i++) {
+      try {
+        await loadFont(candidates[i]);
+        if (i > 0)
+          warnings.push('Font "' + f.family + " " + f.style + '" unavailable, used "' + candidates[i].family + " " + candidates[i].style + '"');
+        return candidates[i];
+      } catch (e) {}
+    }
+    throw codeError('No usable font for "' + f.family + " " + f.style + '"', "FONT");
+  }
+  async function applyModes(node, modes, warnings, path) {
+    if (!modes || typeof modes !== "object" || typeof node.setExplicitVariableModeForCollection !== "function")
+      return;
+    const collections = await figma.variables.getLocalVariableCollectionsAsync();
+    const names = Object.keys(modes);
+    for (let i = 0;i < names.length; i++) {
+      let collection = null;
+      for (let k = 0;k < collections.length; k++)
+        if (collections[k].name === names[i] || collections[k].id === names[i])
+          collection = collections[k];
+      if (!collection) {
+        warnings.push(path + ': no variable collection named "' + names[i] + '"');
+        continue;
+      }
+      let modeId = "";
+      for (let k = 0;k < collection.modes.length; k++)
+        if (collection.modes[k].name === modes[names[i]])
+          modeId = collection.modes[k].modeId;
+      if (!modeId) {
+        warnings.push(path + ': collection "' + collection.name + '" has no mode "' + modes[names[i]] + '"');
+        continue;
+      }
+      node.setExplicitVariableModeForCollection(collection, modeId);
+    }
+  }
+
   // plugin/lib/build.ts
   var MAX_NODES2 = 3000;
   var SHADOW_DEFAULT = { x: 0, y: 4, blur: 16, spread: 0, color: "#0000001F" };
@@ -598,6 +931,8 @@
       node.visible = false;
     if (s.locked)
       node.locked = true;
+    if (s.modes)
+      await applyModes(node, s.modes, ctx.warnings, path);
     if (s.name) {
       let key = String(s.name);
       for (let n = 2;ctx.ids[key]; n++)
@@ -1356,9 +1691,9 @@
       });
     }
     if (include.indexOf("components") !== -1) {
-      const list = await localComponents();
-      counts.components = list.length;
-      out.components = list.slice(0, limit).map(function(c) {
+      const list2 = await localComponents();
+      counts.components = list2.length;
+      out.components = list2.slice(0, limit).map(function(c) {
         const item = { name: c.name, id: c.id, page: (pageOf(c) || { name: "?" }).name };
         if (c.type === "COMPONENT_SET") {
           const defs = c.componentPropertyDefinitions;
@@ -1514,6 +1849,7 @@
     build,
     describe,
     get_design_system: getDesignSystem,
+    design_tokens: designTokens,
     audit,
     get_css: getCss,
     checkpoint,
@@ -1649,8 +1985,8 @@
       const m = /line (\d+)/i.exec(String(e && e.message));
       return m ? Number(m[1]) : undefined;
     }
-    const line = raw - lineBase - offset;
-    return line >= 1 ? line : undefined;
+    const line2 = raw - lineBase - offset;
+    return line2 >= 1 ? line2 : undefined;
   }
   async function runScript(p, timeoutMs) {
     const logs = [];

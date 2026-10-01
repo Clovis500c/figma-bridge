@@ -11,6 +11,7 @@ import {
   parseHex,
   place,
 } from "./util";
+import { applyModes } from "./tokens";
 
 interface Ctx {
   warnings: string[];
@@ -191,6 +192,7 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
   if (typeof s.rotation === "number") node.rotation = s.rotation;
   if (s.visible === false) node.visible = false;
   if (s.locked) node.locked = true;
+  if (s.modes) await applyModes(node, s.modes, ctx.warnings, path);
 
   if (s.name) {
     let key = String(s.name);
@@ -377,7 +379,7 @@ async function applyVisuals(node: any, s: any, ctx: Ctx, type: string) {
   }
 }
 
-function shadowEffect(sh: any): Effect {
+export function shadowEffect(sh: any): Effect {
   const c = parseHex(sh.color || SHADOW_DEFAULT.color);
   return {
     type: sh.inner ? "INNER_SHADOW" : "DROP_SHADOW",
@@ -390,7 +392,7 @@ function shadowEffect(sh: any): Effect {
   } as Effect;
 }
 
-function stripPrefix(v: string): string {
+export function stripPrefix(v: string): string {
   return String(v).replace(/^(style|var):/, "");
 }
 
@@ -413,7 +415,7 @@ async function setPaints(node: any, field: "fills" | "strokes", value: any) {
   node[field] = paints;
 }
 
-async function toPaint(v: any): Promise<Paint> {
+export async function toPaint(v: any): Promise<Paint> {
   if (typeof v === "string") {
     if (v.indexOf("var:") === 0) {
       const variable = await findVariable(stripPrefix(v));
@@ -469,7 +471,7 @@ async function setPadding(f: FrameNode, p: any) {
   await setNumber(f, "paddingLeft", left);
 }
 
-function lineHeight(v: any): LineHeight {
+export function lineHeight(v: any): LineHeight {
   if (v === "auto") return { unit: "AUTO" };
   const s = String(v);
   if (/%$/.test(s)) return { value: parseFloat(s), unit: "PERCENT" };

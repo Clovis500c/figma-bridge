@@ -5,6 +5,7 @@ import { build } from "./lib/build";
 import { checkpoint } from "./lib/checkpoint";
 import { describe } from "./lib/describe";
 import { getDesignSystem } from "./lib/design-system";
+import { designTokens } from "./lib/tokens";
 import {
   codeError,
   fontNamesOf,
@@ -129,6 +130,7 @@ const HANDLERS: { [method: string]: Handler } = {
   build: build,
   describe: describe,
   get_design_system: getDesignSystem,
+  design_tokens: designTokens,
   audit: audit,
   get_css: getCss,
   checkpoint: checkpoint,
