@@ -158,5 +158,8 @@ bun test          # unit tests (bridge, setup, schemas, tokens, code generation)
 bun run test      # end-to-end test against an open Figma file
 ```
 
+To release, change `version` in `package.json`, then run **Actions → Release → Run workflow** on `main`: it publishes to
+npm and creates the GitHub release.
+
 Options: `FIGMA_BRIDGE_PORT` (default `3055`), `FIGMA_BRIDGE_CHANNEL`, `FIGMA_BRIDGE_OUT`, `FIGMA_BRIDGE_SNIPPETS`.
 The server listens on `127.0.0.1` only, and browsers can't send it commands.
