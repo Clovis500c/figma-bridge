@@ -16,9 +16,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
@@ -38,8 +38,10 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$tag" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match the version in package.json ($tag)."; exit 1
           fi
+          # Already on npm (a re-run after a failed release step): only create the GitHub release.
           if npm view "$name@${tag#v}" version > /dev/null 2>&1; then
-            echo "::error::$name ${tag#v} is already on npm: change \"version\" in package.json first."; exit 1
+            echo "::notice::$name ${tag#v} is already on npm: skipping npm publish. For a new release, change \"version\" in package.json."
+            echo "PUBLISHED=true" >> "$GITHUB_ENV"
           fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
 
@@ -49,7 +51,15 @@ jobs:
       - run: bun test
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        if: env.PUBLISHED != 'true'
+        shell: bash
+        run: |
+          if ! npm publish --provenance --access public 2>&1 | tee publish.log; then
+            if grep -q "previously staged" publish.log; then
+              echo "::error::${TAG#v} is already waiting for approval on npmjs.com. Approve it there, then run this workflow again to create the GitHub release."
+            fi
+            exit 1
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
