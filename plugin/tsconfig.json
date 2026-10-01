@@ -5,6 +5,7 @@
     "types": ["plugin-typings"],
     "typeRoots": ["../node_modules/@figma", "../node_modules/@types"],
     "strict": true,
+    "resolveJsonModule": true,
     "noUnusedLocals": true,
     "skipLibCheck": true,
     "noEmit": true

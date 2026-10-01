@@ -2830,9 +2830,10 @@
   function cancelWait(id) {
     finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
   }
+  // package.json
+  var version = "1.5.0";
 
   // plugin/code.ts
-  var VERSION = "1.5.0";
   var DEFAULT_SIZE = { width: 340, height: 540 };
   var MIN_SIZE = { width: 280, height: 260 };
   var MAX_SIZE = { width: 900, height: 1200 };
@@ -2870,7 +2871,7 @@
       size = clampSize(saved.width, saved.height);
     compact = !!await figma.clientStorage.getAsync("compact");
     applySize2();
-    post({ t: "init", version: VERSION, session: sessionInfo(), settings: { channel, compact } });
+    post({ t: "init", version, session: sessionInfo(), settings: { channel, compact } });
   }
   try {
     if (!figma.root.getRelaunchData().open)

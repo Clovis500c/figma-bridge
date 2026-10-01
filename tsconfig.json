@@ -6,6 +6,7 @@
     "lib": ["ESNext"],
     "types": ["node"],
     "strict": true,
+    "resolveJsonModule": true,
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "skipLibCheck": true,

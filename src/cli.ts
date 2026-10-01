@@ -4,9 +4,9 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bold, dim, green, installPlugin, parseClients, printSetup, printSnippets, runSetup, yellow } from "./setup";
+import { version as VERSION } from "../package.json";
 
 export const PACKAGE = "@clovis500c/figma-bridge";
-const VERSION = "1.5.0";
 
 const [cmd, ...rest] = process.argv.slice(2);
 const home = homedir();

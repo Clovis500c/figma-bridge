@@ -27,8 +27,8 @@ import {
   safeStringify,
   toSafe,
 } from "./lib/util";
+import { version as VERSION } from "../package.json";
 
-const VERSION = "1.5.0";
 const DEFAULT_SIZE = { width: 340, height: 540 };
 const MIN_SIZE = { width: 280, height: 260 };
 const MAX_SIZE = { width: 900, height: 1200 };
