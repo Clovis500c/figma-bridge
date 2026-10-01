@@ -44,7 +44,13 @@ jobs:
           cp -r dist stage/figma-bridge/
           (cd stage && zip -qr "../figma-bridge-$GITHUB_REF_NAME.zip" figma-bridge)
 
+      # A release made on github.com already exists (it created the tag): attach the zip to it.
       - name: GitHub release
-        run: gh release create "$GITHUB_REF_NAME" "figma-bridge-$GITHUB_REF_NAME.zip" --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "figma-bridge-$GITHUB_REF_NAME.zip" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "figma-bridge-$GITHUB_REF_NAME.zip" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
