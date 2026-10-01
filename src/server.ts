@@ -9,7 +9,7 @@ import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const PORT = Number(process.env.FIGMA_BRIDGE_PORT) || 3055;
 const CHANNEL = process.env.FIGMA_BRIDGE_CHANNEL || "default";
 const OUT_DIR = process.env.FIGMA_BRIDGE_OUT || join(tmpdir(), "figma-bridge");
@@ -196,7 +196,8 @@ gap/padding/radius accept "var:<number variable>".
 Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
 Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`,
     inputSchema: {
-      spec: z.union([z.record(z.string(), z.any()), z.array(z.record(z.string(), z.any()))]).describe("Node or array of nodes"),
+      // A plain open object keeps the schema portable (Gemini/Antigravity reject propertyNames and anyOf on some versions).
+      spec: z.object({}).passthrough().describe("Root node: {name, layout, children:[...], ...}. Several roots: wrap them in a frame or call build again."),
       parentId: z.string().optional().describe("Parent frame (default: current page)"),
       x: z.number().optional().describe("Position of the root on the page (default: viewport center)"),
       y: z.number().optional(),
@@ -407,7 +408,9 @@ server.registerTool(
   "get_context",
   {
     title: "Current Figma context",
-    description: "File name, pages (id/name), current page, selection (ids, names, bounds) and viewport of the connected file.",
+    description:
+      "Start here. File name, pages (id/name), current page, selection (ids, names, bounds) and viewport of the connected file. " +
+      "Workflow: get_design_system → build (new UI) or describe + run_script (edits) → screenshot returnImage:true + audit → fix.",
     inputSchema: {},
   },
   () => track("get_context", "", async () => ok(await bridge.request("get_context", {}, 15_000))),

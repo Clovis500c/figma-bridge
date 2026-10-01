@@ -1413,7 +1413,7 @@
   }
 
   // plugin/code.ts
-  var VERSION = "1.2.0";
+  var VERSION = "1.3.0";
   var DEFAULT_SIZE = { width: 340, height: 540 };
   var MIN_SIZE = { width: 280, height: 260 };
   var MAX_SIZE = { width: 900, height: 1200 };

@@ -20,7 +20,7 @@ import {
   toSafe,
 } from "./lib/util";
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const DEFAULT_SIZE = { width: 340, height: 540 };
 const MIN_SIZE = { width: 280, height: 260 };
 const MAX_SIZE = { width: 900, height: 1200 };

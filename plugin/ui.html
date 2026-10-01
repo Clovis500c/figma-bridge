@@ -339,7 +339,7 @@
         <div class="tile figma" id="tileFigma"><svg width="18" height="18"><use href="#i-frame"/></svg></div>
       </div>
       <div class="labels">
-        <div class="lbl"><b>Claude Code</b><span class="trunc" id="agentSub">MCP · localhost:3055</span></div>
+        <div class="lbl"><b>AI agent</b><span class="trunc" id="agentSub">MCP · localhost:3055</span></div>
         <div class="lbl right"><b class="trunc" id="fileName">This file</b><span class="trunc" id="pageName">—</span></div>
       </div>
     </section>
@@ -351,7 +351,7 @@
       </div>
       <div class="check wait" id="chkServer">
         <span class="cico"></span>
-        <div><b>Start Claude Code</b><span>The bridge starts with it (MCP server <b style="display:inline">FigmaBridge</b>). This panel connects by itself.</span></div>
+        <div><b>Start your AI client</b><span>Claude Code, Codex, Antigravity, Cursor… The bridge starts with it (MCP server <b style="display:inline">FigmaBridge</b>). This panel connects by itself.</span></div>
       </div>
       <div class="check fail" id="chkPort">
         <span class="cico"><svg width="10" height="10"><use href="#i-x"/></svg></span>
@@ -685,7 +685,7 @@ function packet(kind) {
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
 const PILL = { connecting: "Connecting", connected: "Live", offline: "Offline", foreign: "Port busy" };
-const BADGE = { connecting: "connecting", connected: "working", offline: "waiting for Claude", foreign: "port 3055 busy" };
+const BADGE = { connecting: "connecting", connected: "working", offline: "waiting for agent", foreign: "port 3055 busy" };
 
 function setState(next) {
   state = next;
@@ -743,10 +743,10 @@ function renderLog() {
   const list = filter === "err" ? entries.filter((e) => e.status === "err") : entries;
   if (!list.length) {
     log.innerHTML = filter === "err"
-      ? '<li class="empty"><div class="art">' + icon("i-check", 18) + "</div><b>No errors</b>Everything Claude ran worked.</li>"
+      ? '<li class="empty"><div class="art">' + icon("i-check", 18) + "</div><b>No errors</b>Every command worked.</li>"
       : state === "connected"
-        ? '<li class="empty"><div class="art">' + icon("i-spark", 20) + '</div><b>Ready when you are</b>Ask Claude to design something in this file.<span class="quote">“Build a pricing card with 3 plans”</span></li>'
-        : '<li class="empty"><div class="art">' + icon("i-pulse", 18) + "</div><b>No activity yet</b>Commands from Claude will show up here.</li>";
+        ? '<li class="empty"><div class="art">' + icon("i-spark", 20) + '</div><b>Ready when you are</b>Ask your agent to design something in this file.<span class="quote">“Build a pricing card with 3 plans”</span></li>'
+        : '<li class="empty"><div class="art">' + icon("i-pulse", 18) + "</div><b>No activity yet</b>Commands from your agent will show up here.</li>";
     return;
   }
   log.innerHTML = list.map((e) => {
@@ -772,7 +772,7 @@ function renderLog() {
 }
 
 function renderBar() {
-  $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connected") : PILL[state] + (state === "offline" ? ": waiting for Claude Code" : "");
+  $("barTitle").textContent = state === "connected" ? (session ? session.fileName : "Connected") : PILL[state] + (state === "offline" ? ": waiting for your agent" : "");
   const last = entries[0];
   $("barSub").textContent = last
     ? methodOf(last.method).label + " · " + (last.status === "run" ? "running…" : last.status === "ok" ? fmtMs(last.ms) : "error")
