@@ -5,7 +5,8 @@
 **Let any AI agent design in the Figma desktop app, with no rate limits.**
 
 Figma Bridge is a local [MCP](https://modelcontextprotocol.io) server plus a Figma plugin. Your agent gets full read and
-write access to the open file through the Plugin API, not the web API: no tokens, no quotas.
+write access to the open file through the Plugin API, not the web API: no tokens, no quotas. (A token is only needed
+for the optional comments and version history tools.)
 
 Works with **Claude Code**, **Claude Desktop**, **Codex**, **Antigravity**, **Gemini CLI**, **Cursor**, **Windsurf**
 and any other MCP client.
@@ -140,6 +141,7 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 | `checkpoint` | Save layers and restore them later |
 | `snippets` | Reusable script functions (`lib.name()` in scripts) |
 | `get_context` · `get_css` · `list_fonts` | File info, generated CSS, installed fonts |
+| `comments` · `versions` | Optional, with a Figma token: read, post and answer comments; version history and diffs ([setup](docs/rest.md)) |
 | `list_sessions` · `select_session` | Choose a file when several are open (or pass `file` to any tool) |
 
 Each tool describes its parameters to the agent, which needs no extra instructions.
@@ -169,5 +171,5 @@ To release, change `version` in `package.json`, then run **Actions → Release �
 npm and creates the GitHub release.
 
 Options: `FIGMA_BRIDGE_PORT` (default `3055`), `FIGMA_BRIDGE_CHANNEL`, `FIGMA_BRIDGE_OUT`, `FIGMA_BRIDGE_SNIPPETS`,
-`FIGMA_BRIDGE_BROWSER`.
+`FIGMA_BRIDGE_BROWSER`, and `FIGMA_TOKEN` for the optional REST tools.
 The server listens on `127.0.0.1` only, and browsers can't send it commands.

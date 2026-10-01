@@ -6,6 +6,7 @@
   "ui": "ui.html",
   "editorType": ["figma", "figjam", "slides"],
   "documentAccess": "dynamic-page",
+  "enablePrivatePluginApi": true,
   "networkAccess": {
     "allowedDomains": ["none"],
     "devAllowedDomains": ["http://localhost:3055", "ws://localhost:3055"],

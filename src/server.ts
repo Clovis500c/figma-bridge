@@ -11,6 +11,7 @@ import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { generateCode, type IrNode } from "./codegen";
 import { diagramSpec } from "./diagram";
+import { diffTrees, fileKeyFrom, FigmaRest, threadComments, TOKEN_HELP } from "./rest";
 import { planProjectExport, writePlan } from "./project/plan";
 import { normalizeTokens } from "./tokens";
 import { type ExportData, exportTokenFiles, type Format, FORMATS } from "./tokens-export";
@@ -189,6 +190,7 @@ const server = new McpServer(
       "Save helpers you will reuse with the snippets tool. Icons: search_icons, then insert_icon or {icon:'set:name'} in build.",
       "Rules: load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync); keep results small.",
       "The user can cancel a command from the plugin (code CANCELLED): build stops, a script may still finish, so check the file before retrying.",
+      "With FIGMA_TOKEN set: comments reads and posts file comments pinned to layers, versions lists the history and diffs a version against now.",
       "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it). If list_sessions reports versionMismatch, ask them to reopen or update the plugin.",
     ].join("\n"),
   },
@@ -966,6 +968,132 @@ server.registerTool(
           deleteSnippet(need(args.name, "name"));
           return ok({ deleted: args.name });
       }
+    }),
+);
+
+// ─── Optional REST features (FIGMA_TOKEN) ───────────────────────────────────
+
+/** Token, file key (fileUrl, else the connected file's) and the plugin session of that file, if connected. */
+async function restContext(fileUrl?: string) {
+  const token = process.env.FIGMA_TOKEN;
+  if (!token) throw new BridgeError(TOKEN_HELP, "NO_TOKEN");
+  const session = await bridge.current().catch(() => null);
+  let key = fileUrl ? fileKeyFrom(fileUrl) : null;
+  if (fileUrl && !key) throw new BridgeError(`Not a Figma file link or key: ${fileUrl}`, "BAD_ARGS");
+  key ??= session?.fileKey ?? null;
+  if (!key) {
+    throw new BridgeError(
+      "Unknown file key: the plugin can't read it here (Figma gives it only to development and private plugins). Pass fileUrl: the file's link (Share → Copy link).",
+      "NO_FILE_KEY",
+    );
+  }
+  return { rest: new FigmaRest(token), key, session: session?.fileKey === key ? session : null };
+}
+
+/** Layer names for node ids, when the file is open in the plugin. */
+async function layerNames(session: unknown, ids: string[]): Promise<Record<string, { name: string; type: string; page?: string }>> {
+  if (!session || !ids.length) return {};
+  return bridge.request("node_info", { ids: [...new Set(ids)] }, 20_000).catch(() => ({}));
+}
+
+server.registerTool(
+  "comments",
+  {
+    title: "Read and write file comments",
+    description:
+      "Figma comments through the REST API (needs FIGMA_TOKEN; without it, returns how to set one). " +
+      "list: open threads with their replies and the layer each is pinned to (includeResolved for all). " +
+      "post: {message, nodeId?} pinned to a layer (x/y offset inside it), or on the file. reply: {commentId, message}. " +
+      "resolve: Figma's API cannot resolve comments, so this replies \"✓ Resolved\" (or message) and the user clicks Resolve. delete: {commentId} (your own comments). " +
+      "The file is the connected one, or fileUrl. Example: {\"action\":\"post\",\"nodeId\":\"12:34\",\"message\":\"Contrast is 2.8:1 here\"}",
+    inputSchema: {
+      action: z.enum(["list", "post", "reply", "resolve", "delete"]).optional().describe("Default list"),
+      fileUrl: z.string().optional().describe("File link or key (default: the connected file)"),
+      nodeId: z.string().optional().describe("post: layer to pin the comment to"),
+      x: z.number().optional().describe("post: offset inside the layer, px"),
+      y: z.number().optional(),
+      message: z.string().max(5000).optional(),
+      commentId: z.string().optional().describe("reply, resolve, delete"),
+      includeResolved: z.boolean().optional().describe("list: include resolved threads"),
+    },
+  },
+  (args) =>
+    track("comments", `${args.action ?? "list"} ${args.commentId ?? args.nodeId ?? ""}`, async () => {
+      const { rest, key, session } = await restContext(args.fileUrl);
+      const action = args.action ?? "list";
+      const need = (v: string | undefined, what: string) => {
+        if (!v) throw new BridgeError(`\`${what}\` is required for ${action}.`, "BAD_ARGS");
+        return v;
+      };
+      if (action === "list") {
+        const threads = threadComments(await rest.comments(key), !!args.includeResolved);
+        const names = await layerNames(session, threads.map((t) => t.nodeId).filter((x): x is string => !!x));
+        return ok({
+          fileKey: key,
+          open: threads.filter((t) => !t.resolvedAt).length,
+          threads: threads.map((t) => (t.nodeId && names[t.nodeId] ? { ...t, layer: names[t.nodeId] } : t)),
+        });
+      }
+      if (action === "post") {
+        const c = await rest.postComment(key, need(args.message, "message"), { nodeId: args.nodeId, offset: args.nodeId ? { x: args.x ?? 0, y: args.y ?? 0 } : undefined });
+        return ok({ posted: c.id, nodeId: args.nodeId ?? null });
+      }
+      if (action === "reply") {
+        const c = await rest.postComment(key, need(args.message, "message"), { replyTo: need(args.commentId, "commentId") });
+        return ok({ replied: c.id, to: args.commentId });
+      }
+      if (action === "resolve") {
+        const c = await rest.postComment(key, args.message ?? "✓ Resolved", { replyTo: need(args.commentId, "commentId") });
+        return ok({ replied: c.id, to: args.commentId, note: "Figma's REST API has no way to resolve a comment: a reply says it is resolved; ask the user to click Resolve." });
+      }
+      await rest.deleteComment(key, need(args.commentId, "commentId"));
+      return ok({ deleted: args.commentId });
+    }),
+);
+
+server.registerTool(
+  "versions",
+  {
+    title: "File versions and what changed",
+    description:
+      "Version history through the REST API (needs FIGMA_TOKEN). list: saved versions (id, label, description, author, date). " +
+      "diff: {versionId} compares that version with now (or with toVersionId) and lists layers added, removed and changed (text, size, position, fill, visibility, type), matched by their name path. " +
+      "Scope: nodeId, else the current page of the connected file, else every page. The file is the connected one, or fileUrl. " +
+      'Example: {"action":"diff","versionId":"1234567890"}',
+    inputSchema: {
+      action: z.enum(["list", "diff"]).optional().describe("Default list"),
+      fileUrl: z.string().optional().describe("File link or key (default: the connected file)"),
+      versionId: z.string().optional().describe("diff: the older version"),
+      toVersionId: z.string().optional().describe("diff: the newer version (default: now)"),
+      nodeId: z.string().optional().describe("diff: only this layer and its children"),
+      limit: z.number().int().min(1).max(200).optional().describe("list: max versions, default 30; diff: max items per list, default 200"),
+    },
+  },
+  (args) =>
+    track("versions", `${args.action ?? "list"} ${args.versionId ?? ""}`, async () => {
+      const { rest, key, session } = await restContext(args.fileUrl);
+      if ((args.action ?? "list") === "list") {
+        const list = await rest.versions(key, args.limit ?? 30);
+        return ok({
+          fileKey: key,
+          versions: list.map((v) => ({ id: v.id, createdAt: v.created_at, ...(v.label ? { label: v.label } : {}), ...(v.description ? { description: v.description } : {}), author: v.user?.handle })),
+        });
+      }
+      if (!args.versionId) throw new BridgeError("`versionId` is required for diff: call versions {action:\"list\"} first.", "BAD_ARGS");
+      let ids: string[];
+      if (args.nodeId) ids = [args.nodeId];
+      else if (session?.pageId) ids = [session.pageId];
+      else ids = [...new Set([...(await rest.pages(key, args.versionId)), ...(await rest.pages(key, args.toVersionId))].map((p) => p.id))];
+      const [before, after] = await Promise.all([rest.nodes(key, ids, args.versionId), rest.nodes(key, ids, args.toVersionId)]);
+      const empty = (id: string, name: string) => ({ id, name, type: "PAGE", children: [] });
+      const results = ids.map((id) => {
+        const b = before[id];
+        const a = after[id];
+        const name = (a ?? b)?.name ?? id;
+        const d = diffTrees(b ?? empty(id, name), a ?? empty(id, name), args.limit ?? 200);
+        return { id, name, ...(b ? {} : { note: "did not exist in the older version" }), ...(a ? {} : { note: "no longer exists" }), ...d };
+      });
+      return ok({ fileKey: key, from: args.versionId, to: args.toVersionId ?? "now", scopes: results });
     }),
 );
 

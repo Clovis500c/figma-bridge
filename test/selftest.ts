@@ -45,7 +45,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 25, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 27, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -384,6 +384,19 @@ check("file argument", !targeted.isError && targeted.data.fileName === target?.f
 const wrong = await call("build", { select: false, spec: { type: "sticky", text: "selftest" } });
 check("editor check (sticky in Design)", target?.editor === "figjam" ? !wrong.isError : wrong.isError && wrong.data.code === "WRONG_EDITOR", wrong.data.error ?? "created");
 if (target?.editor === "figjam" && wrong.data.rootId) await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(wrong.data.rootId)}))?.remove()` });
+
+// ─── 1.10: REST features ────────────────────────────────────────────────────
+if (process.env.FIGMA_TOKEN) {
+  const posted = await call("comments", { action: "post", nodeId: newCardId ?? cardId, message: "figma-bridge selftest comment" });
+  const listed = await call("comments", {});
+  const removed = posted.data.posted ? await call("comments", { action: "delete", commentId: posted.data.posted }) : posted;
+  check("comments post/list/delete", !posted.isError && listed.data.threads?.some((t: any) => t.id === posted.data.posted) && !removed.isError, posted.data.error ?? listed.data.error ?? removed.data.error ?? "ok");
+  const versions = await call("versions", {});
+  check("versions", !versions.isError && Array.isArray(versions.data.versions), versions.data.versions?.length ?? versions.data.error);
+} else {
+  const noToken = await call("comments", {});
+  check("comments without FIGMA_TOKEN", noToken.isError && noToken.data.code === "NO_TOKEN", "explains how to set a token (set FIGMA_TOKEN to test the REST tools)");
+}
 
 const cleanup = await call("run_script", {
   code: `for (const id of ${JSON.stringify([frameId, img.data.nodeId, svg.data.nodeId, newCardId ?? cardId, icon.data.nodeId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,

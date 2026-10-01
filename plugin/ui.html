@@ -487,6 +487,7 @@ const METHODS = {
   prototype: { label: "Prototype", color: "#8b5cf6", icon: "i-play" },
   annotate: { label: "Annotate", color: "#f59e0b", icon: "i-note" },
   export_tree: { label: "Export code", color: "#64748b", icon: "i-braces" },
+  node_info: { label: "Layer names", color: "#64748b", icon: "i-tree" },
   ping: { label: "Ping", color: "#64748b", icon: "i-pulse" },
 };
 const methodOf = (m) => METHODS[m] || { label: m, color: "#64748b", icon: "i-pulse" };
@@ -774,6 +775,7 @@ function summarize(msg) {
       return action.charAt(0).toUpperCase() + action.slice(1) + (p.nodeId ? " · " + p.nodeId : "");
     }
     case "export_tree": return p.nodeId ? "Node " + p.nodeId : "Selection";
+    case "node_info": return (p.ids || []).length + " layer" + ((p.ids || []).length === 1 ? "" : "s");
     case "wait_for_selection": return p.message || "Select layers";
     case "build": {
       let count = 0;
@@ -1184,7 +1186,7 @@ window.onmessage = (ev) => {
   } else if (msg.t === "info") {
     session = msg.session;
     renderSession();
-    send({ t: "info", fileName: session.fileName, page: session.page });
+    send({ t: "info", fileName: session.fileName, page: session.page, pageId: session.pageId });
   } else if (msg.t === "res") {
     onResult(msg);
   } else if (msg.t === "progress") {
