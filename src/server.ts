@@ -11,6 +11,7 @@ import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { generateCode, type IrNode } from "./codegen";
 import { diagramSpec } from "./diagram";
+import { registerGuides, type ToolDoc } from "./guides";
 import { diffTrees, fileKeyFrom, FigmaRest, threadComments, TOKEN_HELP } from "./rest";
 import { planProjectExport, writePlan } from "./project/plan";
 import { normalizeTokens } from "./tokens";
@@ -168,31 +169,56 @@ async function prepareSpec(spec: unknown, defaultColor: string) {
 
 const safeName = (s: string) => s.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "node";
 
+const INSTRUCTIONS = [
+  "Figma Bridge drives the user's Figma desktop app through a local plugin. No rate limits: iterate freely.",
+  "Workflow:",
+  "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
+  "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
+  "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
+  "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again. audit {scope:'design-system'} scores the file's design system; audit {fix:true} binds raw values to variables and styles.",
+  "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
+  "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
+  "Existing website or HTML → import_web turns it into editable auto-layout frames (one per viewport); then compare against the returned reference screenshot.",
+  "When the target is unclear, wait_for_selection asks the user to pick it in Figma. prototype links screens, annotate leaves Dev Mode notes, export_code turns a frame into code; give it projectPath to reuse the project's components and tokens.",
+  "run_script: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
+  "Script helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?),",
+  "utils.build(spec, {parentId}), utils.describe(nodeOrId, depth); lib.<name>(args) runs a saved snippet; console.log is returned as `logs`.",
+  "Save helpers you will reuse with the snippets tool. Icons: search_icons, then insert_icon or {icon:'set:name'} in build.",
+  "Rules: load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync); keep results small.",
+  "The user can cancel a command from the plugin (code CANCELLED): build stops, a script may still finish, so check the file before retrying.",
+  "With FIGMA_TOKEN set: comments reads and posts file comments pinned to layers, versions lists the history and diffs a version against now.",
+  "Prompts new-screen, apply-design-system, reproduce-screenshot, import-website, figma-to-code and audit-and-fix are ready-made workflows; the resources figma-bridge://docs/build-spec and figma-bridge://docs/workflow are the full reference.",
+  "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it). If list_sessions reports versionMismatch, ask them to reopen or update the plugin.",
+];
+
+const BUILD_DESCRIPTION = `Create a whole layout in ONE call from a declarative spec. Fonts load automatically, icons are fetched, images loaded. Much faster and safer than run_script for new UI.
+Node: {type?, name?, ...props, children?: Node[]}. type is inferred (text/spans→text, icon→icon, src→image, component→instance, variants→componentSet, else frame). Types: frame, component, componentSet, text, rect, ellipse, line, icon, image, svg, instance.
+FRAME: layout "row"|"column"|"grid" (auto-layout; omit for free positioning), gap (number|"auto"), padding (n | [v,h] | [t,r,b,l]), align (cross axis: start|center|end|baseline), justify (main axis: start|center|end|between), wrap, rowGap, clip. Frames have no fill unless set.
+GRID: layout:"grid", columns (count | tracks like [200,"1fr","2fr","hug"]), rows (same; default: enough rows, hugging), columnGap, rowGap (or gap). Children: span:[rows,cols] or colSpan/rowSpan, cellAlign/cellValign. Give the grid a w for "fr" columns.
+SIZE: w / h: number (fixed) | "fill" (stretch inside an auto-layout parent) | "hug". Auto-layout frames hug by default. grow:true. absolute:true with x/y inside auto-layout; x/y for children of free frames.
+TEXT: text, font ("Inter" | "Inter:Bold"), weight (400|500|600|700 or style name), size, color, lineHeight (1.5 | 24 | "150%"), letterSpacing (px | "2%"), align (left|center|right|justify), case (upper|lower|title), decoration (underline|strike), maxLines, textStyle "style:Name". Give w:"fill" or a number to wrap text.
+RICH TEXT: spans:[{text:"Read the "},{text:"docs",weight:600,color:"#0D99FF",link:"https://…"}] instead of text; a span may set font, weight, size, color, decoration, case, link.
+PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color variable>", {gradient:["#a","#b"], angle:90, type?:"radial"}, {image:"https://…"|path, fit:"fill"|"fit"|"crop"|"tile"}, null, or an array (last on top). stroke + strokeWidth (n | [t,r,b,l]) + strokeAlign (inside|center|outside) + strokeDash [dash,gap].
+EFFECTS: radius (n | [tl,tr,br,bl] | "var:x"), opacity, shadow (true | {x,y,blur,spread,color} | [...] | "style:Name"), blur, backgroundBlur, rotation, visible.
+ICON: {icon:"lucide:house", size:20, color:"#111"} (any Iconify set). IMAGE: {src:"C:/img.png" | "https://…", w, h, fit:"fill"|"fit"|"crop"|"tile"}. SVG: {svg:"<svg…>"}.
+INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary", Label:"Buy"}, text:{"Label layer name":"Buy"}}.
+COMPONENT SET: {type:"componentSet", name:"Button", base:{shared frame spec}, variants:[{props:{Variant:"Primary",Size:"M"}, fill:"#0D99FF", children:[…]}, …], properties:{Label:"Button", "Show icon":{type:"boolean",default:true}, Icon:{type:"instance",default:"Icon/Star"}}}. One component per variant, combined as variants.
+On a layer inside a component: bind:"Label" links a text to a text property (created if missing); bind:{visible:"Show icon"} or {mainComponent:"Icon"} for the others. type:"component" takes properties too.
+PROTOTYPE: reactions:[{trigger:"click", action:"navigate", to:"Details", transition:"smart", duration:300}] on any layer (see the prototype tool).
+SECTION: {type:"section", name, children (placed with x/y), w?, h?} (wraps its children when no size).
+FIGJAM files: {type:"sticky", text, color:"yellow"|"blue"|…|"#hex", wide?}, {type:"shape", shape:"rounded"|"square"|"ellipse"|"diamond"|"database"|"hexagon"|…, text, w, h, fill, stroke}, {type:"connector", from, to, label?, line:"elbowed"|"straight"|"curved", dashed?, endArrow?:"arrow"|"none"} (from/to: layer name, key or id; any node can set key:"a"), {type:"table", rows:[["Name","Role"],["Ada","Eng"]]}, {type:"codeBlock", code, language:"typescript"}.
+DIAGRAM (FigJam): {type:"diagram", source:"flowchart LR\\n A[Start] --> B{Valid?}\\n B -->|yes| C(Done)\\n B -.->|no| A", as?:"shapes"|"stickies", name?} lays out a Mermaid flowchart (shapes [] () {} (()) [()] {{}}, edges --> --- -.-> ==> with |labels|, subgraphs → sections).
+SLIDES files: {slides:[{name, fill?, children:[…]}, …]} or {type:"slide", …}: one 1920×1080 slide per entry, children placed with x/y or auto-layout.
+gap/padding/radius accept "var:<number variable>". MODES: modes:{"Theme":"Dark"} sets a collection's variable mode on a frame and its children.
+Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
+Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`;
+
 // ─── MCP server ─────────────────────────────────────────────────────────────
 
 const server = new McpServer(
   { name: "figma-bridge", version: VERSION },
   {
-    instructions: [
-      "Figma Bridge drives the user's Figma desktop app through a local plugin. No rate limits: iterate freely.",
-      "Workflow:",
-      "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
-      "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
-      "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
-      "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again. audit {scope:'design-system'} scores the file's design system; audit {fix:true} binds raw values to variables and styles.",
-      "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
-      "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
-      "Existing website or HTML → import_web turns it into editable auto-layout frames (one per viewport); then compare against the returned reference screenshot.",
-      "When the target is unclear, wait_for_selection asks the user to pick it in Figma. prototype links screens, annotate leaves Dev Mode notes, export_code turns a frame into code; give it projectPath to reuse the project's components and tokens.",
-      "run_script: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
-      "Script helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?),",
-      "utils.build(spec, {parentId}), utils.describe(nodeOrId, depth); lib.<name>(args) runs a saved snippet; console.log is returned as `logs`.",
-      "Save helpers you will reuse with the snippets tool. Icons: search_icons, then insert_icon or {icon:'set:name'} in build.",
-      "Rules: load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync); keep results small.",
-      "The user can cancel a command from the plugin (code CANCELLED): build stops, a script may still finish, so check the file before retrying.",
-      "With FIGMA_TOKEN set: comments reads and posts file comments pinned to layers, versions lists the history and diffs a version against now.",
-      "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it). If list_sessions reports versionMismatch, ask them to reopen or update the plugin.",
-    ].join("\n"),
+    instructions: INSTRUCTIONS.join("\n"),
   },
 );
 
@@ -200,7 +226,9 @@ const server = new McpServer(
 // so an agent can work on several files at once (calls to different files run in parallel).
 const SESSION_TOOLS = new Set(["list_sessions", "select_session"]);
 const registerTool = server.registerTool.bind(server) as (...args: any[]) => unknown;
-(server as any).registerTool = (name: string, config: { inputSchema?: Record<string, z.ZodTypeAny> }, handler: (args: any, extra: unknown) => unknown) => {
+const toolDocs: ToolDoc[] = [];
+(server as any).registerTool = (name: string, config: { title?: string; description?: string; inputSchema?: Record<string, z.ZodTypeAny> }, handler: (args: any, extra: unknown) => unknown) => {
+  toolDocs.push({ name, title: config.title, description: config.description ?? "" });
   if (SESSION_TOOLS.has(name)) return registerTool(name, config, handler);
   const inputSchema = {
     ...config.inputSchema,
@@ -240,27 +268,7 @@ server.registerTool(
   "build",
   {
     title: "Build a layout from a JSON spec",
-    description: `Create a whole layout in ONE call from a declarative spec. Fonts load automatically, icons are fetched, images loaded. Much faster and safer than run_script for new UI.
-Node: {type?, name?, ...props, children?: Node[]}. type is inferred (text/spans→text, icon→icon, src→image, component→instance, variants→componentSet, else frame). Types: frame, component, componentSet, text, rect, ellipse, line, icon, image, svg, instance.
-FRAME: layout "row"|"column"|"grid" (auto-layout; omit for free positioning), gap (number|"auto"), padding (n | [v,h] | [t,r,b,l]), align (cross axis: start|center|end|baseline), justify (main axis: start|center|end|between), wrap, rowGap, clip. Frames have no fill unless set.
-GRID: layout:"grid", columns (count | tracks like [200,"1fr","2fr","hug"]), rows (same; default: enough rows, hugging), columnGap, rowGap (or gap). Children: span:[rows,cols] or colSpan/rowSpan, cellAlign/cellValign. Give the grid a w for "fr" columns.
-SIZE: w / h: number (fixed) | "fill" (stretch inside an auto-layout parent) | "hug". Auto-layout frames hug by default. grow:true. absolute:true with x/y inside auto-layout; x/y for children of free frames.
-TEXT: text, font ("Inter" | "Inter:Bold"), weight (400|500|600|700 or style name), size, color, lineHeight (1.5 | 24 | "150%"), letterSpacing (px | "2%"), align (left|center|right|justify), case (upper|lower|title), decoration (underline|strike), maxLines, textStyle "style:Name". Give w:"fill" or a number to wrap text.
-RICH TEXT: spans:[{text:"Read the "},{text:"docs",weight:600,color:"#0D99FF",link:"https://…"}] instead of text; a span may set font, weight, size, color, decoration, case, link.
-PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color variable>", {gradient:["#a","#b"], angle:90, type?:"radial"}, {image:"https://…"|path, fit:"fill"|"fit"|"crop"|"tile"}, null, or an array (last on top). stroke + strokeWidth (n | [t,r,b,l]) + strokeAlign (inside|center|outside) + strokeDash [dash,gap].
-EFFECTS: radius (n | [tl,tr,br,bl] | "var:x"), opacity, shadow (true | {x,y,blur,spread,color} | [...] | "style:Name"), blur, backgroundBlur, rotation, visible.
-ICON: {icon:"lucide:house", size:20, color:"#111"} (any Iconify set). IMAGE: {src:"C:/img.png" | "https://…", w, h, fit:"fill"|"fit"|"crop"|"tile"}. SVG: {svg:"<svg…>"}.
-INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary", Label:"Buy"}, text:{"Label layer name":"Buy"}}.
-COMPONENT SET: {type:"componentSet", name:"Button", base:{shared frame spec}, variants:[{props:{Variant:"Primary",Size:"M"}, fill:"#0D99FF", children:[…]}, …], properties:{Label:"Button", "Show icon":{type:"boolean",default:true}, Icon:{type:"instance",default:"Icon/Star"}}}. One component per variant, combined as variants.
-On a layer inside a component: bind:"Label" links a text to a text property (created if missing); bind:{visible:"Show icon"} or {mainComponent:"Icon"} for the others. type:"component" takes properties too.
-PROTOTYPE: reactions:[{trigger:"click", action:"navigate", to:"Details", transition:"smart", duration:300}] on any layer (see the prototype tool).
-SECTION: {type:"section", name, children (placed with x/y), w?, h?} (wraps its children when no size).
-FIGJAM files: {type:"sticky", text, color:"yellow"|"blue"|…|"#hex", wide?}, {type:"shape", shape:"rounded"|"square"|"ellipse"|"diamond"|"database"|"hexagon"|…, text, w, h, fill, stroke}, {type:"connector", from, to, label?, line:"elbowed"|"straight"|"curved", dashed?, endArrow?:"arrow"|"none"} (from/to: layer name, key or id; any node can set key:"a"), {type:"table", rows:[["Name","Role"],["Ada","Eng"]]}, {type:"codeBlock", code, language:"typescript"}.
-DIAGRAM (FigJam): {type:"diagram", source:"flowchart LR\n A[Start] --> B{Valid?}\n B -->|yes| C(Done)\n B -.->|no| A", as?:"shapes"|"stickies", name?} lays out a Mermaid flowchart (shapes [] () {} (()) [()] {{}}, edges --> --- -.-> ==> with |labels|, subgraphs → sections).
-SLIDES files: {slides:[{name, fill?, children:[…]}, …]} or {type:"slide", …}: one 1920×1080 slide per entry, children placed with x/y or auto-layout.
-gap/padding/radius accept "var:<number variable>". MODES: modes:{"Theme":"Dark"} sets a collection's variable mode on a frame and its children.
-Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
-Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`,
+    description: BUILD_DESCRIPTION,
     inputSchema: {
       // A plain open object keeps the schema portable (Gemini/Antigravity reject propertyNames and anyOf on some versions).
       spec: z.object({}).passthrough().describe("Root node: {name, layout, children:[...], ...}. Several roots: wrap them in a frame or call build again."),
@@ -1142,6 +1150,8 @@ server.registerTool(
       return ok({ selected: { id: s.id, fileName: s.fileName, page: s.page } });
     }),
 );
+
+registerGuides(server, { instructions: INSTRUCTIONS, buildSpec: BUILD_DESCRIPTION, tools: () => toolDocs });
 
 await server.connect(new StdioServerTransport());
 log(`Figma Bridge MCP ${VERSION} ready (port ${PORT}, channel ${CHANNEL}, files in ${OUT_DIR})`);
