@@ -382,10 +382,15 @@ async function screenshot(p: any) {
   if (typeof node.exportAsync !== "function") throw codeError("A " + node.type + " node cannot be exported", "BAD_ARGS");
   const box = node.absoluteRenderBounds || node.absoluteBoundingBox || { width: node.width || 1, height: node.height || 1 };
   let scale = p.scale || 1;
+  // `width` (used by compare) exports at the reference image's resolution.
+  if (!p.scale && p.width) scale = Math.max(0.05, Math.min(4, p.width / Math.max(box.width, 1)));
   if (p.maxDimension) scale = Math.min(scale, p.maxDimension / Math.max(box.width, box.height, 1));
   const format = p.format === "JPG" ? "JPG" : "PNG";
   const bytes = await node.exportAsync({ format: format, constraint: { type: "SCALE", value: scale } });
-  return { bytes: bytes, format: format, scale: scale, name: node.name, nodeId: node.id };
+  // The export covers the render bounds (shadows included): offset maps image pixels back to the layer box.
+  const bb = node.absoluteBoundingBox;
+  const offset = node.absoluteRenderBounds && bb ? { x: round(node.absoluteRenderBounds.x - bb.x), y: round(node.absoluteRenderBounds.y - bb.y) } : { x: 0, y: 0 };
+  return { bytes: bytes, format: format, scale: scale, offset: offset, name: node.name, nodeId: node.id };
 }
 
 async function placeImage(p: any) {

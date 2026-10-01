@@ -2,7 +2,7 @@
 // then round-trips a script, a screenshot, an image and an SVG. Leaves the file unchanged.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -40,7 +40,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 19, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 20, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -101,6 +101,14 @@ check("screenshot → file", !shot.isError && (await shotFile.exists()) && shot.
 
 const view = await call("screenshot", { nodeId: frameId, returnImage: true, format: "JPG" });
 check("screenshot returnImage", !view.isError && view.images === 1, `${view.data.width}×${view.data.height} jpg`);
+
+const same = await call("compare", { nodeId: frameId, reference: shot.data.path });
+const sideBySide = await call("compare", { nodeId: frameId, reference: shot.data.path, scale: 1, returnImage: true });
+check(
+  "compare",
+  !same.isError && same.data.mismatchPercent < 1 && existsSync(same.data.heatmapPath ?? "") && sideBySide.images === 1,
+  { mismatch: same.data.mismatchPercent, regions: same.data.regions?.length, error: same.data.error },
+);
 
 const img = await call("place_image", { path: shot.data.path, x: made.data.result.x + 260, y: made.data.result.y, width: 240, name: "selftest image" });
 check("place_image", !img.isError && !!img.data.nodeId, img.data);

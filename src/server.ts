@@ -148,6 +148,7 @@ const server = new McpServer(
       "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values.",
       "2. New UI → build (one call per screen or section, with auto-layout). Editing existing design → describe it first, then build into it (parentId) or run_script.",
       "3. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again.",
+      "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
       "4. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
       "run_script: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
       "Script helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?),",
@@ -355,6 +356,81 @@ server.registerTool(
       const meta = { path, nodeId: r.nodeId, name: r.name, width: info?.width, height: info?.height, bytes: bytes.length };
       const content: Content[] = [{ type: "text", text: json(meta) }];
       if (returnImage) content.push({ type: "image", data: r.bytesB64, mimeType: ext === "jpg" ? "image/jpeg" : "image/png" });
+      return { content };
+    }),
+);
+
+server.registerTool(
+  "compare",
+  {
+    title: "Compare a layer with a reference image",
+    description:
+      "Pixel-diff a layer against a reference image (mockup, screenshot) from a local path or URL. The layer is exported at the " +
+      "reference's resolution (or scale), the reference is resized to match, and differing pixels are counted. Returns " +
+      "{mismatchPercent, regions:[{x, y, width, height, mismatchPercent}] in layer coordinates (largest first), heatmapPath}. " +
+      "returnImage:true also shows reference and result side by side. Use it to reproduce a mockup: build → compare → fix the largest regions → compare again.",
+    inputSchema: {
+      nodeId: z.string().optional().describe("Layer to compare (default: the first selected layer)"),
+      reference: z.string().min(1).describe("Reference image: local path or http(s) URL (PNG, JPG, WEBP, GIF)"),
+      scale: z.number().min(0.05).max(4).optional().describe("Export scale; default: match the reference width"),
+      threshold: z.number().min(0).max(1).optional().describe("Per-pixel color distance that counts as different, default 0.1"),
+      returnImage: z.boolean().optional().describe("Also return reference and result side by side"),
+    },
+  },
+  (args) =>
+    track("compare", `${args.nodeId ?? "(selection)"} vs ${oneLine(args.reference, 80)}`, async () => {
+      const refBytes = await readImageSource(args.reference);
+      const info = imageInfo(refBytes);
+      if (!info) throw new BridgeError(`Unsupported reference image (expected PNG, JPG, WEBP or GIF): ${args.reference}`, "BAD_IMAGE");
+      const shot = await bridge.request<{ bytesB64: string; scale: number; offset: { x: number; y: number }; name: string; nodeId: string }>(
+        "screenshot",
+        { nodeId: args.nodeId, scale: args.scale, width: Math.min(info.width, 2400), format: "PNG", maxDimension: 4096 },
+        60_000,
+      );
+      const diff = await bridge.request<{
+        width: number;
+        height: number;
+        mismatch: number;
+        regions: { x: number; y: number; width: number; height: number; mismatch: number }[];
+        totalRegions: number;
+        reference: { width: number; height: number };
+        heatmap: string;
+        sideBySide?: string;
+      }>(
+        "compare_images",
+        { actual: shot.bytesB64, reference: Buffer.from(refBytes).toString("base64"), referenceMime: info.mime, threshold: args.threshold, sideBySide: !!args.returnImage },
+        90_000,
+      );
+      const pct = (v: number) => Math.round(v * 10_000) / 100;
+      const toLayer = (v: number, axis: "x" | "y") => Math.round((v / shot.scale + shot.offset[axis]) * 10) / 10;
+      const heatmapPath = join(OUT_DIR, `compare-${safeName(shot.name)}-${Date.now()}.png`);
+      await Bun.write(heatmapPath, Buffer.from(diff.heatmap, "base64"));
+      const refRatio = diff.reference.width / diff.reference.height;
+      const ratio = diff.width / diff.height;
+      const result: Record<string, unknown> = {
+        nodeId: shot.nodeId,
+        mismatchPercent: pct(diff.mismatch),
+        regions: diff.regions.map((r) => ({
+          x: toLayer(r.x, "x"),
+          y: toLayer(r.y, "y"),
+          width: Math.round((r.width / shot.scale) * 10) / 10,
+          height: Math.round((r.height / shot.scale) * 10) / 10,
+          mismatchPercent: pct(r.mismatch),
+        })),
+        totalRegions: diff.totalRegions,
+        compared: { width: diff.width, height: diff.height, scale: Math.round(shot.scale * 1000) / 1000 },
+        reference: diff.reference,
+        heatmapPath,
+      };
+      if (Math.abs(refRatio - ratio) / ratio > 0.03) {
+        result.warning = `Aspect ratios differ (reference ${refRatio.toFixed(3)}, layer ${ratio.toFixed(3)}): the reference was stretched. Match the layer size to the mockup first.`;
+      }
+      if (diff.sideBySide) {
+        result.sideBySidePath = heatmapPath.replace(/\.png$/, "-side.png");
+        await Bun.write(result.sideBySidePath as string, Buffer.from(diff.sideBySide, "base64"));
+      }
+      const content: Content[] = [{ type: "text", text: json(result) }];
+      if (diff.sideBySide) content.push({ type: "image", data: diff.sideBySide, mimeType: "image/png" });
       return { content };
     }),
 );

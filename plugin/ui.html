@@ -315,6 +315,7 @@
       <symbol id="i-braces" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H7a2 2 0 0 0-2 2v3.5a2 2 0 0 1-2 2 2 2 0 0 1 2 2V18a2 2 0 0 0 2 2h1M16 4h1a2 2 0 0 1 2 2v3.5a2 2 0 0 0 2 2 2 2 0 0 0-2 2V18a2 2 0 0 1-2 2h-1"/></symbol>
       <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5"/><path d="M3.5 4v4.5H8M12 8v4.5l3 2"/></symbol>
       <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></symbol>
+      <symbol id="i-diff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="10" height="14" rx="2"/><path d="M17 5h1.5A2 2 0 0 1 20.5 7v10a2 2 0 0 1-2 2H17" stroke-dasharray="2 2.5"/><path d="M8.5 9.5v5M6 12h5"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5.5 12.5 4 4 9-9"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     </defs>
@@ -443,6 +444,7 @@ const METHODS = {
   get_css: { label: "CSS", color: "#64748b", icon: "i-braces" },
   checkpoint: { label: "Checkpoint", color: "#64748b", icon: "i-history" },
   screenshot: { label: "Screenshot", color: "#0ea5e9", icon: "i-shot" },
+  compare_images: { label: "Compare", color: "#0ea5e9", icon: "i-diff" },
   place_image: { label: "Image", color: "#10b981", icon: "i-image" },
   import_svg: { label: "SVG", color: "#f59e0b", icon: "i-pen" },
   get_context: { label: "Context", color: "#64748b", icon: "i-layers" },
@@ -524,6 +526,134 @@ async function transcode(bytes, mime, maxDim) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+// ─── Image comparison (compare tool) ────────────────────────────────────────
+// Runs here because the plugin main thread has no canvas.
+const VIEW_MAX = 1568;
+
+function canvasOf(w, h) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  return c;
+}
+async function pngB64(canvas) {
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+  return bytesToB64(new Uint8Array(await blob.arrayBuffer()));
+}
+// Pixels drawn on white at w×h, so transparent areas compare as white.
+function pixelsOf(bmp, w, h) {
+  const ctx = canvasOf(w, h).getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bmp, 0, 0, w, h);
+  return ctx.getImageData(0, 0, w, h);
+}
+
+async function compareImages(p) {
+  const actual = await createImageBitmap(new Blob([b64ToBytes(p.actual)], { type: "image/png" }));
+  const ref = await createImageBitmap(new Blob([b64ToBytes(p.reference)], { type: p.referenceMime || "image/png" }));
+  const w = actual.width, h = actual.height;
+  const a = pixelsOf(actual, w, h).data;
+  const refImg = pixelsOf(ref, w, h);
+  const b = refImg.data;
+  const threshold = typeof p.threshold === "number" ? p.threshold : 0.1;
+  const cell = Math.max(4, Math.round(Math.max(w, h) / 160));
+  const cols = Math.ceil(w / cell), rows = Math.ceil(h / cell);
+  const cellDiff = new Uint32Array(cols * rows);
+  const heat = new ImageData(w, h);
+  const hd = heat.data;
+  let diffCount = 0;
+  for (let i = 0, px = 0; i < a.length; i += 4, px++) {
+    const dr = a[i] - b[i], dg = a[i + 1] - b[i + 1], db = a[i + 2] - b[i + 2];
+    const d = Math.sqrt(0.299 * dr * dr + 0.587 * dg * dg + 0.114 * db * db) / 255;
+    if (d > threshold) {
+      diffCount++;
+      const x = px % w, y = (px - x) / w;
+      cellDiff[Math.floor(y / cell) * cols + Math.floor(x / cell)]++;
+      const k = Math.min(1, 0.5 + d);
+      hd[i] = 255;
+      hd[i + 1] = hd[i + 2] = Math.round(90 * (1 - k));
+    } else {
+      // The design itself, faded, gives context around the red areas.
+      const luma = 0.299 * a[i] + 0.587 * a[i + 1] + 0.114 * a[i + 2];
+      hd[i] = hd[i + 1] = hd[i + 2] = Math.round(255 - (255 - luma) * 0.22);
+    }
+    hd[i + 3] = 255;
+  }
+
+  // Regions: connected groups of differing cells (gaps of one cell are bridged).
+  const minCell = Math.max(1, Math.round(cell * cell * 0.02));
+  const seen = new Uint8Array(cols * rows);
+  const regions = [];
+  for (let start = 0; start < cellDiff.length; start++) {
+    if (seen[start] || cellDiff[start] < minCell) continue;
+    const stack = [start];
+    seen[start] = 1;
+    let x0 = cols, y0 = rows, x1 = 0, y1 = 0, count = 0;
+    while (stack.length) {
+      const c = stack.pop();
+      const cx = c % cols, cy = (c - cx) / cols;
+      x0 = Math.min(x0, cx); y0 = Math.min(y0, cy); x1 = Math.max(x1, cx); y1 = Math.max(y1, cy);
+      count += cellDiff[c];
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+        const n = ny * cols + nx;
+        if (!seen[n] && cellDiff[n] >= minCell) { seen[n] = 1; stack.push(n); }
+      }
+    }
+    const rx = x0 * cell, ry = y0 * cell;
+    const rw = Math.min(w, (x1 + 1) * cell) - rx, rh = Math.min(h, (y1 + 1) * cell) - ry;
+    regions.push({ x: rx, y: ry, width: rw, height: rh, pixels: count, mismatch: count / (rw * rh) });
+  }
+  regions.sort((r1, r2) => r2.pixels - r1.pixels);
+
+  const heatCanvas = canvasOf(w, h);
+  const hctx = heatCanvas.getContext("2d");
+  hctx.putImageData(heat, 0, 0);
+  hctx.strokeStyle = "#e5484d";
+  hctx.lineWidth = Math.max(1, Math.round(Math.max(w, h) / 600));
+  for (const r of regions.slice(0, 12)) hctx.strokeRect(r.x + 0.5, r.y + 0.5, r.width - 1, r.height - 1);
+
+  const out = {
+    width: w,
+    height: h,
+    mismatch: diffCount / (w * h),
+    regions: regions.slice(0, 12),
+    totalRegions: regions.length,
+    reference: { width: ref.width, height: ref.height },
+    heatmap: await pngB64(heatCanvas),
+  };
+  if (p.sideBySide) {
+    // Reference | Figma, with a label bar, downscaled to what a model can read.
+    const gap = 16, bar = 28;
+    const k = Math.min(1, VIEW_MAX / (2 * w + gap), (VIEW_MAX - bar) / h);
+    const pw = Math.max(1, Math.round(w * k)), ph = Math.max(1, Math.round(h * k));
+    const c = canvasOf(2 * pw + gap, ph + bar);
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#f3f3f5";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = "#111113";
+    ctx.font = "600 13px Inter, system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Reference", 4, bar / 2);
+    ctx.fillText("Figma", pw + gap + 4, bar / 2);
+    ctx.imageSmoothingQuality = "high";
+    const refCanvas = canvasOf(w, h);
+    refCanvas.getContext("2d").putImageData(refImg, 0, 0);
+    ctx.drawImage(refCanvas, 0, bar, pw, ph);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(pw + gap, bar, pw, ph);
+    ctx.drawImage(actual, pw + gap, bar, pw, ph);
+    out.sideBySide = await pngB64(c);
+  }
+  return out;
+}
+
+// Commands answered by this iframe instead of the plugin main thread.
+const UI_HANDLERS = { compare_images: compareImages };
+
 // ─── Connection ─────────────────────────────────────────────────────────────
 function connect() {
   clearTimeout(retryTimer);
@@ -583,6 +713,7 @@ function summarize(msg) {
     case "screenshot": return (p.nodeId ? "Node " + p.nodeId : "Selection") + (p.scale ? " · " + p.scale + "×" : "") + (p.format === "JPG" ? " · JPG" : "");
     case "place_image": return p.name || (p.nodeId ? "Fill on " + p.nodeId : "New image layer");
     case "import_svg": return p.name ? p.name.replace(/^icon\//, "Icon · ") : (p.svg ? (Math.round(p.svg.length / 102.4) / 10) + " KB of SVG" : "SVG");
+    case "compare_images": return "Design vs reference" + (p.sideBySide ? " · side by side" : "");
     case "list_fonts": return p.filter ? "Matching “" + p.filter + "”" : "All fonts";
     case "get_context": return "File, pages and selection";
     case "build": {
@@ -636,6 +767,14 @@ async function onRequest(msg) {
   packet("out");
   render();
   let params = msg.params || {};
+  if (UI_HANDLERS[msg.method]) {
+    try {
+      onResult({ t: "res", id: msg.id, ok: true, result: await UI_HANDLERS[msg.method](params) });
+    } catch (e) {
+      onResult({ t: "res", id: msg.id, ok: false, code: (e && e.code) || "UI_ERROR", error: String((e && e.message) || e) });
+    }
+    return;
+  }
   try {
     if (params.images) {
       const bytes = {};
