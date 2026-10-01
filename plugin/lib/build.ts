@@ -464,7 +464,7 @@ async function applySpans(t: TextNode, s: any, ctx: Ctx, path: string) {
       if (typeof color === "string" && color.indexOf("style:") === 0) {
         await t.setRangeFillStyleIdAsync(at, end, (await findStyle("paint", stripPrefix(color))).id);
       } else if (color !== undefined) {
-        t.setRangeFills(at, end, [await toPaint(color)]);
+        t.setRangeFills(at, end, [await toPaint(color, ctx.images)]);
       }
       const deco: any = { underline: "UNDERLINE", strike: "STRIKETHROUGH", strikethrough: "STRIKETHROUGH", none: "NONE" };
       if (sp.link) {
@@ -472,7 +472,7 @@ async function applySpans(t: TextNode, s: any, ctx: Ctx, path: string) {
         if (sp.decoration === undefined) t.setRangeTextDecoration(at, end, "UNDERLINE");
       }
       if (sp.decoration && deco[sp.decoration]) t.setRangeTextDecoration(at, end, deco[sp.decoration]);
-      const cases: any = { upper: "UPPER", lower: "LOWER", title: "TITLE" };
+      const cases: any = { upper: "UPPER", lower: "LOWER", title: "TITLE", none: "ORIGINAL" };
       if (sp.case && cases[sp.case]) t.setRangeTextCase(at, end, cases[sp.case]);
     } catch (e) {
       ctx.warnings.push(path + ".spans[" + i + "]: " + ((e as Error).message || e));
@@ -656,10 +656,20 @@ async function overrideTexts(inst: InstanceNode, texts: any, ctx: Ctx) {
 
 async function applyVisuals(node: any, s: any, ctx: Ctx, type: string) {
   const fill = s.fill !== undefined ? s.fill : type === "text" ? s.color : undefined;
-  if (fill !== undefined && "fills" in node && type !== "image") await setPaints(node, "fills", fill);
+  if (fill !== undefined && "fills" in node && type !== "image") await setPaints(node, "fills", fill, ctx.images);
   if (s.stroke !== undefined && "strokes" in node) {
-    await setPaints(node, "strokes", s.stroke);
-    node.strokeWeight = typeof s.strokeWidth === "number" ? s.strokeWidth : 1;
+    await setPaints(node, "strokes", s.stroke, ctx.images);
+    if (Array.isArray(s.strokeWidth) && "strokeTopWeight" in node) {
+      // [top, right, bottom, left] like padding: one weight per side.
+      const w = s.strokeWidth.map(Number);
+      node.strokeTopWeight = w[0] || 0;
+      node.strokeRightWeight = w[1] === undefined ? w[0] || 0 : w[1] || 0;
+      node.strokeBottomWeight = w[2] === undefined ? w[0] || 0 : w[2] || 0;
+      node.strokeLeftWeight = w[3] === undefined ? (w[1] === undefined ? w[0] || 0 : w[1] || 0) : w[3] || 0;
+    } else {
+      node.strokeWeight = typeof s.strokeWidth === "number" ? s.strokeWidth : 1;
+    }
+    if (Array.isArray(s.strokeDash) && "dashPattern" in node) node.dashPattern = s.strokeDash.map(Number);
     if ("strokeAlign" in node && type !== "line" && type !== "text") {
       node.strokeAlign = String(s.strokeAlign || "inside").toUpperCase();
     }
@@ -716,8 +726,8 @@ function solid(hex: string): SolidPaint {
   return { type: "SOLID", color: { r: c.r, g: c.g, b: c.b }, opacity: c.a };
 }
 
-/** "#hex", "style:Name", "var:Name", {gradient:[...], angle}, Paint objects, null / "none", or an array of these. */
-async function setPaints(node: any, field: "fills" | "strokes", value: any) {
+/** "#hex", "style:Name", "var:Name", {gradient:[...], angle}, {image, fit}, Paint objects, null / "none", or an array of these. */
+async function setPaints(node: any, field: "fills" | "strokes", value: any, images?: { [key: string]: Uint8Array }) {
   if (typeof value === "string" && value.indexOf("style:") === 0) {
     const style = await findStyle("paint", stripPrefix(value));
     if (field === "fills") await node.setFillStyleIdAsync(style.id);
@@ -726,11 +736,13 @@ async function setPaints(node: any, field: "fills" | "strokes", value: any) {
   }
   const list = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
   const paints: Paint[] = [];
-  for (let i = 0; i < list.length; i++) paints.push(await toPaint(list[i]));
+  for (let i = 0; i < list.length; i++) paints.push(await toPaint(list[i], images));
   node[field] = paints;
 }
 
-export async function toPaint(v: any): Promise<Paint> {
+const FITS: { [fit: string]: "FILL" | "FIT" | "CROP" | "TILE" } = { fill: "FILL", cover: "FILL", fit: "FIT", contain: "FIT", crop: "CROP", tile: "TILE" };
+
+export async function toPaint(v: any, images?: { [key: string]: Uint8Array }): Promise<Paint> {
   if (typeof v === "string") {
     if (v.indexOf("var:") === 0) {
       const variable = await findVariable(stripPrefix(v));
@@ -759,6 +771,14 @@ export async function toPaint(v: any): Promise<Paint> {
           [-sin, cos, 0.5 + 0.5 * sin - 0.5 * cos],
         ];
     return { type: radial ? "GRADIENT_RADIAL" : "GRADIENT_LINEAR", gradientTransform: transform, gradientStops: stops } as GradientPaint;
+  }
+  if (v && v.imageKey !== undefined) {
+    // {image: src} in the spec: the server downloads it and sends the bytes under imageKey.
+    const bytes = images && images[v.imageKey];
+    if (!bytes) throw codeError("Image fill data missing (use {image: src} with the build tool)", "BAD_ARGS");
+    const paint: ImagePaint = { type: "IMAGE", imageHash: figma.createImage(bytes).hash, scaleMode: FITS[String(v.fit || "fill").toLowerCase()] || "FILL" };
+    if (typeof v.opacity === "number") return Object.assign({}, paint, { opacity: v.opacity });
+    return paint;
   }
   if (v && typeof v.type === "string") return v as Paint;
   throw codeError("Invalid paint: " + JSON.stringify(v), "BAD_ARGS");

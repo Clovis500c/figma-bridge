@@ -4,6 +4,7 @@ import { appendFileSync, mkdirSync, statSync, truncateSync, writeFileSync } from
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Bridge, BridgeError } from "./bridge";
 import { iconSvg, searchIcons } from "./icons";
@@ -83,6 +84,9 @@ async function track(name: string, summary: string, fn: () => Promise<ToolResult
 const oneLine = (s: string, max = 120) => s.replace(/\s+/g, " ").trim().slice(0, max);
 
 async function readImageSource(source: string): Promise<Uint8Array> {
+  const data = /^data:[^,]*?(;base64)?,(.*)$/is.exec(source);
+  if (data) return new Uint8Array(data[1] ? Buffer.from(data[2]!, "base64") : Buffer.from(decodeURIComponent(data[2]!)));
+  if (/^file:\/\//i.test(source)) source = fileURLToPath(source);
   if (/^https?:\/\//i.test(source)) {
     const res = await fetch(source, { signal: AbortSignal.timeout(30_000), redirect: "follow" });
     if (!res.ok) throw new BridgeError(`Download failed: HTTP ${res.status} for ${source}`, "DOWNLOAD");
@@ -99,7 +103,10 @@ async function readImageSource(source: string): Promise<Uint8Array> {
 
 /** Image bytes as the bridge payload; the plugin UI converts WEBP and oversized images. */
 async function imagePayload(source: string) {
-  const bytes = await readImageSource(source);
+  return bytesPayload(await readImageSource(source), source);
+}
+
+function bytesPayload(bytes: Uint8Array, source: string) {
   const info = imageInfo(bytes);
   if (!info) throw new BridgeError(`Unsupported image (expected PNG, JPG, WEBP or GIF): ${source}`, "BAD_IMAGE");
   const needsTranscode = info.format === "webp" || Math.max(info.width, info.height) > FIGMA_MAX_IMAGE_DIM;
@@ -127,6 +134,16 @@ async function prepareSpec(spec: unknown, defaultColor: string) {
       jobs.push(imagePayload(String(node.src)).then((img) => void (images[key] = img)));
       node.imageKey = key;
       delete node.src;
+    }
+    // Image paints: fill:{image:"https://…", fit:"cover"}.
+    for (const field of ["fill", "stroke"]) {
+      for (const paint of Array.isArray(node[field]) ? node[field] : [node[field]]) {
+        if (!paint || typeof paint !== "object" || typeof paint.image !== "string" || paint.imageKey) continue;
+        const key = `img${n++}`;
+        jobs.push(imagePayload(paint.image).then((img) => void (images[key] = img)));
+        paint.imageKey = key;
+        delete paint.image;
+      }
     }
     if (Array.isArray(node.children)) node.children.forEach(walk);
     if (Array.isArray(node.variants)) node.variants.forEach(walk);
@@ -200,7 +217,7 @@ GRID: layout:"grid", columns (count | tracks like [200,"1fr","2fr","hug"]), rows
 SIZE: w / h: number (fixed) | "fill" (stretch inside an auto-layout parent) | "hug". Auto-layout frames hug by default. grow:true. absolute:true with x/y inside auto-layout; x/y for children of free frames.
 TEXT: text, font ("Inter" | "Inter:Bold"), weight (400|500|600|700 or style name), size, color, lineHeight (1.5 | 24 | "150%"), letterSpacing (px | "2%"), align (left|center|right|justify), case (upper|lower|title), decoration (underline|strike), maxLines, textStyle "style:Name". Give w:"fill" or a number to wrap text.
 RICH TEXT: spans:[{text:"Read the "},{text:"docs",weight:600,color:"#0D99FF",link:"https://…"}] instead of text; a span may set font, weight, size, color, decoration, case, link.
-PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color variable>", {gradient:["#a","#b"], angle:90, type?:"radial"}, null. stroke + strokeWidth + strokeAlign (inside|center|outside).
+PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color variable>", {gradient:["#a","#b"], angle:90, type?:"radial"}, {image:"https://…"|path, fit:"fill"|"fit"|"crop"|"tile"}, null, or an array (last on top). stroke + strokeWidth (n | [t,r,b,l]) + strokeAlign (inside|center|outside) + strokeDash [dash,gap].
 EFFECTS: radius (n | [tl,tr,br,bl] | "var:x"), opacity, shadow (true | {x,y,blur,spread,color} | [...] | "style:Name"), blur, backgroundBlur, rotation, visible.
 ICON: {icon:"lucide:house", size:20, color:"#111"} (any Iconify set). IMAGE: {src:"C:/img.png" | "https://…", w, h, fit:"fill"|"fit"|"crop"|"tile"}. SVG: {svg:"<svg…>"}.
 INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary", Label:"Buy"}, text:{"Label layer name":"Buy"}}.
