@@ -418,6 +418,304 @@
     return { count: out.length, nodes: out };
   }
 
+  // plugin/lib/naming.ts
+  var GENERIC_NAME = /^(frame|rectangle|ellipse|group|vector|text|line|polygon|star|component|instance|section|image|auto ?layout|union|subtract|intersect|exclude|boolean|layer|shape|slice|mask|container|wrapper|div|span|box)(\s*\d+)?(\s+copy(\s*\d+)?)?$/i;
+  function isGenericName(n) {
+    const name = n.name.trim();
+    if (!name || GENERIC_NAME.test(name))
+      return true;
+    if (n.kind === "text" && n.text !== undefined) {
+      const t = n.text.trim();
+      const a = name.toLowerCase();
+      const b = t.toLowerCase();
+      return a === b || a.length >= 12 && b.indexOf(a) === 0;
+    }
+    return false;
+  }
+  var NUMERIC = /^[\s$€£¥+\-−]*[\d][\d\s.,:%/×x+\-−]*[\s$€£¥%kKmMbB]*$/;
+  var SCREEN_W = [360, 375, 390, 393, 402, 412, 414, 428, 430, 440];
+  function visibleKids(n) {
+    return n.children.filter(function(c) {
+      return !c.hidden;
+    });
+  }
+  function maxFont(n) {
+    let m = n.kind === "text" && n.fontSize ? n.fontSize : 0;
+    for (let i = 0;i < n.children.length; i++) {
+      const c = n.children[i];
+      if (c && !c.hidden)
+        m = Math.max(m, maxFont(c));
+    }
+    return m;
+  }
+  function onlyKinds(list2, kinds) {
+    for (let i = 0;i < list2.length; i++) {
+      const c = list2[i];
+      if (c && kinds.indexOf(c.kind) === -1)
+        return false;
+    }
+    return list2.length > 0;
+  }
+  function buttonLike(n) {
+    const kids = visibleKids(n);
+    if (!n.background || n.h > 72 || kids.length === 0 || kids.length > 3)
+      return false;
+    let texts = 0;
+    for (let i = 0;i < kids.length; i++) {
+      const c = kids[i];
+      if (!c)
+        continue;
+      if (c.kind === "text") {
+        texts++;
+        if ((c.text || "").length > 32)
+          return false;
+      } else if (c.kind !== "vector" && c.kind !== "image")
+        return false;
+    }
+    return texts === 1;
+  }
+  function isScreen(n) {
+    return SCREEN_W.indexOf(Math.round(n.w)) !== -1 && n.h >= 640 || n.w >= 1024 && n.h >= 600;
+  }
+  function largestText(n, parent) {
+    const others = parent ? visibleKids(parent).filter(function(c) {
+      return c !== n && c.kind === "text";
+    }) : [];
+    const size = n.fontSize || 14;
+    return others.length > 0 && others.every(function(c) {
+      return (c.fontSize || 14) < size;
+    });
+  }
+  function covers(n, p) {
+    return Math.abs(n.x) <= 1 && Math.abs(n.y) <= 1 && n.w >= p.w - 1 && n.h >= p.h - 1;
+  }
+  function roleOf(n, parent, root, top, inButton) {
+    const kids = visibleKids(n);
+    if (n.kind === "text") {
+      const t = (n.text || "").trim();
+      const size = n.fontSize || 14;
+      if (inButton)
+        return "Label";
+      if (NUMERIC.test(t))
+        return "Value";
+      if (size >= top - 0.5 && size >= 18)
+        return "Title";
+      if (size >= 16 && largestText(n, parent))
+        return "Title";
+      if (size >= 20)
+        return "Heading";
+      if (t.length > 60)
+        return "Description";
+      if (size <= 12)
+        return "Caption";
+      if (t.length > 30)
+        return "Description";
+      return "Label";
+    }
+    if (n.kind === "vector")
+      return "Icon";
+    if (n.kind === "image" && kids.length === 0) {
+      const round2 = n.ellipse || n.radius !== undefined && Math.abs(n.w - n.h) <= 1 && n.radius >= n.w / 2 - 1;
+      return round2 ? "Avatar" : "Image";
+    }
+    if (kids.length === 0) {
+      if (Math.min(n.w, n.h) <= 2 && Math.max(n.w, n.h) > 8)
+        return "Divider";
+      if (parent && covers(n, parent))
+        return "Background";
+      if (n.clickable)
+        return "Button";
+      if (n.ellipse)
+        return n.w <= 16 ? "Dot" : "Circle";
+      return "Shape";
+    }
+    if (n.clickable)
+      return "Button";
+    if (buttonLike(n)) {
+      const label = kids.filter(function(c) {
+        return c.kind === "text";
+      })[0];
+      return n.h <= 24 || label && (label.fontSize || 14) <= 12 ? "Badge" : "Button";
+    }
+    if (!parent) {
+      if (isScreen(n))
+        return "Screen";
+    } else if (parent === root && isScreen(root)) {
+      if (n.w >= root.w * 0.9 && n.y <= root.h * 0.1 && n.h <= root.h * 0.25)
+        return "Header";
+      if (n.w >= root.w * 0.9 && n.y + n.h >= root.h * 0.9 && n.h <= root.h * 0.25)
+        return "Footer";
+      if (n.h >= root.h * 0.9 && n.w <= root.w * 0.35 && n.x <= 1)
+        return "Sidebar";
+    }
+    const flow = kids.filter(function(c) {
+      return !c.absolute;
+    });
+    if (flow.length >= 2) {
+      const r = baseName(flow[0]);
+      const same = flow.every(function(c) {
+        return baseName(c) === r;
+      });
+      if (same && r && r !== "Label" && r !== "Value" && r !== "Divider") {
+        if (r === "Button")
+          return "Actions";
+        return r + (n.layout === "GRID" || n.wrap ? "Grid" : "List");
+      }
+    }
+    if (n.background)
+      return n.radius ? "Card" : "Panel";
+    if (onlyKinds(kids, ["text"]))
+      return "TextGroup";
+    if (n.layout === "HORIZONTAL")
+      return "Row";
+    if (n.layout === "GRID")
+      return "Grid";
+    return "Container";
+  }
+  function baseName(n) {
+    return pascalName(n.role || n.name).replace(/\d+$/, "");
+  }
+  function inferRoles(root) {
+    const top = maxFont(root);
+    const walk = function(n, parent, inButton) {
+      const button = n.kind !== "text" && (n.clickable || buttonLike(n) || /button|btn/i.test(n.name));
+      for (let i = 0;i < n.children.length; i++) {
+        const c = n.children[i];
+        if (c)
+          walk(c, n, inButton || button);
+      }
+      if (isGenericName(n))
+        n.role = roleOf(n, parent, root, top, inButton);
+    };
+    walk(root, null, false);
+  }
+  function pascalName(name) {
+    let segs = name.split("/").map(function(s) {
+      return s.replace(/^[\w-]+:/, "").trim();
+    }).filter(function(s) {
+      return s && !/^default$/i.test(s);
+    });
+    if (segs.length > 1)
+      segs = segs.slice(1).concat([segs[0]]);
+    const words = segs.join(" ").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean);
+    const out = words.map(function(w) {
+      return w === w.toUpperCase() && w.length <= 4 ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    }).join("");
+    return out.slice(0, 48);
+  }
+  var ROLE_WORDS = ("Actions Avatar Background Badge Banner Bar Body Button Card Column Container Content Controls Details Dialog Divider Footer Frame Grid Group Gui " + "Header Hero Hud HUD Info Item List Menu Modal Nav Navbar Navigation Overlay Panel Popup Row Screen Section Sidebar Slot Stack Stats Tab Tabs Tile " + "Toolbar Tooltip Window Wrapper").split(" ");
+
+  // plugin/lib/roles.ts
+  var VECTORS = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "LINE"];
+  function visiblePaints(list2) {
+    if (!list2 || list2 === figma.mixed)
+      return [];
+    return list2.filter(function(p) {
+      return p.visible !== false && (p.opacity === undefined || p.opacity > 0);
+    });
+  }
+  function vectorOnly(n) {
+    if (VECTORS.indexOf(n.type) !== -1)
+      return true;
+    if (n.type === "TEXT" || !("children" in n) || !n.children.length)
+      return false;
+    for (let i = 0;i < n.children.length; i++)
+      if (n.children[i].visible !== false && !vectorOnly(n.children[i]))
+        return false;
+    return true;
+  }
+  function fontSizeOf(t) {
+    if (typeof t.fontSize === "number")
+      return t.fontSize;
+    let max = 0;
+    try {
+      const segs = t.getStyledTextSegments(["fontSize"]);
+      for (let i = 0;i < segs.length; i++)
+        max = Math.max(max, segs[i].fontSize);
+    } catch (e) {}
+    return max || 14;
+  }
+  function describe(n, depth) {
+    const fills = "fills" in n ? visiblePaints(n.fills) : [];
+    const strokes = "strokes" in n ? visiblePaints(n.strokes) : [];
+    const kids = "children" in n && n.type !== "TEXT" && depth < 12 ? n.children : [];
+    const image = fills.length === 1 && fills[0].type === "IMAGE";
+    let kind = "shape";
+    if (n.type === "TEXT")
+      kind = "text";
+    else if (vectorOnly(n))
+      kind = "vector";
+    else if (image && !kids.length)
+      kind = "image";
+    else if (kids.length || n.layoutMode && n.layoutMode !== "NONE")
+      kind = "frame";
+    let radius = 0;
+    if (typeof n.cornerRadius === "number")
+      radius = n.cornerRadius;
+    else if ("topLeftRadius" in n)
+      radius = Math.max(n.topLeftRadius, n.topRightRadius, n.bottomRightRadius, n.bottomLeftRadius);
+    const r = {
+      node: n,
+      kind,
+      name: n.name,
+      x: n.x || 0,
+      y: n.y || 0,
+      w: n.width || 0,
+      h: n.height || 0,
+      hidden: n.visible === false,
+      background: fills.length > 0 || strokes.length > 0,
+      radius,
+      ellipse: n.type === "ELLIPSE",
+      clickable: !!(n.reactions && n.reactions.some(function(x) {
+        return x.trigger && (x.trigger.type === "ON_CLICK" || x.trigger.type === "ON_PRESS");
+      })),
+      absolute: n.layoutPositioning === "ABSOLUTE",
+      children: []
+    };
+    if (n.type === "TEXT") {
+      r.text = n.characters;
+      r.fontSize = fontSizeOf(n);
+    }
+    if (n.layoutMode && n.layoutMode !== "NONE")
+      r.layout = n.layoutMode;
+    if (n.layoutWrap === "WRAP")
+      r.wrap = true;
+    if (kind !== "vector") {
+      for (let i = 0;i < kids.length; i++)
+        r.children.push(describe(kids[i], depth + 1));
+    }
+    return r;
+  }
+  function roleNames(root) {
+    const tree = describe(root, 0);
+    inferRoles(tree);
+    const out = {};
+    const walk = function(r) {
+      if (r.role)
+        out[r.node.id] = r.role;
+      for (let i = 0;i < r.children.length; i++)
+        walk(r.children[i]);
+    };
+    walk(tree);
+    return out;
+  }
+  function applyRoleNames(root, rename) {
+    const names = roleNames(root);
+    let count = 0;
+    const walk = function(n) {
+      const role = names[n.id];
+      if (role && rename(n) && n.name !== role) {
+        n.name = role;
+        count++;
+      }
+      if ("children" in n && n.type !== "INSTANCE")
+        for (let i = 0;i < n.children.length; i++)
+          walk(n.children[i]);
+    };
+    walk(root);
+    return count;
+  }
+
   // plugin/lib/health.ts
   var MAX_NODES = 20000;
   var MAX_ISSUES = 100;
@@ -721,10 +1019,10 @@
     const varNames = vars.vars.map(function(v) {
       return v.name;
     });
-    const styleNames = styles.paint.concat(styles.text, styles.effect).map(function(s) {
+    const styleNames2 = styles.paint.concat(styles.text, styles.effect).map(function(s) {
       return s.name;
     });
-    const naming = namingConsistency(varNames.concat(styleNames), "Token", issues);
+    const naming = namingConsistency(varNames.concat(styleNames2), "Token", issues);
     const categories = {
       tokens: { score: score(colorBound + numberBound, colorTotal + numberTotal), colors: { bound: colorBound, total: colorTotal }, numbers: { bound: numberBound, total: numberTotal } },
       contrast: { score: score(contrastOk, contrastTotal), passing: contrastOk, total: contrastTotal },
@@ -760,11 +1058,11 @@
     for (let pass = 0;picked.length < MAX_ISSUES && pass < MAX_ISSUES; pass++) {
       let added = false;
       for (let c = 0;c < names.length && picked.length < MAX_ISSUES; c++) {
-        const list = issues.filter(function(x) {
+        const list2 = issues.filter(function(x) {
           return x.category === names[c];
         });
-        if (list[pass]) {
-          picked.push(list[pass]);
+        if (list2[pass]) {
+          picked.push(list2[pass]);
           added = true;
         }
       }
@@ -829,6 +1127,15 @@
     }
     const changes = [];
     const counts = { colors: 0, numbers: 0, textStyles: 0, names: 0 };
+    const roleCache = {};
+    const roleFor = function(n) {
+      let top = n;
+      while (top.parent && top.parent.type !== "PAGE" && top.parent.type !== "DOCUMENT" && top.parent.type !== "SECTION")
+        top = top.parent;
+      if (!roleCache[top.id])
+        roleCache[top.id] = roleNames(top);
+      return roleCache[top.id][n.id] || null;
+    };
     const record = function(n, fix, from, to) {
       counts[fix]++;
       if (changes.length < 200)
@@ -935,7 +1242,7 @@
         }
       }
       if (fixes.indexOf("names") !== -1 && n.type !== "TEXT" && DEFAULT_NAME.test(n.name)) {
-        const name = nameFromContent(n);
+        const name = roleFor(n);
         if (name && name !== n.name) {
           const from = n.name;
           n.name = name;
@@ -944,52 +1251,6 @@
       }
     }
     return { scope: scope.label, fixed: counts, changes, truncated: scope.truncated || changes.length >= 200 };
-  }
-  function firstText(n, depth) {
-    if (n.type === "TEXT")
-      return n.characters;
-    if (depth > 3 || !("children" in n))
-      return "";
-    for (let i = 0;i < n.children.length; i++) {
-      if (n.children[i].visible === false)
-        continue;
-      const t = firstText(n.children[i], depth + 1);
-      if (t.trim())
-        return t;
-    }
-    return "";
-  }
-  function hasImage(n) {
-    return "fills" in n && n.fills !== figma.mixed && n.fills.some(function(f) {
-      return f.type === "IMAGE" && f.visible !== false;
-    });
-  }
-  function vectorOnly(n) {
-    if (n.type === "VECTOR" || n.type === "BOOLEAN_OPERATION" || n.type === "STAR" || n.type === "POLYGON")
-      return true;
-    if (!("children" in n) || !n.children.length || n.type === "TEXT")
-      return false;
-    for (let i = 0;i < n.children.length; i++)
-      if (!vectorOnly(n.children[i]))
-        return false;
-    return true;
-  }
-  function nameFromContent(n) {
-    if (hasImage(n))
-      return "Image";
-    if (n.type === "VECTOR" || (n.type === "GROUP" || n.type === "FRAME") && vectorOnly(n))
-      return "Icon";
-    const text = firstText(n, 0).split(`
-`)[0].trim();
-    if (text)
-      return text.length > 32 ? text.slice(0, 31) + "…" : text;
-    if (n.layoutMode === "HORIZONTAL")
-      return "Row";
-    if (n.layoutMode === "VERTICAL")
-      return "Column";
-    if (n.layoutMode === "GRID")
-      return "Grid";
-    return null;
   }
 
   // plugin/lib/audit.ts
@@ -1052,11 +1313,11 @@
           report("off-grid", "info", n, "Spacing/padding not on a 4 px grid (" + vals.map(round).join(",") + ")");
         }
       } else if ((n.type === "FRAME" || n.type === "COMPONENT") && n.parent && n.parent.type !== "PAGE" && n.parent.type !== "SECTION") {
-        const visibleKids = (n.children || []).filter(function(c) {
+        const visibleKids2 = (n.children || []).filter(function(c) {
           return c.visible;
         });
-        if (visibleKids.length >= 2)
-          report("no-auto-layout", "info", n, "Frame with " + visibleKids.length + " children but no auto-layout");
+        if (visibleKids2.length >= 2)
+          report("no-auto-layout", "info", n, "Frame with " + visibleKids2.length + " children but no auto-layout");
       }
       if ((n.type === "FRAME" || n.type === "GROUP") && n.children && !n.children.length) {
         const hasFill = n.fills && n.fills !== figma.mixed && n.fills.length;
@@ -1491,11 +1752,11 @@
     };
     for (let i = 0;i < pending.length; i++) {
       const item = pending[i];
-      const list = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
+      const list2 = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
       const out = [];
-      for (let k = 0;k < list.length; k++) {
+      for (let k = 0;k < list2.length; k++) {
         try {
-          out.push(await toReaction(list[k] || {}, resolve));
+          out.push(await toReaction(list2[k] || {}, resolve));
         } catch (e) {
           warnings.push(item.path + ".reactions[" + k + "]: " + (e.message || e));
         }
@@ -1800,10 +2061,10 @@
   }
   async function writeStyles(styles, counts, warnings) {
     const local = await localStyles();
-    const find = function(list, name) {
-      for (let i = 0;i < list.length; i++)
-        if (list[i].name === name)
-          return list[i];
+    const find = function(list2, name) {
+      for (let i = 0;i < list2.length; i++)
+        if (list2[i].name === name)
+          return list2[i];
       return null;
     };
     const colors = styles.colors || [];
@@ -1811,10 +2072,10 @@
       const s = colors[i];
       try {
         const value = s.value !== undefined ? s.value : s.color;
-        const list = Array.isArray(value) ? value : [value];
+        const list2 = Array.isArray(value) ? value : [value];
         const paints = [];
-        for (let k = 0;k < list.length; k++)
-          paints.push(await toPaint(list[k]));
+        for (let k = 0;k < list2.length; k++)
+          paints.push(await toPaint(list2[k]));
         let style = find(local.paint, s.name);
         if (style)
           counts.paintStyles.updated++;
@@ -1871,10 +2132,10 @@
       const s = effects[i];
       try {
         const value = s.value !== undefined ? s.value : s;
-        const list = Array.isArray(value) ? value : [value];
+        const list2 = Array.isArray(value) ? value : [value];
         const out = [];
-        for (let k = 0;k < list.length; k++) {
-          const e = list[k];
+        for (let k = 0;k < list2.length; k++) {
+          const e = list2[k];
           if (e && typeof e.blur === "number" && e.type === "layer")
             out.push({ type: "LAYER_BLUR", radius: e.blur, visible: true });
           else if (e && typeof e.blur === "number" && e.type === "background")
@@ -1958,6 +2219,7 @@
       reactions: [],
       connectors: [],
       keys: {},
+      unnamed: {},
       requestId,
       total: countNodes(roots),
       lastProgress: 0
@@ -1981,6 +2243,15 @@
       }
       made.push(node);
     }
+    for (let i = 0;i < made.length; i++) {
+      try {
+        applyRoleNames(made[i], function(n) {
+          return !!ctx.unnamed[n.id];
+        });
+      } catch (e) {
+        ctx.warnings.push("Layer names: " + (e.message || e));
+      }
+    }
     if (ctx.reactions.length)
       await applyBuildReactions(ctx.reactions, ctx.ids, ctx.warnings);
     const connectors = await createConnectors(ctx);
@@ -2002,10 +2273,10 @@
       out.warnings = ctx.warnings.slice(0, 50);
     return out;
   }
-  function countNodes(list) {
+  function countNodes(list2) {
     let n = 0;
-    for (let i = 0;i < list.length; i++) {
-      const s = list[i];
+    for (let i = 0;i < list2.length; i++) {
+      const s = list2[i];
       if (!s || typeof s !== "object")
         continue;
       n++;
@@ -2059,13 +2330,13 @@
     };
     roots.forEach(walk);
     const keys = Object.keys(wanted);
-    await Promise.all(keys.map(async function(key) {
-      const f = wanted[key];
+    await Promise.all(keys.map(async function(key2) {
+      const f = wanted[key2];
       const candidates = [f, { family: f.family, style: "Regular" }, { family: "Inter", style: f.style }, { family: "Inter", style: "Regular" }];
       for (let i = 0;i < candidates.length; i++) {
         try {
           await loadFont(candidates[i]);
-          ctx.fonts[key] = candidates[i];
+          ctx.fonts[key2] = candidates[i];
           if (i > 0)
             ctx.warnings.push('Font "' + f.family + " " + f.style + '" unavailable, used "' + candidates[i].family + " " + candidates[i].style + '"');
           return;
@@ -2173,6 +2444,8 @@
       node.name = String(s.name);
     else if (type === "icon")
       node.name = "icon/" + s.icon;
+    else if (NAMED_BY_ROLE.indexOf(type) !== -1)
+      ctx.unnamed[node.id] = true;
     if (type === "frame" || type === "component")
       await setupFrame(node, s, ctx, path);
     else if (type === "slide")
@@ -2233,14 +2506,15 @@
     if (s.reactions)
       ctx.reactions.push({ node, reactions: s.reactions, path });
     if (s.name) {
-      let key = String(s.name);
-      for (let n = 2;ctx.ids[key]; n++)
-        key = s.name + " #" + n;
+      let key2 = String(s.name);
+      for (let n = 2;ctx.ids[key2]; n++)
+        key2 = s.name + " #" + n;
       if (Object.keys(ctx.ids).length < 300)
-        ctx.ids[key] = node.id;
+        ctx.ids[key2] = node.id;
     }
     return node;
   }
+  var NAMED_BY_ROLE = ["frame", "component", "text", "rect", "ellipse", "line", "image", "svg"];
   var FIXED_LOOK = ["sticky", "shape", "table", "codeblock"];
   async function setupFrame(f, s, ctx, path, keepFills) {
     if (!keepFills)
@@ -2564,13 +2838,13 @@
     } else if (/^[0-9a-f]{40}$/i.test(ref)) {
       comp = await figma.importComponentByKeyAsync(ref);
     } else {
-      const list = await localComponents();
-      for (let i = 0;i < list.length && !comp; i++)
-        if (list[i].name === ref)
-          comp = list[i];
-      for (let i = 0;i < list.length && !comp; i++)
-        if (list[i].name.toLowerCase() === ref.toLowerCase())
-          comp = list[i];
+      const list2 = await localComponents();
+      for (let i = 0;i < list2.length && !comp; i++)
+        if (list2[i].name === ref)
+          comp = list2[i];
+      for (let i = 0;i < list2.length && !comp; i++)
+        if (list2[i].name.toLowerCase() === ref.toLowerCase())
+          comp = list2[i];
     }
     if (!comp)
       throw codeError(path + ': component "' + ref + '" not found. Use get_design_system to list components.', "NOT_FOUND");
@@ -2649,9 +2923,9 @@
           const comp = await findComponent(String(def.default), path + ".properties." + name);
           const main = comp.type === "COMPONENT_SET" ? comp.defaultVariant : comp;
           const preferred = [];
-          const list = Array.isArray(def.preferred) ? def.preferred : [];
-          for (let k = 0;k < list.length; k++) {
-            const p = await findComponent(String(list[k]), path + ".properties." + name);
+          const list2 = Array.isArray(def.preferred) ? def.preferred : [];
+          for (let k = 0;k < list2.length; k++) {
+            const p = await findComponent(String(list2[k]), path + ".properties." + name);
             preferred.push({ type: p.type === "COMPONENT_SET" ? "COMPONENT_SET" : "COMPONENT", key: p.key });
           }
           keys[name] = owner.addComponentProperty(name, "INSTANCE_SWAP", main.id, preferred.length ? { preferredValues: preferred } : undefined);
@@ -2791,10 +3065,10 @@
         await node.setStrokeStyleIdAsync(style.id);
       return;
     }
-    const list = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
+    const list2 = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
     const paints = [];
-    for (let i = 0;i < list.length; i++)
-      paints.push(await toPaint(list[i], images));
+    for (let i = 0;i < list2.length; i++)
+      paints.push(await toPaint(list2[i], images));
     node[field] = paints;
   }
   var FITS = { fill: "FILL", cover: "FILL", fit: "FIT", contain: "FIT", crop: "CROP", tile: "TILE" };
@@ -3077,7 +3351,7 @@
   }
 
   // plugin/lib/describe.ts
-  async function describe(p) {
+  async function describe2(p) {
     let targets;
     if (p.nodeId)
       targets = [await getNode(p.nodeId)];
@@ -3340,8 +3614,8 @@
     }
     return { file, fit: paint.scaleMode === "FIT" ? "contain" : paint.scaleMode === "TILE" ? "tile" : "cover" };
   }
-  function tracks(list) {
-    return (list || []).map(function(t) {
+  function tracks(list3) {
+    return (list3 || []).map(function(t) {
       return t.type === "FIXED" ? round(t.value) + "px" : t.type === "HUG" ? "auto" : (t.value || 1) + "fr";
     });
   }
@@ -3575,9 +3849,9 @@
       });
     }
     if (include.indexOf("components") !== -1) {
-      const list = await localComponents();
-      counts.components = list.length;
-      out.components = list.slice(0, limit).map(function(c) {
+      const list3 = await localComponents();
+      counts.components = list3.length;
+      out.components = list3.slice(0, limit).map(function(c) {
         const item = { name: c.name, id: c.id, page: (pageOf(c) || { name: "?" }).name };
         if (c.type === "COMPONENT_SET") {
           const defs = c.componentPropertyDefinitions;
@@ -3665,10 +3939,10 @@
         }
         collName[v.variableCollectionId] = collection;
       }
-      const out = { alias: { collection, name: v.name } };
+      const out2 = { alias: { collection, name: v.name } };
       if (v.remote)
-        out.alias.remote = true;
-      return out;
+        out2.alias.remote = true;
+      return out2;
     };
     const value = async function(raw, type) {
       if (raw && typeof raw === "object" && raw.type === "VARIABLE_ALIAS")
@@ -3687,7 +3961,7 @@
       const modes = col.modes.slice().sort(function(a, b) {
         return (a.modeId === col.defaultModeId ? 0 : 1) - (b.modeId === col.defaultModeId ? 0 : 1);
       });
-      const list = [];
+      const list3 = [];
       for (let i = 0;i < vars.length; i++) {
         const v = vars[i];
         if (v.variableCollectionId !== col.id)
@@ -3702,14 +3976,14 @@
           item.scopes = v.scopes.slice();
         if (v.hiddenFromPublishing)
           item.hidden = true;
-        list.push(item);
+        list3.push(item);
       }
       outCollections.push({
         name: col.name,
         modes: modes.map(function(m) {
           return m.name;
         }),
-        variables: list
+        variables: list3
       });
     }
     const styles = await localStyles();
@@ -3779,7 +4053,7 @@
     const effect = [];
     for (let i = 0;i < styles.effect.length; i++) {
       const s = styles.effect[i];
-      const list = [];
+      const list3 = [];
       for (let k = 0;k < s.effects.length; k++) {
         const e = s.effects[k];
         if (e.visible === false)
@@ -3790,14 +4064,14 @@
             sh.inner = true;
           if (e.boundVariables && e.boundVariables.color)
             sh.colorVariable = (await aliasOf(e.boundVariables.color.id)).alias;
-          list.push(sh);
+          list3.push(sh);
         } else {
-          list.push({ type: e.type === "LAYER_BLUR" ? "layer" : "background", blur: round(e.radius) });
+          list3.push({ type: e.type === "LAYER_BLUR" ? "layer" : "background", blur: round(e.radius) });
         }
       }
-      if (!list.length)
+      if (!list3.length)
         continue;
-      const item = { name: s.name, value: list };
+      const item = { name: s.name, value: list3 };
       if (s.description)
         item.description = s.description;
       effect.push(item);
@@ -3922,7 +4196,7 @@
 
   // plugin/lib/roblox.ts
   var MAX_NODES5 = 2000;
-  var VECTORS = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "LINE"];
+  var VECTORS2 = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "LINE"];
   async function robloxTree(p) {
     const node = p.nodeId ? await getNode(p.nodeId) : figma.currentPage.selection[0];
     if (!node)
@@ -3933,12 +4207,12 @@
     const tree = await walk2(node, null, ctx);
     return { tree, images: ctx.images, nodes: ctx.count, truncated: ctx.truncated, fileName: figma.root.name };
   }
-  function paints(list) {
-    if (!list || list === figma.mixed)
+  function paints(list3) {
+    if (!list3 || list3 === figma.mixed)
       return [];
     const out = [];
-    for (let i = 0;i < list.length; i++) {
-      const pt = list[i];
+    for (let i = 0;i < list3.length; i++) {
+      const pt = list3[i];
       if (pt.visible === false)
         continue;
       const o = { type: pt.type, opacity: pt.opacity === undefined ? 1 : round(pt.opacity) };
@@ -3959,7 +4233,7 @@
     return out;
   }
   function vectorOnly2(n) {
-    if (VECTORS.indexOf(n.type) !== -1)
+    if (VECTORS2.indexOf(n.type) !== -1)
       return true;
     if (n.type === "TEXT" || !("children" in n) || !n.children.length)
       return false;
@@ -4226,7 +4500,7 @@
     finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
   }
   // package.json
-  var version = "1.13.0";
+  var version = "1.14.0";
 
   // plugin/code.ts
   var DEFAULT_SIZE = { width: 340, height: 540 };
@@ -4340,7 +4614,7 @@
   var HANDLERS = {
     run_script: runScript,
     build,
-    describe,
+    describe: describe2,
     find: find2,
     get_design_system: getDesignSystem,
     design_tokens: designTokens,
@@ -4509,8 +4783,8 @@
       const m = /line (\d+)/i.exec(String(e && e.message));
       return m ? Number(m[1]) : undefined;
     }
-    const line = raw - lineBase - offset;
-    return line >= 1 ? line : undefined;
+    const line2 = raw - lineBase - offset;
+    return line2 >= 1 ? line2 : undefined;
   }
   async function runScript(p, timeoutMs) {
     const logs = [];
@@ -4591,7 +4865,7 @@
     },
     describe: async function(node, depth) {
       const id = node && typeof node === "object" ? node.id : node;
-      const out = await describe({ nodeId: id, depth });
+      const out = await describe2({ nodeId: id, depth });
       return out.outline;
     }
   };
