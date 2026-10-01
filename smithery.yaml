@@ -1,0 +1,16 @@
+# Smithery: Figma Bridge runs locally (it talks to the Figma desktop app through a plugin on localhost).
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      figmaToken:
+        type: string
+        description: Optional Figma personal access token, only for the comments and versions tools.
+  commandFunction: |-
+    (config) => ({
+      command: "npx",
+      args: ["-y", "@clovis500c/figma-bridge"],
+      env: config.figmaToken ? { FIGMA_TOKEN: config.figmaToken } : {}
+    })
+  exampleConfig: {}

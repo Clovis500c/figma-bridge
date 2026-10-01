@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.clovis500c/figma-bridge",
+  "title": "Figma Bridge",
+  "description": "Let any AI agent design in the Figma desktop app: build, import websites, tokens, audits, code.",
+  "websiteUrl": "https://github.com/Clovis500c/figma-bridge#readme",
+  "repository": {
+    "url": "https://github.com/Clovis500c/figma-bridge",
+    "source": "github"
+  },
+  "version": "1.10.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@clovis500c/figma-bridge",
+      "version": "1.10.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "FIGMA_TOKEN",
+          "description": "Optional Figma personal access token, only for the comments and versions tools",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "FIGMA_BRIDGE_PORT",
+          "description": "Local port shared with the Figma plugin (default 3055)",
+          "isRequired": false,
+          "format": "number"
+        }
+      ]
+    }
+  ]
+}

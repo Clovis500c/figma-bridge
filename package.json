@@ -59,5 +59,6 @@
   },
   "optionalDependencies": {
     "playwright-core": "^1.56.0"
-  }
+  },
+  "mcpName": "io.github.clovis500c/figma-bridge"
 }
