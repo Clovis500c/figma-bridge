@@ -82,7 +82,7 @@ export async function importWeb(opts: ImportOptions, deps: ImportDeps): Promise<
           // No usable file (canvas, video, AVIF, SVG background…): picture it from the page instead.
           if (a.layer) {
             try {
-              images[key] = await page.picture(a.box);
+              images[key] = await page.picture(a.box, a.ref);
               return;
             } catch {}
           }

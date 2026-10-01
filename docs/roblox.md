@@ -77,18 +77,19 @@ In `scale` mode no `UDim` or `UDim2` has an offset:
 | What | Scale value |
 |---|---|
 | Size and position | Fraction of the parent (its content box, inside `UIPadding`, for auto-layout children) |
-| Hug sizing | The designed size as a fraction (no `AutomaticSize`, which works in pixels) |
+| Hug sizing | The designed size as a fraction (no `AutomaticSize`, which works in pixels); content-sized layers centered in their parent stay centered |
 | `UIPadding` | Top and bottom ÷ the frame's height, left and right ÷ its width |
 | `UIListLayout.Padding` | Gap ÷ the content box along the fill direction |
 | `UIGridLayout` | `CellSize` and `CellPadding` ÷ the content box |
+| Panel pictures | Stretched, not 9-sliced: their box keeps the design proportions |
 | `UICorner` | Radius ÷ the shortest side (0.5 for pills and circles) |
 | `UIStroke` | `StrokeSizingMode = ScaledSize`, `Thickness` = stroke weight ÷ the shortest side |
 | `UIShadow` | `BlurRadius` ÷ the shortest side; `Offset` and `Spread` ÷ width and height |
 | Text | `TextScaled = true` with a `UITextSizeConstraint` (below) |
 
 Text sized to its content (auto width or auto height in Figma) may grow up to twice its design size on larger screens;
-text in a fixed box stays at most at its design size, so a loose box doesn't blow it up. `MinTextSize` is half the
-design size.
+text in a fixed box stays at most at its design size, so a loose box doesn't blow it up. `MinTextSize` is 1: Roblox
+hides scaled text that can't fit at its minimum size, which would blank labels on small phones.
 
 ## Mapping
 
@@ -96,10 +97,11 @@ design size.
 
 - `ScreenGui` with `ResetOnSpawn = false`, `ZIndexBehavior = Sibling`, `IgnoreGuiInset = true`.
 - The frame inside it is centered: `AnchorPoint (0.5, 0.5)`, `Position {0.5, 0}, {0.5, 0}`.
-- Size: `offset` mode keeps the design size in pixels. Otherwise a frame with the target's aspect ratio (within 10%)
+- Size: `offset` keeps the design size in pixels. Otherwise a frame with the target's aspect ratio (within 10%)
   and at least 40% of its width is a full screen (`{1, 0}, {1, 0}`); anything else is sized as a fraction of the target
   resolution.
-- A `UIAspectRatioConstraint` keeps the frame's proportions.
+- A `UIAspectRatioConstraint` keeps the frame's proportions. A frame that isn't full screen is sized from the screen
+  height (`DominantAxis = Height`), since on phones the width varies most.
 - A full-screen design drawn at another size (say 960×540 for 1920×1080) scales its text by target width ÷ design
   width, except in `offset` mode.
 
@@ -107,7 +109,7 @@ design size.
 
 | Figma layer | Roblox |
 |---|---|
-| Text | `TextLabel`; `TextButton` if it has a click/press interaction or its name contains Button, Btn or CTA |
+| Text | `TextLabel`; `TextButton` if it has a click/press interaction or its name contains Button, Btn or CTA, or is Close, Back, Buy, Confirm, Cancel, Next, Exit, Play, Claim, Equip… |
 | Frame, group, rectangle, ellipse with a native look | `Frame`; `CanvasGroup` when it has children and opacity < 1; `TextButton` (`Text = ""`) when clickable or named like a button |
 | Single image fill, no children, no stroke or effects | `ImageLabel` (`ImageButton` for buttons) |
 | Vector, boolean, star, polygon, line, or a frame made only of vectors (icons) | Picture: `ImageLabel` with the 2× PNG |
@@ -181,7 +183,7 @@ Free-positioned layers get `ZIndex` 1, 2, 3… in Figma's order (later layers on
 | Font family | `FontFace` family `rbxasset://fonts/families/<Name>.json` (table below; `fonts` overrides it) |
 | Font weight | `FontFace` weight: the closest of Thin 100, ExtraLight 200, Light 300, Regular 400, Medium 500, SemiBold 600, Bold 700, ExtraBold 800, Heavy 900 |
 | Italic / oblique style | `FontFace` style Italic |
-| Font size | `TextSize` (scaled for full screens, see Root) + `UITextSizeConstraint` (`MinTextSize` = half; `MaxTextSize` = size, or twice the size for auto-sized text in scale mode) + `TextScaled` in scale mode |
+| Font size | `TextSize` (scaled for full screens, see Root) + `UITextSizeConstraint` (`MinTextSize` = 1 in scale mode, half the size otherwise; `MaxTextSize` = size, or twice the size for auto-sized text in scale mode) + `TextScaled` in scale mode |
 | Fill color and opacity | `TextColor3`, `TextTransparency` |
 | Horizontal alignment | `TextXAlignment` Left, Center, Right (justified: Left) |
 | Vertical alignment | `TextYAlignment` Top, Center, Bottom |

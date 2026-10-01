@@ -64,6 +64,8 @@ export interface RNode {
   effects?: REffect[];
   clickable?: boolean;
   vector?: boolean;
+  /** The plugin could not read an image fill: picture the layer as it looks. */
+  rasterize?: boolean;
   text?: { characters: string; align: string; valign: string; autoResize: string; maxLines: number; segments: RSegment[] };
   layout?: { mode: string; padding: number[]; gap: number; primary: string; counter: string; wrap?: boolean; counterGap?: number; columns?: number; rows?: number; columnGap?: number; rowGap?: number };
   children?: RNode[];
@@ -121,6 +123,10 @@ export interface AssetRef {
   /** Picture bounds relative to the layer box, in design px. */
   offset?: { x: number; y: number };
   size?: { w: number; h: number };
+  /** Picture pixels per design px (pictures are kept under Roblox's 1024 px limit). */
+  scale?: number;
+  /** The picture's size in pixels. */
+  px?: { w: number; h: number };
 }
 
 const num = (v: number) => Math.round(v * 10000) / 10000;
@@ -141,7 +147,8 @@ export function color3(hex: string): { r: number; g: number; b: number } {
 const C3 = (hex: string): RbxValue => ({ t: "Color3", ...color3(hex) });
 
 
-const BUTTON_NAME = /button|btn|\bcta\b/i;
+// Layers that act as buttons by their name: "Buy button", "Close", "Back"...
+const BUTTON_NAME = /button|btn|\bcta\b|^(close|back|buy|confirm|cancel|next|previous|prev|exit|play|claim|equip|purchase)$/i;
 const VECTOR_TYPES = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "LINE"];
 const ICON_WORDS = ["Icon", "Logo", "Image", "Illustration", "Avatar", "Emoji"];
 const IMAGE_WORDS = ["Image", "Icon", "Avatar", "Logo", "Thumbnail", "Picture", "Photo", "Banner", "Background", "Illustration", "Art", "Cover"];
@@ -169,6 +176,7 @@ export function decide(n: RNode, opts: RobloxOptions): Decision {
   const other = (n.effects ?? []).filter((e) => e.type !== "DROP_SHADOW");
   const hasChildren = !!n.children?.some((c) => !c.hidden);
 
+  if (n.rasterize && raster !== "none") return { kind: "picture", approximations: ["image file unreadable: pictured as it looks"] };
   if (n.vector || VECTOR_TYPES.includes(n.type)) {
     return raster === "none" ? { kind: "frame", approximations: ["vector shape skipped (rasterize is none)"] } : { kind: "picture", approximations };
   }
@@ -351,7 +359,10 @@ class Mapper {
           : [["AnchorPoint", V2(0.5, 0.5)], ["Position", U2(0.5, 0, 0.5, 0)], ["Size", U2(root.w / tw, 0, root.h / th, 0)]];
     top.props = top.props.filter(([k]) => !["AnchorPoint", "Position", "Size", "LayoutOrder", "ZIndex", "AutomaticSize"].includes(k));
     top.props.splice(1, 0, ...geo);
-    top.children.push(this.inst("UIAspectRatioConstraint", "UIAspectRatioConstraint", [["AspectRatio", F(root.w / root.h)]]));
+    // Not full screen: sized from the screen height (on phones the width varies most); the width follows the design ratio.
+    const ratio: [string, RbxValue][] = [["AspectRatio", F(root.w / root.h)]];
+    if (this.opts.mode !== "offset" && !fullScreen) ratio.push(["DominantAxis", E("DominantAxis", "Height")]);
+    top.children.push(this.inst("UIAspectRatioConstraint", "UIAspectRatioConstraint", ratio));
     const out = this.opts.asRootFrame
       ? top
       : this.inst("ScreenGui", `${(this.names.get(root.id) ?? "Ui").replace(/Gui$/, "")}Gui`, [["ResetOnSpawn", B(false)], ["ZIndexBehavior", E("ZIndexBehavior", "Sibling")], ["IgnoreGuiInset", B(true)]], [top]);
@@ -396,7 +407,11 @@ class Mapper {
       out.push(["LayoutOrder", I(index + 1)]);
       return out;
     }
-    const c = n.constraints ?? { h: "MIN", v: "MIN" };
+    const c = { ...(n.constraints ?? { h: "MIN", v: "MIN" }) };
+    // Content-sized layers centered in their parent stay centered: Roblox fonts measure differently than Figma's.
+    const centered = this.centered(n, parent);
+    if (centered.x && c.h === "MIN") c.h = "CENTER";
+    if (centered.y && c.v === "MIN") c.v = "CENTER";
     const axis = (pos: number, size: number, total: number, k: string): { anchor: number; p: [number, number]; s: [number, number] } => {
       const end = total - pos - size;
       if (k === "SCALE" || f.scale) {
@@ -416,6 +431,16 @@ class Mapper {
     out.push(["Size", U2(hug.w ? 0 : x.s[0], hug.w ? 0 : x.s[1], hug.h ? 0 : y.s[0], hug.h ? 0 : y.s[1])]);
     out.push(["ZIndex", I(index + 1)]);
     return out;
+  }
+
+  /** Axes on which a layer sized by its content (text, hug frame) sits at its parent's center. */
+  private centered(n: RNode, parent: Parent | null): { x: boolean; y: boolean } {
+    if (!parent || (parent.layout && !n.absolute)) return { x: false, y: false };
+    const t = n.text?.autoResize;
+    const hugX = t === "WIDTH_AND_HEIGHT" || (!n.text && n.sizing?.h === "HUG");
+    const hugY = t === "WIDTH_AND_HEIGHT" || t === "HEIGHT" || (!n.text && n.sizing?.v === "HUG");
+    const near = (pos: number, size: number, total: number) => Math.abs(pos + size / 2 - total / 2) <= 1.5 && size < total;
+    return { x: hugX && near(n.x, n.w, parent.w), y: hugY && near(n.y, n.h, parent.h) };
   }
 
   private automaticSize(n: RNode, d: Decision): [string, RbxValue][] {
@@ -620,13 +645,21 @@ class Mapper {
       const isButton = !!n.clickable || BUTTON_NAME.test(n.name);
       className = isButton ? "TextButton" : "TextLabel";
       props = this.textProps(n);
+      // A content-sized label: center the glyphs in its box when it is centered, and vertically always.
+      const centered = this.centered(n, parent);
+      const auto = n.text!.autoResize === "WIDTH_AND_HEIGHT" || n.text!.autoResize === "HEIGHT";
+      props = props.map(([k, v]): [string, RbxValue] =>
+        k === "TextXAlignment" && centered.x ? [k, E("TextXAlignment", "Center")] : k === "TextYAlignment" && auto && n.text!.valign === "TOP" ? [k, E("TextYAlignment", "Center")] : [k, v],
+      );
       if (isButton) props.push(["AutoButtonColor", B(false)]);
       if ((n.effects ?? []).some((e) => e.type === "DROP_SHADOW")) this.warn(n, "text shadow has no Roblox equivalent: ignored");
       const size = (props.find(([k]) => k === "TextSize")![1] as { v: number }).v;
       // Text sized to its content can grow with the screen; text in a fixed box stays at its design size at most.
       const tight = n.text!.autoResize === "WIDTH_AND_HEIGHT" || n.text!.autoResize === "HEIGHT";
       const max = this.scaleOnly && tight ? size * 2 : size;
-      children.push(this.inst("UITextSizeConstraint", "UITextSizeConstraint", [["MaxTextSize", I(max)], ["MinTextSize", I(Math.max(1, Math.round(size * 0.5)))]]));
+      // Scale mode: no floor, or Roblox hides scaled text that can't fit at MinTextSize (small phones).
+      const min = this.scaleOnly ? 1 : Math.max(1, Math.round(size * 0.5));
+      children.push(this.inst("UITextSizeConstraint", "UITextSizeConstraint", [["MaxTextSize", I(max)], ["MinTextSize", I(min)]]));
       return this.inst(className, this.label(n, isButton ? "button" : "text"), [...common, ...props], children, n.id);
     }
 
@@ -667,20 +700,14 @@ class Mapper {
       // Background Roblox can't draw: a 9-slice picture that stays crisp when resized, content on top.
       this.counts.pictures++;
       const a = this.assetUrl(`${n.id}:panel`, n);
-      const scale = this.opts.scale ?? 2;
+      const scale = a.scale ?? this.opts.scale ?? 2;
       const inset = Math.ceil((Math.max(0, ...(n.radius ?? [0])) + (n.strokeWeight ?? 0) + 2) * scale);
-      const pw = Math.round((a.size?.w ?? n.w) * scale);
-      const ph = Math.round((a.size?.h ?? n.h) * scale);
+      const pw = a.px?.w ?? Math.round((a.size?.w ?? n.w) * scale);
+      const ph = a.px?.h ?? Math.round((a.size?.h ?? n.h) * scale);
       const ix = Math.min(inset, Math.floor(pw / 2) - 1);
       const iy = Math.min(inset, Math.floor(ph / 2) - 1);
       className = button ? "ImageButton" : "ImageLabel";
-      props = [
-        ["BackgroundTransparency", F(1)],
-        ["Image", { t: "Content", url: a.url }],
-        ["ScaleType", E("ScaleType", "Slice")],
-        ["SliceCenter", { t: "Rect", x0: ix, y0: iy, x1: pw - ix, y1: ph - iy }],
-        ["SliceScale", F(1 / scale)],
-      ];
+      props = [["BackgroundTransparency", F(1)], ["Image", { t: "Content", url: a.url }], ...this.imageScaling(n, ix, iy, pw, ph, scale)];
       if (opacity < 1) props.push(["ImageTransparency", F(1 - opacity)]);
       if (button) props.push(["AutoButtonColor", B(false)]);
       // Rounded like the picture, so the native shadow follows the same corners.
@@ -750,14 +777,29 @@ class Mapper {
     return this.inst(className, this.label(n, flavor), [...common, ...props], children, n.id);
   }
 
+  /** How a panel picture resizes: stretched when its box keeps the design proportions, 9-slice otherwise. */
+  private imageScaling(n: RNode, ix: number, iy: number, pw: number, ph: number, scale: number): [string, RbxValue][] {
+    // Scale mode: the whole UI resizes in proportion, so a stretched picture stays exact (a 9-slice would keep pixel corners).
+    if (this.scaleOnly) return [["ScaleType", E("ScaleType", "Stretch")]];
+    const resizes = n.grow || n.stretch || n.sizing?.h === "FILL" || n.sizing?.v === "FILL" || n.sizing?.h === "HUG" || n.sizing?.v === "HUG";
+    if (this.opts.mode === "offset" && !resizes) return [["ScaleType", E("ScaleType", "Stretch")]];
+    return [
+      ["ScaleType", E("ScaleType", "Slice")],
+      ["SliceCenter", { t: "Rect", x0: ix, y0: iy, x1: pw - ix, y1: ph - iy }],
+      ["SliceScale", F(1 / scale)],
+    ];
+  }
+
   /** Grows a picture's box by its overflow (shadows, outside strokes), keeping it aligned with the layer. */
   private pictureGeometry(n: RNode, a: AssetRef, geo: [string, RbxValue][], parent: Parent): [string, RbxValue][] {
     if (!a.offset || !a.size || (Math.abs(a.offset.x) < 0.5 && Math.abs(a.offset.y) < 0.5 && Math.abs(a.size.w - n.w) < 0.5 && Math.abs(a.size.h - n.h) < 0.5)) return geo;
     const f = this.frameOf(n, parent);
     const dw = a.size.w - n.w;
     const dh = a.size.h - n.h;
-    const ox = a.offset.x;
-    const oy = a.offset.y;
+    // The position moves the anchor point: shift it by the anchor's share of the growth too.
+    const anchor = geo.find(([k]) => k === "AnchorPoint")?.[1] as { x: number; y: number } | undefined;
+    const ox = a.offset.x + (anchor?.x ?? 0) * dw;
+    const oy = a.offset.y + (anchor?.y ?? 0) * dh;
     return geo.map(([k, v]) => {
       if (v.t !== "UDim2" || (k !== "Size" && k !== "Position")) return [k, v];
       if (f.scale) {

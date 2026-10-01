@@ -448,13 +448,13 @@
     }
     return m;
   }
-  function onlyKinds(list2, kinds) {
-    for (let i = 0;i < list2.length; i++) {
-      const c = list2[i];
+  function onlyKinds(list, kinds) {
+    for (let i = 0;i < list.length; i++) {
+      const c = list[i];
       if (c && kinds.indexOf(c.kind) === -1)
         return false;
     }
-    return list2.length > 0;
+    return list.length > 0;
   }
   function buttonLike(n) {
     const kids = visibleKids(n);
@@ -515,8 +515,8 @@
     if (n.kind === "vector")
       return "Icon";
     if (n.kind === "image" && kids.length === 0) {
-      const round2 = n.ellipse || n.radius !== undefined && Math.abs(n.w - n.h) <= 1 && n.radius >= n.w / 2 - 1;
-      return round2 ? "Avatar" : "Image";
+      const round = n.ellipse || n.radius !== undefined && Math.abs(n.w - n.h) <= 1 && n.radius >= n.w / 2 - 1;
+      return round ? "Avatar" : "Image";
     }
     if (kids.length === 0) {
       if (Math.min(n.w, n.h) <= 2 && Math.max(n.w, n.h) > 8)
@@ -607,10 +607,10 @@
 
   // plugin/lib/roles.ts
   var VECTORS = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "LINE"];
-  function visiblePaints(list2) {
-    if (!list2 || list2 === figma.mixed)
+  function visiblePaints(list) {
+    if (!list || list === figma.mixed)
       return [];
-    return list2.filter(function(p) {
+    return list.filter(function(p) {
       return p.visible !== false && (p.opacity === undefined || p.opacity > 0);
     });
   }
@@ -1019,10 +1019,10 @@
     const varNames = vars.vars.map(function(v) {
       return v.name;
     });
-    const styleNames2 = styles.paint.concat(styles.text, styles.effect).map(function(s) {
+    const styleNames = styles.paint.concat(styles.text, styles.effect).map(function(s) {
       return s.name;
     });
-    const naming = namingConsistency(varNames.concat(styleNames2), "Token", issues);
+    const naming = namingConsistency(varNames.concat(styleNames), "Token", issues);
     const categories = {
       tokens: { score: score(colorBound + numberBound, colorTotal + numberTotal), colors: { bound: colorBound, total: colorTotal }, numbers: { bound: numberBound, total: numberTotal } },
       contrast: { score: score(contrastOk, contrastTotal), passing: contrastOk, total: contrastTotal },
@@ -1058,11 +1058,11 @@
     for (let pass = 0;picked.length < MAX_ISSUES && pass < MAX_ISSUES; pass++) {
       let added = false;
       for (let c = 0;c < names.length && picked.length < MAX_ISSUES; c++) {
-        const list2 = issues.filter(function(x) {
+        const list = issues.filter(function(x) {
           return x.category === names[c];
         });
-        if (list2[pass]) {
-          picked.push(list2[pass]);
+        if (list[pass]) {
+          picked.push(list[pass]);
           added = true;
         }
       }
@@ -1313,11 +1313,11 @@
           report("off-grid", "info", n, "Spacing/padding not on a 4 px grid (" + vals.map(round).join(",") + ")");
         }
       } else if ((n.type === "FRAME" || n.type === "COMPONENT") && n.parent && n.parent.type !== "PAGE" && n.parent.type !== "SECTION") {
-        const visibleKids2 = (n.children || []).filter(function(c) {
+        const visibleKids = (n.children || []).filter(function(c) {
           return c.visible;
         });
-        if (visibleKids2.length >= 2)
-          report("no-auto-layout", "info", n, "Frame with " + visibleKids2.length + " children but no auto-layout");
+        if (visibleKids.length >= 2)
+          report("no-auto-layout", "info", n, "Frame with " + visibleKids.length + " children but no auto-layout");
       }
       if ((n.type === "FRAME" || n.type === "GROUP") && n.children && !n.children.length) {
         const hasFill = n.fills && n.fills !== figma.mixed && n.fills.length;
@@ -1752,11 +1752,11 @@
     };
     for (let i = 0;i < pending.length; i++) {
       const item = pending[i];
-      const list2 = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
+      const list = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
       const out = [];
-      for (let k = 0;k < list2.length; k++) {
+      for (let k = 0;k < list.length; k++) {
         try {
-          out.push(await toReaction(list2[k] || {}, resolve));
+          out.push(await toReaction(list[k] || {}, resolve));
         } catch (e) {
           warnings.push(item.path + ".reactions[" + k + "]: " + (e.message || e));
         }
@@ -2061,10 +2061,10 @@
   }
   async function writeStyles(styles, counts, warnings) {
     const local = await localStyles();
-    const find = function(list2, name) {
-      for (let i = 0;i < list2.length; i++)
-        if (list2[i].name === name)
-          return list2[i];
+    const find = function(list, name) {
+      for (let i = 0;i < list.length; i++)
+        if (list[i].name === name)
+          return list[i];
       return null;
     };
     const colors = styles.colors || [];
@@ -2072,10 +2072,10 @@
       const s = colors[i];
       try {
         const value = s.value !== undefined ? s.value : s.color;
-        const list2 = Array.isArray(value) ? value : [value];
+        const list = Array.isArray(value) ? value : [value];
         const paints = [];
-        for (let k = 0;k < list2.length; k++)
-          paints.push(await toPaint(list2[k]));
+        for (let k = 0;k < list.length; k++)
+          paints.push(await toPaint(list[k]));
         let style = find(local.paint, s.name);
         if (style)
           counts.paintStyles.updated++;
@@ -2132,10 +2132,10 @@
       const s = effects[i];
       try {
         const value = s.value !== undefined ? s.value : s;
-        const list2 = Array.isArray(value) ? value : [value];
+        const list = Array.isArray(value) ? value : [value];
         const out = [];
-        for (let k = 0;k < list2.length; k++) {
-          const e = list2[k];
+        for (let k = 0;k < list.length; k++) {
+          const e = list[k];
           if (e && typeof e.blur === "number" && e.type === "layer")
             out.push({ type: "LAYER_BLUR", radius: e.blur, visible: true });
           else if (e && typeof e.blur === "number" && e.type === "background")
@@ -2273,10 +2273,10 @@
       out.warnings = ctx.warnings.slice(0, 50);
     return out;
   }
-  function countNodes(list2) {
+  function countNodes(list) {
     let n = 0;
-    for (let i = 0;i < list2.length; i++) {
-      const s = list2[i];
+    for (let i = 0;i < list.length; i++) {
+      const s = list[i];
       if (!s || typeof s !== "object")
         continue;
       n++;
@@ -2330,13 +2330,13 @@
     };
     roots.forEach(walk);
     const keys = Object.keys(wanted);
-    await Promise.all(keys.map(async function(key2) {
-      const f = wanted[key2];
+    await Promise.all(keys.map(async function(key) {
+      const f = wanted[key];
       const candidates = [f, { family: f.family, style: "Regular" }, { family: "Inter", style: f.style }, { family: "Inter", style: "Regular" }];
       for (let i = 0;i < candidates.length; i++) {
         try {
           await loadFont(candidates[i]);
-          ctx.fonts[key2] = candidates[i];
+          ctx.fonts[key] = candidates[i];
           if (i > 0)
             ctx.warnings.push('Font "' + f.family + " " + f.style + '" unavailable, used "' + candidates[i].family + " " + candidates[i].style + '"');
           return;
@@ -2506,11 +2506,11 @@
     if (s.reactions)
       ctx.reactions.push({ node, reactions: s.reactions, path });
     if (s.name) {
-      let key2 = String(s.name);
-      for (let n = 2;ctx.ids[key2]; n++)
-        key2 = s.name + " #" + n;
+      let key = String(s.name);
+      for (let n = 2;ctx.ids[key]; n++)
+        key = s.name + " #" + n;
       if (Object.keys(ctx.ids).length < 300)
-        ctx.ids[key2] = node.id;
+        ctx.ids[key] = node.id;
     }
     return node;
   }
@@ -2599,6 +2599,8 @@
     if (mode === "GRID") {
       if (await setupGrid(f, s, ctx, path))
         return;
+      if (Array.isArray(s.gridSize))
+        return placeGridItems(f, s);
       mode = "HORIZONTAL";
       s = Object.assign({}, s, { wrap: true, rowGap: s.rowGap !== undefined ? s.rowGap : s.gap, gap: s.columnGap !== undefined ? s.columnGap : s.gap });
     }
@@ -2643,7 +2645,28 @@
       return { type: "FIXED", value: parseFloat(px[1]) };
     return fallback === "FLEX" ? { type: "FLEX", value: 1 } : { type: "HUG" };
   }
+  var GRID_FALLBACK = `Figma's grid track API failed (a Figma bug: "invalid id"): grids were built as wrapping rows, or at their measured positions for imported pages.`;
+  var gridTracksBroken = false;
+  function tracksReadable(f) {
+    try {
+      const t = f.gridColumnSizes[0];
+      return !!t && typeof t.type === "string";
+    } catch (e) {
+      return false;
+    }
+  }
   async function setupGrid(f, s, ctx, path) {
+    const fallback = function() {
+      gridTracksBroken = true;
+      try {
+        f.layoutMode = "NONE";
+      } catch (e) {}
+      if (ctx.warnings.indexOf(GRID_FALLBACK) === -1)
+        ctx.warnings.push(GRID_FALLBACK);
+      return false;
+    };
+    if (gridTracksBroken)
+      return fallback();
     try {
       f.layoutMode = "GRID";
     } catch (e) {
@@ -2673,14 +2696,16 @@
     set("rows", function() {
       f.gridRowCount = rowCount;
     });
-    set("column sizes", function() {
+    if (!tracksReadable(f))
+      return fallback();
+    try {
       for (let i = 0;i < colCount; i++)
-        applyTrack(f.gridColumnSizes[i], track(cols ? cols[i] : undefined, fixedW ? "FLEX" : "HUG"));
-    });
-    set("row sizes", function() {
+        applyTrack(f, "gridColumnSizes", i, track(cols ? cols[i] : undefined, fixedW ? "FLEX" : "HUG"));
       for (let i = 0;i < rowCount; i++)
-        applyTrack(f.gridRowSizes[i], track(rows ? rows[i] : undefined, fixedH ? "FLEX" : "HUG"));
-    });
+        applyTrack(f, "gridRowSizes", i, track(rows ? rows[i] : undefined, fixedH ? "FLEX" : "HUG"));
+    } catch (e) {
+      return fallback();
+    }
     if (!fixedW)
       set("sizing", function() {
         f.layoutSizingHorizontal = "HUG";
@@ -2703,12 +2728,30 @@
       await setPadding(f, s.padding);
     return true;
   }
-  function applyTrack(t, spec) {
-    if (!t)
+  function placeGridItems(f, s) {
+    if (s.w === "hug" || s.w === undefined)
+      s.w = s.gridSize[0];
+    if (s.h === "hug" || s.h === undefined)
+      s.h = s.gridSize[1];
+    const kids = Array.isArray(s.children) ? s.children : [];
+    for (let i = 0;i < kids.length; i++) {
+      const p = kids[i] && kids[i].place;
+      if (!Array.isArray(p))
+        continue;
+      kids[i].x = p[0];
+      kids[i].y = p[1];
+      kids[i].w = p[2];
+      if (kids[i].type !== "text" || kids[i].h !== undefined)
+        kids[i].h = p[3];
+    }
+  }
+  function applyTrack(f, field, i, spec) {
+    if (!f[field][i])
       return;
-    t.type = spec.type;
-    if (spec.value !== undefined && spec.type !== "HUG")
-      t.value = spec.value;
+    if (f[field][i].type !== spec.type)
+      f[field][i].type = spec.type;
+    if (spec.value !== undefined && spec.type !== "HUG" && f[field][i].value !== spec.value)
+      f[field][i].value = spec.value;
   }
   function spanOf(s, axis) {
     if (!s || typeof s !== "object")
@@ -2838,13 +2881,13 @@
     } else if (/^[0-9a-f]{40}$/i.test(ref)) {
       comp = await figma.importComponentByKeyAsync(ref);
     } else {
-      const list2 = await localComponents();
-      for (let i = 0;i < list2.length && !comp; i++)
-        if (list2[i].name === ref)
-          comp = list2[i];
-      for (let i = 0;i < list2.length && !comp; i++)
-        if (list2[i].name.toLowerCase() === ref.toLowerCase())
-          comp = list2[i];
+      const list = await localComponents();
+      for (let i = 0;i < list.length && !comp; i++)
+        if (list[i].name === ref)
+          comp = list[i];
+      for (let i = 0;i < list.length && !comp; i++)
+        if (list[i].name.toLowerCase() === ref.toLowerCase())
+          comp = list[i];
     }
     if (!comp)
       throw codeError(path + ': component "' + ref + '" not found. Use get_design_system to list components.', "NOT_FOUND");
@@ -2923,9 +2966,9 @@
           const comp = await findComponent(String(def.default), path + ".properties." + name);
           const main = comp.type === "COMPONENT_SET" ? comp.defaultVariant : comp;
           const preferred = [];
-          const list2 = Array.isArray(def.preferred) ? def.preferred : [];
-          for (let k = 0;k < list2.length; k++) {
-            const p = await findComponent(String(list2[k]), path + ".properties." + name);
+          const list = Array.isArray(def.preferred) ? def.preferred : [];
+          for (let k = 0;k < list.length; k++) {
+            const p = await findComponent(String(list[k]), path + ".properties." + name);
             preferred.push({ type: p.type === "COMPONENT_SET" ? "COMPONENT_SET" : "COMPONENT", key: p.key });
           }
           keys[name] = owner.addComponentProperty(name, "INSTANCE_SWAP", main.id, preferred.length ? { preferredValues: preferred } : undefined);
@@ -3065,10 +3108,10 @@
         await node.setStrokeStyleIdAsync(style.id);
       return;
     }
-    const list2 = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
+    const list = value === null || value === "none" ? [] : Array.isArray(value) ? value : [value];
     const paints = [];
-    for (let i = 0;i < list2.length; i++)
-      paints.push(await toPaint(list2[i], images));
+    for (let i = 0;i < list.length; i++)
+      paints.push(await toPaint(list[i], images));
     node[field] = paints;
   }
   var FITS = { fill: "FILL", cover: "FILL", fit: "FIT", contain: "FIT", crop: "CROP", tile: "TILE" };
@@ -3127,10 +3170,13 @@
     const right = v[1] === undefined ? v[0] : v[1];
     const bottom = v[2] === undefined ? v[0] : v[2];
     const left = v[3] === undefined ? right : v[3];
-    await setNumber(f, "paddingTop", top);
-    await setNumber(f, "paddingRight", right);
-    await setNumber(f, "paddingBottom", bottom);
-    await setNumber(f, "paddingLeft", left);
+    const clamp = function(x) {
+      return typeof x === "number" ? Math.max(0, x) : x;
+    };
+    await setNumber(f, "paddingTop", clamp(top));
+    await setNumber(f, "paddingRight", clamp(right));
+    await setNumber(f, "paddingBottom", clamp(bottom));
+    await setNumber(f, "paddingLeft", clamp(left));
   }
   function lineHeight(v) {
     if (v === "auto")
@@ -3614,8 +3660,8 @@
     }
     return { file, fit: paint.scaleMode === "FIT" ? "contain" : paint.scaleMode === "TILE" ? "tile" : "cover" };
   }
-  function tracks(list3) {
-    return (list3 || []).map(function(t) {
+  function tracks(list) {
+    return (list || []).map(function(t) {
       return t.type === "FIXED" ? round(t.value) + "px" : t.type === "HUG" ? "auto" : (t.value || 1) + "fr";
     });
   }
@@ -3849,9 +3895,9 @@
       });
     }
     if (include.indexOf("components") !== -1) {
-      const list3 = await localComponents();
-      counts.components = list3.length;
-      out.components = list3.slice(0, limit).map(function(c) {
+      const list = await localComponents();
+      counts.components = list.length;
+      out.components = list.slice(0, limit).map(function(c) {
         const item = { name: c.name, id: c.id, page: (pageOf(c) || { name: "?" }).name };
         if (c.type === "COMPONENT_SET") {
           const defs = c.componentPropertyDefinitions;
@@ -3939,10 +3985,10 @@
         }
         collName[v.variableCollectionId] = collection;
       }
-      const out2 = { alias: { collection, name: v.name } };
+      const out = { alias: { collection, name: v.name } };
       if (v.remote)
-        out2.alias.remote = true;
-      return out2;
+        out.alias.remote = true;
+      return out;
     };
     const value = async function(raw, type) {
       if (raw && typeof raw === "object" && raw.type === "VARIABLE_ALIAS")
@@ -3961,7 +4007,7 @@
       const modes = col.modes.slice().sort(function(a, b) {
         return (a.modeId === col.defaultModeId ? 0 : 1) - (b.modeId === col.defaultModeId ? 0 : 1);
       });
-      const list3 = [];
+      const list = [];
       for (let i = 0;i < vars.length; i++) {
         const v = vars[i];
         if (v.variableCollectionId !== col.id)
@@ -3976,14 +4022,14 @@
           item.scopes = v.scopes.slice();
         if (v.hiddenFromPublishing)
           item.hidden = true;
-        list3.push(item);
+        list.push(item);
       }
       outCollections.push({
         name: col.name,
         modes: modes.map(function(m) {
           return m.name;
         }),
-        variables: list3
+        variables: list
       });
     }
     const styles = await localStyles();
@@ -4053,7 +4099,7 @@
     const effect = [];
     for (let i = 0;i < styles.effect.length; i++) {
       const s = styles.effect[i];
-      const list3 = [];
+      const list = [];
       for (let k = 0;k < s.effects.length; k++) {
         const e = s.effects[k];
         if (e.visible === false)
@@ -4064,14 +4110,14 @@
             sh.inner = true;
           if (e.boundVariables && e.boundVariables.color)
             sh.colorVariable = (await aliasOf(e.boundVariables.color.id)).alias;
-          list3.push(sh);
+          list.push(sh);
         } else {
-          list3.push({ type: e.type === "LAYER_BLUR" ? "layer" : "background", blur: round(e.radius) });
+          list.push({ type: e.type === "LAYER_BLUR" ? "layer" : "background", blur: round(e.radius) });
         }
       }
-      if (!list3.length)
+      if (!list.length)
         continue;
-      const item = { name: s.name, value: list3 };
+      const item = { name: s.name, value: list };
       if (s.description)
         item.description = s.description;
       effect.push(item);
@@ -4207,12 +4253,12 @@
     const tree = await walk2(node, null, ctx);
     return { tree, images: ctx.images, nodes: ctx.count, truncated: ctx.truncated, fileName: figma.root.name };
   }
-  function paints(list3) {
-    if (!list3 || list3 === figma.mixed)
+  function paints(list) {
+    if (!list || list === figma.mixed)
       return [];
     const out = [];
-    for (let i = 0;i < list3.length; i++) {
-      const pt = list3[i];
+    for (let i = 0;i < list.length; i++) {
+      const pt = list[i];
       if (pt.visible === false)
         continue;
       const o = { type: pt.type, opacity: pt.opacity === undefined ? 1 : round(pt.opacity) };
@@ -4314,7 +4360,13 @@
       const image = figma.getImageByHash(h);
       if (!image)
         continue;
-      const bytes = await image.getBytesAsync();
+      let bytes;
+      try {
+        bytes = await image.getBytesAsync();
+      } catch (e) {
+        out.rasterize = true;
+        continue;
+      }
       if (ctx.imageBytes + bytes.length > 40 << 20)
         continue;
       ctx.imageBytes += bytes.length;
@@ -4386,22 +4438,39 @@
       })
     };
   }
+  function withTimeout(p, ms, message) {
+    return new Promise(function(resolve, reject) {
+      const timer = setTimeout(function() {
+        reject(new Error(message));
+      }, ms);
+      p.then(function(v) {
+        clearTimeout(timer);
+        resolve(v);
+      }, function(e) {
+        clearTimeout(timer);
+        reject(e);
+      });
+    });
+  }
   async function robloxImages(p) {
     const items = Array.isArray(p.items) ? p.items : [];
     const out = [];
     for (let i = 0;i < items.length; i++) {
       const it = items[i];
-      const scale = Math.max(1, Math.min(4, Number(it.scale) || 2));
+      let scale = Math.max(1, Math.min(4, Number(it.scale) || 2));
       let temp = null;
       try {
         let node = await getNode(it.id);
         if (it.mode === "panel" || it.mode === "shadow") {
           temp = node.clone();
+          figma.currentPage.appendChild(temp);
           if ("children" in temp)
             for (let k = temp.children.length - 1;k >= 0; k--)
               temp.children[k].remove();
           if (it.mode === "panel")
-            temp.effects = [];
+            temp.effects = node.effects.filter(function(e) {
+              return e.type !== "DROP_SHADOW";
+            });
           else {
             temp.effects = node.effects.filter(function(e) {
               return e.type === "DROP_SHADOW" && e.visible !== false;
@@ -4410,7 +4479,10 @@
           }
           node = temp;
         }
-        const bytes = await node.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: scale } });
+        const box = node.absoluteRenderBounds || node.absoluteBoundingBox;
+        if (box)
+          scale = Math.min(scale, Math.floor(1024 / Math.max(1, box.width, box.height) * 1000) / 1000);
+        const bytes = await withTimeout(node.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: scale } }), 20000, "export timed out");
         const rb = node.absoluteRenderBounds || node.absoluteBoundingBox;
         const bb = node.absoluteBoundingBox;
         out.push({
@@ -4500,7 +4572,7 @@
     finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
   }
   // package.json
-  var version = "1.14.0";
+  var version = "1.14.2";
 
   // plugin/code.ts
   var DEFAULT_SIZE = { width: 340, height: 540 };
@@ -4783,8 +4855,8 @@
       const m = /line (\d+)/i.exec(String(e && e.message));
       return m ? Number(m[1]) : undefined;
     }
-    const line2 = raw - lineBase - offset;
-    return line2 >= 1 ? line2 : undefined;
+    const line = raw - lineBase - offset;
+    return line >= 1 ? line : undefined;
   }
   async function runScript(p, timeoutMs) {
     const logs = [];

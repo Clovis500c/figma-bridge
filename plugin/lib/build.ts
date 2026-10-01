@@ -418,6 +418,7 @@ async function setupLayout(f: FrameNode | ComponentSetNode, s: any, ctx: Ctx, pa
   f.clipsContent = !!s.clip;
   if (mode === "GRID") {
     if (await setupGrid(f, s, ctx, path)) return;
+    if (Array.isArray(s.gridSize)) return placeGridItems(f, s);
     mode = "HORIZONTAL";
     s = Object.assign({}, s, { wrap: true, rowGap: s.rowGap !== undefined ? s.rowGap : s.gap, gap: s.columnGap !== undefined ? s.columnGap : s.gap });
   }
@@ -457,8 +458,33 @@ function track(v: any, fallback: "FLEX" | "HUG"): { type: "FLEX" | "FIXED" | "HU
   return fallback === "FLEX" ? { type: "FLEX", value: 1 } : { type: "HUG" };
 }
 
-/** Returns false when this Figma version has no grid auto-layout (the caller falls back to a wrapping row). */
+const GRID_FALLBACK = "Figma's grid track API failed (a Figma bug: \"invalid id\"): grids were built as wrapping rows, or at their measured positions for imported pages.";
+
+// Figma's GridTrackSize objects can fail with "Attempted to invoke callback with invalid id", sometimes only after
+// a number of calls in the same session. A grid whose tracks can't be read lays its cells out in the wrong place,
+// so every grid is checked, and after the first failure grids are skipped for the rest of the session.
+let gridTracksBroken = false;
+
+function tracksReadable(f: any): boolean {
+  try {
+    const t = f.gridColumnSizes[0];
+    return !!t && typeof t.type === "string";
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Returns false when grid auto-layout is unavailable or unreliable (the caller falls back to a wrapping row). */
 async function setupGrid(f: any, s: any, ctx: Ctx, path: string): Promise<boolean> {
+  const fallback = function () {
+    gridTracksBroken = true;
+    try {
+      f.layoutMode = "NONE";
+    } catch (e) {}
+    if (ctx.warnings.indexOf(GRID_FALLBACK) === -1) ctx.warnings.push(GRID_FALLBACK);
+    return false;
+  };
+  if (gridTracksBroken) return fallback();
   try {
     f.layoutMode = "GRID";
   } catch (e) {
@@ -487,13 +513,15 @@ async function setupGrid(f: any, s: any, ctx: Ctx, path: string): Promise<boolea
   set("rows", function () {
     f.gridRowCount = rowCount;
   });
+  if (!tracksReadable(f)) return fallback();
   // Flexible tracks need a fixed container size; otherwise tracks hug their content.
-  set("column sizes", function () {
-    for (let i = 0; i < colCount; i++) applyTrack(f.gridColumnSizes[i], track(cols ? cols[i] : undefined, fixedW ? "FLEX" : "HUG"));
-  });
-  set("row sizes", function () {
-    for (let i = 0; i < rowCount; i++) applyTrack(f.gridRowSizes[i], track(rows ? rows[i] : undefined, fixedH ? "FLEX" : "HUG"));
-  });
+  // A failed track write leaves a grid that misplaces and rejects its children: fall back instead.
+  try {
+    for (let i = 0; i < colCount; i++) applyTrack(f, "gridColumnSizes", i, track(cols ? cols[i] : undefined, fixedW ? "FLEX" : "HUG"));
+    for (let i = 0; i < rowCount; i++) applyTrack(f, "gridRowSizes", i, track(rows ? rows[i] : undefined, fixedH ? "FLEX" : "HUG"));
+  } catch (e) {
+    return fallback();
+  }
   if (!fixedW) set("sizing", function () {
     f.layoutSizingHorizontal = "HUG";
   });
@@ -511,10 +539,26 @@ async function setupGrid(f: any, s: any, ctx: Ctx, path: string): Promise<boolea
   return true;
 }
 
-function applyTrack(t: any, spec: { type: string; value?: number }) {
-  if (!t) return;
-  t.type = spec.type;
-  if (spec.value !== undefined && spec.type !== "HUG") t.value = spec.value;
+/** Fallback for imported grids: the measured boxes (gridSize, children place) as free positions. */
+function placeGridItems(f: FrameNode | ComponentSetNode, s: any) {
+  if (s.w === "hug" || s.w === undefined) s.w = s.gridSize[0];
+  if (s.h === "hug" || s.h === undefined) s.h = s.gridSize[1];
+  const kids: any[] = Array.isArray(s.children) ? s.children : [];
+  for (let i = 0; i < kids.length; i++) {
+    const p = kids[i] && kids[i].place;
+    if (!Array.isArray(p)) continue;
+    kids[i].x = p[0];
+    kids[i].y = p[1];
+    kids[i].w = p[2];
+    if (kids[i].type !== "text" || kids[i].h !== undefined) kids[i].h = p[3];
+  }
+}
+
+// A GridTrackSize object goes stale once one of its properties changes: read the track again for every write.
+function applyTrack(f: any, field: "gridColumnSizes" | "gridRowSizes", i: number, spec: { type: string; value?: number }) {
+  if (!f[field][i]) return;
+  if (f[field][i].type !== spec.type) f[field][i].type = spec.type;
+  if (spec.value !== undefined && spec.type !== "HUG" && f[field][i].value !== spec.value) f[field][i].value = spec.value;
 }
 
 function spanOf(s: any, axis: "col" | "row"): number {
@@ -924,10 +968,14 @@ async function setPadding(f: FrameNode | ComponentSetNode, p: any) {
   const right = v[1] === undefined ? v[0] : v[1];
   const bottom = v[2] === undefined ? v[0] : v[2];
   const left = v[3] === undefined ? right : v[3];
-  await setNumber(f, "paddingTop", top);
-  await setNumber(f, "paddingRight", right);
-  await setNumber(f, "paddingBottom", bottom);
-  await setNumber(f, "paddingLeft", left);
+  // Figma rejects negative padding (web layouts can produce it from negative margins).
+  const clamp = function (x: any) {
+    return typeof x === "number" ? Math.max(0, x) : x;
+  };
+  await setNumber(f, "paddingTop", clamp(top));
+  await setNumber(f, "paddingRight", clamp(right));
+  await setNumber(f, "paddingBottom", clamp(bottom));
+  await setNumber(f, "paddingLeft", clamp(left));
 }
 
 export function lineHeight(v: any): LineHeight {

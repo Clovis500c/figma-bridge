@@ -44,6 +44,8 @@ export interface RawNode {
   autoWidth?: boolean;
   src?: string;
   svg?: string;
+  /** Raster only: marks the element in the page so it can be pictured on its own. */
+  ref?: number;
 }
 
 export interface Snapshot {
@@ -264,6 +266,14 @@ export function snapshot(opts: SnapshotOptions): Snapshot {
   }
 
   const SKIP = ["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "HEAD", "META", "LINK", "TITLE", "BASE"];
+  /** Rotated or skewed: frames can't reproduce it, a picture can. */
+  const skewed = (t: string) => {
+    if (!t || t === "none") return false;
+    const m = /^matrix(([^)]+))$/.exec(t);
+    if (!m) return true;
+    const v = m[1]!.split(",").map(Number);
+    return Math.abs(v[1]!) > 0.001 || Math.abs(v[2]!) > 0.001;
+  };
   const RASTER = ["CANVAS", "VIDEO", "IFRAME", "OBJECT", "EMBED", "AUDIO", "MATH"];
 
   /** Inline-level element that only carries text styling: its text joins the parent's runs. */
@@ -460,9 +470,10 @@ export function snapshot(opts: SnapshotOptions): Snapshot {
     }
     const nativeControl =
       (tag === "input" && /^(checkbox|radio|range|color|file)$/i.test((el as HTMLInputElement).type)) || (tag === "select" && cs.appearance !== "none");
-    if (RASTER.indexOf(el.tagName) !== -1 || nativeControl) {
+    if (RASTER.indexOf(el.tagName) !== -1 || nativeControl || (skewed(cs.transform) && !(el.textContent || "").trim())) {
       if (box.w < 0.5 || box.h < 0.5) return [];
-      return [{ kind: "raster", tag, name, box, css: cssOf(cs), children: [] }];
+      el.setAttribute("data-fb-pic", String(count));
+      return [{ kind: "raster", tag, name, box, css: cssOf(cs), children: [], ref: count }];
     }
     const node: RawNode = { kind: "box", tag, name, box, css: cssOf(cs), children: [] };
     if (tag === "input" || tag === "textarea") {

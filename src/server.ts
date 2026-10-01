@@ -188,6 +188,7 @@ const INSTRUCTIONS = [
   "Workflow:",
   "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
   "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
+  "Name every layer by its role, like a design system would: Header, NavBar, HeroSection, Content, PricingCard, CardTitle, Price, PrimaryButton, Avatar & Info, Icon/Search; components as Category/Variant (Button/Primary). Never leave Frame 12 or Rectangle 3: names become class names in code and instance names in Roblox.",
   "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
   "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again. audit {scope:'design-system'} scores the file's design system; audit {fix:true} binds raw values to variables and styles.",
   "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",

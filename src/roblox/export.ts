@@ -51,17 +51,17 @@ export async function exportRoblox(args: ExportRobloxArgs, deps: ExportRobloxDep
   const warnings: string[] = [];
   if (t.truncated) warnings.push(`Stopped after ${t.nodes} layers: export a smaller frame for the rest.`);
 
-  // Pictures of what Roblox can't draw, taken by the plugin at 2×, 20 per call.
+  // Pictures of what Roblox can't draw, taken by the plugin at 2× (less for large ones), 20 per call.
   const wanted = pictureRequests(t.tree, opts);
-  const pictures = new Map<string, { b64: string; offset: { x: number; y: number }; size: { w: number; h: number } }>();
+  const pictures = new Map<string, { b64: string; offset: { x: number; y: number }; size: { w: number; h: number }; scale?: number }>();
   for (let i = 0; i < wanted.length; i += 20) {
-    const r = await deps.request<{ images: { id: string; mode: string; b64?: string; error?: string; offset: { x: number; y: number }; size: { w: number; h: number } }[] }>(
+    const r = await deps.request<{ images: { id: string; mode: string; b64?: string; error?: string; offset: { x: number; y: number }; size: { w: number; h: number }; scale?: number }[] }>(
       "roblox_images",
       { items: wanted.slice(i, i + 20).map((w) => ({ ...w, scale: opts.scale })) },
       120_000,
     );
     for (const img of r.images) {
-      if (img.b64) pictures.set(`${img.id}:${img.mode}`, { b64: img.b64, offset: img.offset, size: img.size });
+      if (img.b64) pictures.set(`${img.id}:${img.mode}`, { b64: img.b64, offset: img.offset, size: img.size, scale: img.scale });
       else warnings.push(`Picture of ${img.id} failed: ${img.error}`);
     }
   }
@@ -86,7 +86,14 @@ export async function exportRoblox(args: ExportRobloxArgs, deps: ExportRobloxDep
   for (const w of wanted) {
     const p = pictures.get(`${w.id}:${w.mode}`);
     if (!p) continue;
-    add(`${w.id}:${w.mode}`, new Uint8Array(Buffer.from(p.b64, "base64")), { nodeId: w.id, layer: names.get(w.id) ?? w.id, kind: "picture", mode: w.mode }, "png", { offset: p.offset, size: p.size });
+    const bytes = new Uint8Array(Buffer.from(p.b64, "base64"));
+    const info = imageInfo(bytes);
+    add(`${w.id}:${w.mode}`, bytes, { nodeId: w.id, layer: names.get(w.id) ?? w.id, kind: "picture", mode: w.mode }, "png", {
+      offset: p.offset,
+      size: p.size,
+      scale: p.scale,
+      ...(info ? { px: { w: info.width, h: info.height } } : {}),
+    });
   }
   for (const hash of imageHashes(t.tree)) {
     const b64 = t.images[hash];

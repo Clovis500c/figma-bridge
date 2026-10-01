@@ -136,7 +136,9 @@ describe("roblox_images", () => {
     ]);
     expect(r.images[2]).toMatchObject({ offset: { x: -10, y: -4 }, size: { w: 320, h: 220 } });
     expect(r.images[3]).toMatchObject({ id: "9:9", error: expect.stringContaining("Node not found") });
-    expect(exported[1]).toMatchObject({ effects: [], children: 0, settings: { format: "PNG", constraint: { type: "SCALE", value: 3 } } });
+    // Panels keep their inner effects; only drop shadows move to their own picture.
+    expect(exported[1].effects.map((e: any) => e.type)).toEqual(["LAYER_BLUR"]);
+    expect(exported[1]).toMatchObject({ children: 0, settings: { format: "PNG", constraint: { type: "SCALE", value: 3 } } });
     expect(exported[2].effects.map((e: any) => e.type)).toEqual(["DROP_SHADOW"]);
     expect(exported[2].strokes).toEqual([]);
     expect(copies.every((c) => c.removed)).toBe(true);

@@ -62,6 +62,29 @@ describe("mapping", () => {
     expect(pictureRequests(card, { ...OPTS, rasterize: "all" }).map((p) => p.mode)).toEqual(["panel", "full", "full", "panel", "panel"]);
   });
 
+  test("scale mode: panel pictures are stretched, since their box keeps the design proportions", () => {
+    const panel = mapCard({ rasterize: "all" }).root.children[0]!;
+    expect(panel.className).toBe("ImageLabel");
+    expect(prop(panel, "ScaleType")).toEqual({ t: "enum", e: "ScaleType", v: "Stretch" });
+    expect(prop(panel, "SliceCenter")).toBeUndefined();
+  });
+
+  test("9-slice centers follow the picture's real scale and pixel size", () => {
+    const { root } = mapToRoblox(card, { ...OPTS, mode: "hybrid", rasterize: "all" }, (key) => ({ url: `rbxassetid://${key}`, scale: 1.5, px: { w: 600, h: 450 } }));
+    const panel = root.children[0]!;
+    expect(prop(panel, "SliceScale")).toEqual({ t: "float", v: 0.6667 });
+    const rect = prop(panel, "SliceCenter") as any;
+    expect([600 - rect.x1, 450 - rect.y1]).toEqual([rect.x0, rect.y0]);
+  });
+
+  test("offset mode: fixed-size panels are stretched pictures (exact), not 9-slices", () => {
+    const fixed = { ...card, sizing: { h: "FIXED", v: "FIXED" } };
+    const { root } = mapToRoblox(fixed, { ...OPTS, mode: "offset", rasterize: "all" }, (key) => ({ url: `rbxassetid://${key}` }));
+    const panel = root.children[0]!;
+    expect(prop(panel, "ScaleType")).toEqual({ t: "enum", e: "ScaleType", v: "Stretch" });
+    expect(prop(panel, "SliceCenter")).toBeUndefined();
+  });
+
   test("scale mode (the default) has no offset anywhere", () => {
     const { root } = mapCard();
     const all = udims(root);
@@ -164,8 +187,8 @@ describe("mapping", () => {
     expect(prop(badge, "AnchorPoint")).toEqual({ t: "Vector2", x: 1, y: 0 });
     expect(prop(badge, "Position")).toEqual({ t: "UDim2", xs: 0.98, xo: 0, ys: -0.0333, yo: 0 });
     expect(prop(badge, "ZIndex")).toEqual({ t: "int", v: 5 });
-    expect(prop(badge, "ScaleType")).toEqual({ t: "enum", e: "ScaleType", v: "Slice" });
-    expect(prop(badge, "SliceCenter")).toEqual({ t: "Rect", x0: 32, y0: 27, x1: 112, y1: 29 });
+    expect(prop(badge, "ScaleType")).toEqual({ t: "enum", e: "ScaleType", v: "Stretch" });
+    expect(prop(badge, "SliceCenter")).toBeUndefined();
   });
 
   test("fill, fixed and grow in scale; hug only in offset or hybrid", () => {
@@ -211,6 +234,8 @@ describe("mapping", () => {
     expect(prop(title, "TextWrapped")).toBeUndefined();
     // Text sized to its content may grow with the screen; text in a fixed box stays at most at its design size.
     expect(prop(find(title, "UITextSizeConstraint"), "MaxTextSize")).toEqual({ t: "int", v: 48 });
+    // No floor in scale mode: Roblox hides scaled text that cannot fit at MinTextSize.
+    expect(prop(find(title, "UITextSizeConstraint"), "MinTextSize")).toEqual({ t: "int", v: 1 });
     const price = find(panel, "PriceLabel")!;
     expect(prop(price, "RichText")).toEqual({ t: "bool", v: true });
     expect(prop(price, "Text")).toEqual({ t: "string", v: '<font color="#6B7280" weight="400">Only </font>250 coins' });
@@ -369,6 +394,23 @@ describe("rbxmx", () => {
 describe("Luau", () => {
   const { root } = mapCard();
   const luau = toLuau(root, { source: 'Shop card" in "Shop UI' });
+
+  test("a large UI stays under Luau's 200 locals per function", () => {
+    const leaf = (k: number): RbxInstance => ({ className: "Frame", name: `Cell${k}`, props: [], children: [{ className: "UICorner", name: "UICorner", props: [], children: [] }] });
+    const big: RbxInstance = { className: "ScreenGui", name: "BigGui", props: [], children: [{ className: "Frame", name: "List", props: [], children: Array.from({ length: 300 }, (_, k) => leaf(k)) }] };
+    const src = toLuau(big);
+    expect(() => luaparse.parse(src, { luaVersion: "5.3" })).not.toThrow();
+    // Locals alive at once: the ones declared in every do-block still open.
+    const live: number[] = [0];
+    let peak = 0;
+    for (const line of src.split("\n").map((l) => l.trim())) {
+      if (line === "do") live.push(0);
+      else if (line === "end") live.pop();
+      else if (line.startsWith("local ")) live[live.length - 1]!++;
+      peak = Math.max(peak, live.reduce((a, b) => a + b, 0));
+    }
+    expect(peak).toBeLessThan(10);
+  });
 
   test("parses, replaces a previous copy, returns the root", () => {
     expect(() => luaparse.parse(luau, { luaVersion: "5.3" })).not.toThrow();

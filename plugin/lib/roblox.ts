@@ -114,7 +114,14 @@ async function walk(n: any, parent: any, ctx: Ctx): Promise<any> {
     if (!h || ctx.images[h] !== undefined) continue;
     const image = figma.getImageByHash(h);
     if (!image) continue;
-    const bytes = await image.getBytesAsync();
+    let bytes: Uint8Array;
+    try {
+      bytes = await image.getBytesAsync();
+    } catch (e) {
+      // Figma could not read the original file: picture the layer as it looks instead.
+      out.rasterize = true;
+      continue;
+    }
     if (ctx.imageBytes + bytes.length > 40 << 20) continue;
     ctx.imageBytes += bytes.length;
     ctx.images[h] = figma.base64Encode(bytes);
@@ -183,24 +190,48 @@ function textOf(t: TextNode) {
   };
 }
 
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise(function (resolve, reject) {
+    const timer = setTimeout(function () {
+      reject(new Error(message));
+    }, ms);
+    p.then(
+      function (v) {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      function (e) {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 /**
- * PNG pictures for export_roblox. mode "full": the layer as it looks; "panel": its own fill and stroke only
- * (no children, no effects), for a 9-slice background; "shadow": its drop shadows only.
+ * PNG pictures for export_roblox. mode "full": the layer as it looks; "panel": its own fill, stroke and
+ * inner effects (no children, no drop shadows), for a background picture; "shadow": its drop shadows only.
  */
 export async function robloxImages(p: any) {
   const items: any[] = Array.isArray(p.items) ? p.items : [];
   const out: any[] = [];
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
-    const scale = Math.max(1, Math.min(4, Number(it.scale) || 2));
+    let scale = Math.max(1, Math.min(4, Number(it.scale) || 2));
     let temp: any = null;
     try {
       let node: any = await getNode(it.id);
       if (it.mode === "panel" || it.mode === "shadow") {
         // A copy without children (and without effects, or with nothing but shadows), removed right after.
+        // On the page shown in Figma: a node on a page that isn't displayed may never finish exporting.
         temp = node.clone();
+        figma.currentPage.appendChild(temp);
         if ("children" in temp) for (let k = temp.children.length - 1; k >= 0; k--) temp.children[k].remove();
-        if (it.mode === "panel") temp.effects = [];
+        // Inner shadows are part of the panel's look (bevels, lips); drop shadows get their own picture.
+        if (it.mode === "panel")
+          temp.effects = node.effects.filter(function (e: Effect) {
+            return e.type !== "DROP_SHADOW";
+          });
         else {
           temp.effects = node.effects.filter(function (e: Effect) {
             return e.type === "DROP_SHADOW" && e.visible !== false;
@@ -209,7 +240,10 @@ export async function robloxImages(p: any) {
         }
         node = temp;
       }
-      const bytes = await node.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: scale } });
+      // Roblox shrinks images over 1024 px, which breaks 9-slice centers: stay under it.
+      const box = node.absoluteRenderBounds || node.absoluteBoundingBox;
+      if (box) scale = Math.min(scale, Math.floor((1024 / Math.max(1, box.width, box.height)) * 1000) / 1000);
+      const bytes = await withTimeout<Uint8Array>(node.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: scale } }), 20000, "export timed out");
       const rb = node.absoluteRenderBounds || node.absoluteBoundingBox;
       const bb = node.absoluteBoundingBox;
       out.push({
