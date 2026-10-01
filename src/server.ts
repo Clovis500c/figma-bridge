@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { appendFileSync, mkdirSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -90,10 +91,10 @@ async function readImageSource(source: string): Promise<Uint8Array> {
     if (bytes.length > MAX_IMAGE_BYTES) throw new BridgeError("Remote image is too large", "TOO_LARGE");
     return bytes;
   }
-  const file = Bun.file(source);
-  if (!(await file.exists())) throw new BridgeError(`File not found: ${source}`, "BAD_ARGS");
-  if (file.size > MAX_IMAGE_BYTES) throw new BridgeError(`Image is larger than ${MAX_IMAGE_BYTES >> 20} MB`, "TOO_LARGE");
-  return new Uint8Array(await file.arrayBuffer());
+  const info = await stat(source).catch(() => null);
+  if (!info?.isFile()) throw new BridgeError(`File not found: ${source}`, "BAD_ARGS");
+  if (info.size > MAX_IMAGE_BYTES) throw new BridgeError(`Image is larger than ${MAX_IMAGE_BYTES >> 20} MB`, "TOO_LARGE");
+  return new Uint8Array(await readFile(source));
 }
 
 /** Image bytes as the bridge payload; the plugin UI converts WEBP and oversized images. */
@@ -358,7 +359,7 @@ server.registerTool(
       const info = imageInfo(bytes);
       const ext = r.format === "JPG" ? "jpg" : "png";
       const path = join(OUT_DIR, `${safeName(r.name)}-${safeName(r.nodeId)}-${Date.now()}.${ext}`);
-      await Bun.write(path, bytes);
+      await writeFile(path, bytes);
       const meta = { path, nodeId: r.nodeId, name: r.name, width: info?.width, height: info?.height, bytes: bytes.length };
       const content: Content[] = [{ type: "text", text: json(meta) }];
       if (returnImage) content.push({ type: "image", data: r.bytesB64, mimeType: ext === "jpg" ? "image/jpeg" : "image/png" });
@@ -410,7 +411,7 @@ server.registerTool(
       const pct = (v: number) => Math.round(v * 10_000) / 100;
       const toLayer = (v: number, axis: "x" | "y") => Math.round((v / shot.scale + shot.offset[axis]) * 10) / 10;
       const heatmapPath = join(OUT_DIR, `compare-${safeName(shot.name)}-${Date.now()}.png`);
-      await Bun.write(heatmapPath, Buffer.from(diff.heatmap, "base64"));
+      await writeFile(heatmapPath, Buffer.from(diff.heatmap, "base64"));
       const refRatio = diff.reference.width / diff.reference.height;
       const ratio = diff.width / diff.height;
       const result: Record<string, unknown> = {
@@ -433,7 +434,7 @@ server.registerTool(
       }
       if (diff.sideBySide) {
         result.sideBySidePath = heatmapPath.replace(/\.png$/, "-side.png");
-        await Bun.write(result.sideBySidePath as string, Buffer.from(diff.sideBySide, "base64"));
+        await writeFile(result.sideBySidePath as string, Buffer.from(diff.sideBySide, "base64"));
       }
       const content: Content[] = [{ type: "text", text: json(result) }];
       if (diff.sideBySide) content.push({ type: "image", data: diff.sideBySide, mimeType: "image/png" });
@@ -598,7 +599,7 @@ server.registerTool(
   ({ path, svgString, ...rest }) =>
     track("import_svg", path ?? `${svgString?.length ?? 0} chars`, async () => {
       if (!!path === !!svgString) throw new BridgeError("Give exactly one of `path` or `svgString`.", "BAD_ARGS");
-      const svg = path ? await Bun.file(path).text() : svgString!;
+      const svg = path ? await readFile(path, "utf8") : svgString!;
       return ok(await bridge.request("import_svg", { svg, ...rest }));
     }),
 );
