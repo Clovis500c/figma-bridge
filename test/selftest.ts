@@ -2,7 +2,7 @@
 // then round-trips a script, a screenshot, an image and an SVG. Leaves the file unchanged.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -197,6 +197,17 @@ check(
   { files: exportMeta.files, assets: exportMeta.assets?.length, error: exportMeta.error },
 );
 if (exportMeta.dir) rmSync(exportMeta.dir, { recursive: true, force: true });
+const projectCopy = join(tmpdir(), `figma-bridge-selftest-project-${process.pid}`);
+cpSync(join(import.meta.dir, "fixtures", "projects", "next-shadcn"), projectCopy, { recursive: true });
+const inProject = await call("export_code", { nodeId: cardId, projectPath: projectCopy, name: "Selftest card", write: true });
+const projectFile = join(projectCopy, "src", "components", "SelftestCard.tsx");
+check(
+  "export_code (project)",
+  !inProject.isError && inProject.data.stack?.framework === "react" && existsSync(projectFile) && /export default function SelftestCard/.test(readFileSync(projectFile, "utf8")),
+  { stack: inProject.data.stack?.kind, files: inProject.data.files, error: inProject.data.error },
+);
+rmSync(projectCopy, { recursive: true, force: true });
+if (inProject.data.preview) rmSync(inProject.data.preview, { recursive: true, force: true });
 
 const saved = await call("checkpoint", { action: "save", nodeIds: [cardId], label: "selftest" });
 await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(cardId)})).name = "changed"` });

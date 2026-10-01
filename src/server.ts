@@ -10,6 +10,7 @@ import { Bridge, BridgeError } from "./bridge";
 import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { generateCode, type IrNode } from "./codegen";
+import { planProjectExport, writePlan } from "./project/plan";
 import { normalizeTokens } from "./tokens";
 import { type ExportData, exportTokenFiles, type Format, FORMATS } from "./tokens-export";
 import { importWeb } from "./web/import";
@@ -173,7 +174,7 @@ const server = new McpServer(
       "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
       "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
       "Existing website or HTML → import_web turns it into editable auto-layout frames (one per viewport); then compare against the returned reference screenshot.",
-      "When the target is unclear, wait_for_selection asks the user to pick it in Figma. prototype links screens, annotate leaves Dev Mode notes, export_code turns a frame into HTML/React.",
+      "When the target is unclear, wait_for_selection asks the user to pick it in Figma. prototype links screens, annotate leaves Dev Mode notes, export_code turns a frame into code; give it projectPath to reuse the project's components and tokens.",
       "run_script: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
       "Script helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?),",
       "utils.build(spec, {parentId}), utils.describe(nodeOrId, depth); lib.<name>(args) runs a saved snippet; console.log is returned as `logs`.",
@@ -640,41 +641,84 @@ server.registerTool(
   {
     title: "Export a layer to code",
     description:
-      "Generate front-end code from a frame or component (default: selection). framework html (a standalone page) or react (a component); " +
-      "styling css (classes named after the layers) or tailwind. Auto-layout becomes flexbox, grid auto-layout CSS grid, fill/hug sizing flex rules, " +
-      "text semantic tags (h1–h3, p, a), layers named button/nav/header/footer/section… the matching tags; colors, borders, radii and shadows " +
-      "come from Figma's own CSS (variables stay var(--…)). Images and icons are saved as files in an assets folder. " +
-      "Returns the code as text plus the folder where everything was written. Name layers well before exporting: names become class names.",
+      "Generate front-end code from a frame or component (default: selection). Auto-layout becomes flexbox, grid auto-layout CSS grid, fill/hug sizing flex rules, " +
+      "text semantic tags (h1–h3, p, a), layers named button/nav/header/footer/section… the matching tags; colors, borders, radii and shadows come from Figma's own CSS. " +
+      "Images and icons become asset files.\n" +
+      "WITH projectPath (the root of the user's app): detects the stack from package.json and config files (React, Next, Vue, Nuxt, Svelte, React Native; Tailwind v3/v4, " +
+      "CSS modules, styled-components, plain CSS; shadcn/ui, MUI, Chakra; TypeScript and path aliases), indexes the project's components and their props, and generates a " +
+      "component that imports and uses them: a Figma instance of Button with Variant=Secondary becomes <Button variant=\"secondary\">Label</Button>. Colors use the project's " +
+      "tokens (bg-primary, var(--color-primary)) and the root stretches up to its design width. Explicit mappings go in figma-bridge.map.json at the project root: " +
+      '{"components":{"Figma name":{"import":"@/components/x","name":"X","default":false,"props":{"Figma prop":"codeProp" | {"prop":"codeProp","values":{"Figma value":"code value"}}}}}}. ' +
+      "Returns the file plan (paths and code) and the assets; nothing is written to the project unless write:true (existing files are kept unless overwrite:true).\n" +
+      "WITHOUT projectPath: framework and styling as given (default html + css), files written to a temp folder. Name layers well: names become class and component names.",
     inputSchema: {
       nodeId: z.string().optional(),
-      framework: z.enum(["html", "react"]).optional().describe("Default html"),
-      styling: z.enum(["css", "tailwind"]).optional().describe("Default css"),
+      projectPath: z.string().optional().describe("Root folder of the project (where package.json is)"),
+      framework: z.enum(["html", "react", "vue", "svelte", "react-native"]).optional().describe("Default: detected from the project, else html"),
+      styling: z.enum(["css", "tailwind", "css-modules", "styled-components"]).optional().describe("Default: detected from the project, else css"),
+      name: z.string().optional().describe("Component name (default: the layer name)"),
+      outDir: z.string().optional().describe("projectPath only: folder for the component, relative to the project (default: its components folder)"),
+      write: z.boolean().optional().describe("projectPath only: write the files into the project"),
+      overwrite: z.boolean().optional().describe("With write: replace existing files that differ"),
     },
   },
-  ({ nodeId, framework = "html", styling = "css" }) =>
-    track("export_code", `${nodeId ?? "(selection)"} ${framework}/${styling}`, async () => {
+  ({ nodeId, projectPath, framework, styling, name, outDir, write, overwrite }) =>
+    track("export_code", `${nodeId ?? "(selection)"} ${projectPath ?? `${framework ?? "html"}/${styling ?? "css"}`}`, async () => {
       const r = await bridge.request<{ tree: IrNode; assets: Record<string, { b64?: string; svg?: string }>; nodes: number; truncated: boolean; warnings: string[] }>(
         "export_tree",
         { nodeId },
         120_000,
       );
       const dir = join(OUT_DIR, `export-${safeName(r.tree.name)}-${Date.now()}`);
-      mkdirSync(join(dir, "assets"), { recursive: true });
       const finalName: Record<string, string> = {};
+      const assetBytes: Record<string, Uint8Array> = {};
       for (const [file, a] of Object.entries(r.assets)) {
         const bytes = a.svg !== undefined ? Buffer.from(a.svg) : Buffer.from(a.b64 ?? "", "base64");
         const ext = a.svg !== undefined ? "svg" : imageInfo(bytes)?.format.replace("jpeg", "jpg") ?? "png";
         finalName[file] = file.replace(/\.[a-z]+$/, `.${ext}`);
-        writeFileSync(join(dir, "assets", finalName[file]!), bytes);
+        assetBytes[finalName[file]!] = bytes;
       }
-      const code = generateCode(r.tree, { framework, styling, assetPath: (f) => `assets/${finalName[f] ?? f}` });
-      for (const f of code.files) writeFileSync(join(dir, f.path), f.content);
-      const warnings = [...r.warnings, ...code.warnings];
+      const tree = renameAssets(r.tree, finalName);
+      const warnings = [...r.warnings];
       if (r.truncated) warnings.push(`Stopped after ${r.nodes} layers: export a smaller frame for the rest.`);
+
+      if (projectPath) {
+        const plan = planProjectExport(projectPath, tree, assetBytes, { framework, styling, name, outDir });
+        // A copy of the plan always goes to the temp folder, so it can be inspected without touching the project.
+        for (const f of plan.files) {
+          mkdirSync(dirname(join(dir, f.path)), { recursive: true });
+          writeFileSync(join(dir, f.path), typeof f.content === "string" ? f.content : Buffer.from(f.content));
+        }
+        const written = write ? writePlan(projectPath, plan.files, !!overwrite) : null;
+        const s = plan.stack;
+        const meta = {
+          stack: { kind: s.kind, framework: s.framework, styling: s.styling, tailwind: s.tailwind, ui: s.ui, typescript: s.typescript, componentsDir: s.componentsDir },
+          files: plan.files.filter((f) => f.kind === "code").map((f) => ({ path: f.path, ...(written ? { status: written.find((w) => w.path === f.path)?.status } : {}) })),
+          assets: plan.files.filter((f) => f.kind === "asset").map((f) => ({ path: f.path, ...(written ? { status: written.find((w) => w.path === f.path)?.status } : {}) })),
+          written: !!write,
+          preview: dir,
+          components: plan.components,
+          tokens: plan.tokens,
+          ...(plan.mapFile ? { mapFile: plan.mapFile } : {}),
+          layers: r.nodes,
+          ...(warnings.length + plan.warnings.length ? { warnings: [...warnings, ...plan.warnings].slice(0, 40) } : {}),
+          ...(write ? {} : { next: "Review the code, then call export_code again with write:true to add it to the project." }),
+        };
+        let text = plan.files.filter((f) => f.kind === "code").map((f) => `=== ${f.path} ===\n${f.content}`).join("\n");
+        if (text.length > MAX_OUTPUT_CHARS) text = text.slice(0, MAX_OUTPUT_CHARS) + `\n… truncated: the full code is in ${dir}`;
+        return { content: [{ type: "text", text: json(meta) }, { type: "text", text }] };
+      }
+
+      mkdirSync(join(dir, "assets"), { recursive: true });
+      for (const [file, bytes] of Object.entries(assetBytes)) writeFileSync(join(dir, "assets", file), bytes);
+      const fw = framework ?? "html";
+      const code = generateCode(tree, { framework: fw, styling: styling ?? "css", assetPath: (f) => `assets/${f}` });
+      for (const f of code.files) writeFileSync(join(dir, f.path), f.content);
+      warnings.push(...code.warnings);
       const meta = {
         dir,
         files: code.files.map((f) => f.path),
-        assets: Object.values(finalName).map((f) => `assets/${f}`),
+        assets: Object.keys(assetBytes).map((f) => `assets/${f}`),
         fonts: code.fonts,
         layers: r.nodes,
         ...(warnings.length ? { warnings } : {}),
@@ -684,6 +728,15 @@ server.registerTool(
       return { content: [{ type: "text", text: json(meta) }, { type: "text", text }] };
     }),
 );
+
+/** Asset file names in the tree, after the server picked their real extension. */
+function renameAssets(n: IrNode, names: Record<string, string>): IrNode {
+  const out: IrNode = { ...n };
+  if (n.asset) out.asset = { ...n.asset, file: names[n.asset.file] ?? n.asset.file };
+  if (n.bgImage) out.bgImage = { ...n.bgImage, file: names[n.bgImage.file] ?? n.bgImage.file };
+  if (n.children) out.children = n.children.map((c) => renameAssets(c, names));
+  return out;
+}
 
 server.registerTool(
   "get_css",

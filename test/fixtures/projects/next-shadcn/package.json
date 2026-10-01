@@ -1,0 +1,15 @@
+{
+  "name": "next-shadcn-fixture",
+  "private": true,
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "next": "15.5.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.0"
+  }
+}

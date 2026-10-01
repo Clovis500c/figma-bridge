@@ -126,6 +126,10 @@ async function walk(n: any, parent: any, ctx: Ctx): Promise<any> {
     if (n.gridRowSpan > 1) out.rowSpan = n.gridRowSpan;
   }
   if (n.rotation && Math.abs(n.rotation) > 0.01 && n.type !== "TEXT") out.rotation = round(n.rotation);
+  if (n.type === "INSTANCE") {
+    const info = await instanceInfo(n);
+    if (info) out.component = info;
+  }
 
   let css: any = {};
   try {
@@ -227,4 +231,29 @@ function textOf(t: TextNode) {
       return seg;
     }),
   };
+}
+
+/** The instance's component (its set for a variant) and property values, so code can use a matching component. */
+async function instanceInfo(n: InstanceNode): Promise<any> {
+  let main: ComponentNode | null = null;
+  try {
+    main = await n.getMainComponentAsync();
+  } catch (e) {}
+  if (!main) return null;
+  const set = main.parent && main.parent.type === "COMPONENT_SET" ? main.parent.name : null;
+  const props: { [name: string]: string | boolean } = {};
+  const defs = n.componentProperties;
+  const keys = Object.keys(defs);
+  for (let i = 0; i < keys.length; i++) {
+    const d = defs[keys[i]];
+    if (d.type === "INSTANCE_SWAP") continue;
+    props[keys[i].split("#")[0]] = d.value as string | boolean;
+  }
+  const info: any = { name: set || main.name, props: props };
+  if (set) info.variant = main.name;
+  const text = n.findOne(function (t) {
+    return t.type === "TEXT" && t.visible;
+  }) as TextNode | null;
+  if (text && text.characters.trim()) info.text = text.characters.trim().slice(0, 200);
+  return info;
 }

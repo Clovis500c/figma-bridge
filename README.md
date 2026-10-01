@@ -20,7 +20,7 @@ and any other MCP client.
 - **Score and fix design system health**: token coverage, contrast, text styles, detached instances, duplicates, naming, with safe automatic fixes.
 - **Read existing designs** compactly, search every page, and reuse the file's design system.
 - **Check its own work** with screenshots, a design audit, and a pixel diff against a mockup.
-- **Hand off**: Dev Mode annotations and export to HTML or React (CSS or Tailwind).
+- **Hand off to your codebase**: export a frame into your project with its own components, tokens and stack (React, Next, Vue, Svelte, React Native; Tailwind, CSS modules, styled-components; shadcn, MUI, Chakra) ([details](docs/export-code.md)), plus Dev Mode annotations.
 - **200 000+ icons** through Iconify, checkpoints to roll back, and a library of reusable scripts.
 - **Zero-friction connection**: the plugin connects and reconnects on its own. Each AI command is one Ctrl+Z step, and you can cancel it from the plugin.
 
@@ -133,7 +133,7 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 | `wait_for_selection` | Ask the user to select layers and wait for it |
 | `prototype` | Link frames (click, hover, transitions) and set flow starting points |
 | `annotate` | Add, list or clear Dev Mode annotations |
-| `export_code` | Export a frame to HTML or React, with CSS or Tailwind |
+| `export_code` | Export a frame to code; with `projectPath`, code that uses the project's components and tokens |
 | `insert_icon` · `search_icons` | Iconify icons as editable vectors |
 | `place_image` · `import_svg` | Images from disk or URL, SVG as vectors |
 | `checkpoint` | Save layers and restore them later |

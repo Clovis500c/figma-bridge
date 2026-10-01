@@ -1,0 +1,10 @@
+{
+  // Next.js defaults
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "preserve",
+    "paths": {
+      "@/*": ["./src/*"], /* the src folder */
+    },
+  },
+}

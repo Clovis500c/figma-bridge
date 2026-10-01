@@ -1,8 +1,25 @@
-// export_code, server side: turns the layer tree exported by the plugin into HTML or React,
-// styled with plain CSS or Tailwind classes. Auto-layout maps to flexbox/grid, text to semantic tags.
+// export_code, server side: turns the layer tree exported by the plugin into HTML, React, Vue, Svelte or
+// React Native, styled with CSS, CSS modules, styled-components or Tailwind. Auto-layout maps to flexbox/grid,
+// text to semantic tags; in a project, instances become the project's own components and colors its tokens.
+import { cssColor } from "./tokens";
 
-export type Framework = "html" | "react";
-export type Styling = "css" | "tailwind";
+export type Framework = "html" | "react" | "vue" | "svelte" | "react-native";
+export type Styling = "css" | "tailwind" | "css-modules" | "styled-components";
+
+/** An instance rendered as an existing code component. */
+export interface ComponentUse {
+  name: string;
+  importFrom: string;
+  isDefault: boolean;
+  props: [string, string | boolean][];
+  children?: string;
+}
+
+/** Project design tokens, looked up by color or by Figma variable name. */
+export interface TokenLookup {
+  color(hex: string): { cssVar: string; tw?: string } | null;
+  byName(figmaName: string): { cssVar: string; tw?: string; kind: string } | null;
+}
 
 export interface Segment {
   text: string;
@@ -50,6 +67,8 @@ export interface IrNode {
   text?: { autoResize: string; align: string; valign: string; truncate: number; segments: Segment[] };
   asset?: { file: string; kind: "svg" | "image"; fit?: string };
   bgImage?: { file: string; fit: string };
+  /** Instances: the main component (or its set) and its property values. */
+  component?: { name: string; set?: string; props: Record<string, string | boolean>; text?: string };
   children?: IrNode[];
 }
 
@@ -63,6 +82,14 @@ export interface CodegenOptions {
   styling: Styling;
   /** Final asset path for each file name the plugin gave, e.g. "hero.img" → "assets/hero.png". */
   assetPath: (file: string) => string;
+  /** Import images (bundlers) instead of referring to their path; default: true except for html. */
+  assetImports?: boolean;
+  componentName?: string;
+  typescript?: boolean;
+  /** Root keeps its design width as a max-width and stretches below it. */
+  responsive?: boolean;
+  resolveComponent?: (n: IrNode) => ComponentUse | null;
+  tokens?: TokenLookup;
 }
 
 type Style = Record<string, string>;
@@ -74,6 +101,8 @@ interface El {
   attrs: [string, string][];
   /** React only: inline style entries whose value is a JS expression. */
   inline?: [string, string][];
+  /** Props of a mapped code component (booleans stay booleans). */
+  props?: [string, string | boolean][];
   children: (El | string)[];
 }
 
@@ -138,6 +167,14 @@ function diffStyle(base: Style, s: Style): Style {
   return out;
 }
 
+/** Rewrites var(--figma, #hex) and #hex / rgb() colors in a CSS value; `swap` returns null to keep one. */
+export function replaceColors(value: string, swap: (hex: string | null, figmaVar: string | null) => string | null): string {
+  return value.replace(/var\(--([\w-]+)\s*,\s*([^()]*(?:\([^()]*\))?[^()]*)\)|#[0-9a-fA-F]{3,8}\b|rgba?\([^()]*\)/g, (m, name?: string, fallback?: string) => {
+    if (name) return swap(fallback ? cssColor(fallback.trim()) : null, name) ?? m;
+    return swap(cssColor(m), null) ?? m;
+  });
+}
+
 class Generator {
   private classes = new Map<string, number>();
   private images = new Map<string, string>(); // asset path → React import name
@@ -153,9 +190,30 @@ class Generator {
     return n > 1 ? `${base}-${n}` : base;
   }
 
+  /** Code components used, by import + name. */
+  readonly uses = new Map<string, ComponentUse>();
+
+  private named() {
+    return this.opts.styling !== "tailwind";
+  }
+
+  /** Colors → project tokens: var(--token) in CSS; Tailwind gets them in tailwind(). */
+  private tokenize(st: Style): Style {
+    const tokens = this.opts.tokens;
+    if (!tokens || this.opts.styling === "tailwind") return st;
+    for (const [k, v] of Object.entries(st)) {
+      if (!/^(background|color|border|outline|box-shadow|fill|stroke)/.test(k)) continue;
+      st[k] = replaceColors(v, (hex, name) => {
+        const t = (name ? tokens.byName(name) : null) ?? (hex ? tokens.color(hex) : null);
+        return t && t.cssVar ? `var(--${t.cssVar})` : null;
+      });
+    }
+    return st;
+  }
+
   private imageRef(file: string): string {
     const path = this.opts.assetPath(file);
-    if (this.opts.framework !== "react") return path;
+    if (!this.importsAssets()) return path;
     let name = this.images.get(path);
     if (!name) {
       name = camel("img " + file.replace(/\.[a-z]+$/, ""));
@@ -176,8 +234,14 @@ class Generator {
       if (!isText || n.text!.autoResize === "NONE" || n.text!.autoResize === "TRUNCATE") st2.height = px(n.h);
     };
     if (!parent) {
-      if (n.sizeH !== "hug") fixedW(st);
-      if (n.sizeV !== "hug") fixedH(st);
+      if (this.opts.responsive && n.sizeH !== "hug" && !isText) {
+        st.width = "100%";
+        st["max-width"] = px(n.w);
+        if (n.sizeV === "fixed") st["min-height"] = px(n.h);
+      } else {
+        if (n.sizeH !== "hug") fixedW(st);
+        if (n.sizeV !== "hug") fixedH(st);
+      }
     } else if (n.absolute || !mode) {
       st.position = "absolute";
       st.left = px(n.x);
@@ -254,6 +318,15 @@ class Generator {
   }
 
   element(n: IrNode, parent: IrNode | null, parentTag: string): El {
+    const use = n.component && this.opts.resolveComponent ? this.opts.resolveComponent(n) : null;
+    if (use) {
+      // An existing component: only where it sits and how big it is comes from the design.
+      const st: Style = {};
+      this.sizeAndPosition(n, parent, st);
+      if (st.height && !st.position) delete st.height;
+      this.uses.set(`${use.importFrom}|${use.name}`, use);
+      return { tag: use.name, cls: this.named() && Object.keys(st).length ? this.className(n.name, "item") : "", style: st, attrs: [], props: use.props, children: use.children ? [use.children] : [] };
+    }
     const inline = INLINE_PARENTS.includes(parentTag);
     const tag = this.tagFor(n, inline);
     const st: Style = {};
@@ -266,7 +339,8 @@ class Generator {
     if (tag === "button" || tag === "a") st.cursor = "pointer";
     if ((tag === "button" || (tag === "a" && !n.text)) && !st.display) st.display = "block";
 
-    const el: El = { tag, cls: this.opts.styling === "css" ? this.className(n.name, tag) : "", style: st, attrs: [], children: [] };
+    this.tokenize(st);
+    const el: El = { tag, cls: this.named() ? this.className(n.name, tag) : "", style: st, attrs: [], children: [] };
 
     if (n.asset) {
       el.attrs.push(["src", this.imageRef(n.asset.file)], ["alt", n.asset.kind === "svg" ? "" : n.name]);
@@ -279,7 +353,8 @@ class Generator {
       st["background-position"] = "center";
       if (n.bgImage.fit !== "tile") st["background-repeat"] = "no-repeat";
       const ref = this.imageRef(n.bgImage.file);
-      if (this.opts.framework === "react") el.inline = [["backgroundImage", "`url(${" + ref + "})`"]];
+      if (this.importsAssets() && this.opts.framework !== "react-native") el.inline = [["backgroundImage", ref]];
+      else if (this.opts.framework === "react-native") this.warnings.push(`${n.name}: background images are not exported to React Native`);
       else st["background-image"] = `url('${ref}')`;
     }
     if (n.text) {
@@ -295,7 +370,7 @@ class Generator {
   private textContent(n: IrNode, el: El) {
     const t = n.text!;
     const segs = t.segments.length ? t.segments : [{ text: "", family: "Inter", style: "Regular", weight: 400, size: 14 }];
-    const base = segmentStyle(dominant(segs));
+    const base = this.tokenize(segmentStyle(dominant(segs)));
     Object.assign(el.style, base);
     if (TEXT_ALIGN[t.align]) el.style["text-align"] = TEXT_ALIGN[t.align]!;
     if (t.truncate === 1) Object.assign(el.style, { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" });
@@ -304,7 +379,7 @@ class Generator {
     if (el.tag === "a") el.attrs.push(["href", segs[0]!.link!]);
 
     for (const s of segs) {
-      const diff = diffStyle(base, segmentStyle(s));
+      const diff = diffStyle(base, this.tokenize(segmentStyle(s)));
       const parts = s.text.split("\n");
       const pieces: (El | string)[] = [];
       parts.forEach((p, i) => {
@@ -318,7 +393,7 @@ class Generator {
       }
       const span: El = {
         tag: link ? "a" : "span",
-        cls: this.opts.styling === "css" && Object.keys(diff).length ? this.className(`${el.cls || n.name}-${link ? "link" : "span"}`, "span") : "",
+        cls: this.named() && Object.keys(diff).length ? this.className(`${el.cls || n.name}-${link ? "link" : "span"}`, "span") : "",
         style: diff,
         attrs: link ? [["href", link]] : [],
         children: pieces,
@@ -329,66 +404,215 @@ class Generator {
 
   // ─── Output ───────────────────────────────────────────────────────────────
 
-  render(root: El, name: string): GeneratedFile[] {
+  private importsAssets() {
+    return this.opts.assetImports ?? this.opts.framework !== "html";
+  }
+
+  /** Class or styled-component name of an element in the chosen styling. */
+  private selector(cls: string) {
+    return this.opts.styling === "css-modules" ? camel(cls) : this.opts.styling === "styled-components" ? pascal(cls) : cls;
+  }
+
+  private rules(root: El): string[] {
     const css: string[] = [];
     const collect = (el: El) => {
-      if (el.cls && Object.keys(el.style).length) css.push(`.${el.cls} {\n${Object.entries(el.style).map(([k, v]) => `  ${k}: ${v};`).join("\n")}\n}`);
+      if (el.cls && Object.keys(el.style).length) css.push(`.${this.selector(el.cls)} {\n${Object.entries(el.style).map(([k, v]) => `  ${k}: ${v};`).join("\n")}\n}`);
       for (const c of el.children) if (typeof c !== "string") collect(c);
     };
-    if (this.opts.styling === "css") collect(root);
-    const component = pascal(name);
+    collect(root);
+    return css;
+  }
+
+  private importLines(quote = '"'): string[] {
+    const groups = new Map<string, ComponentUse[]>();
+    for (const u of this.uses.values()) groups.set(u.importFrom, [...(groups.get(u.importFrom) ?? []), u]);
+    const lines: string[] = [];
+    for (const [from, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+      const def = list.find((u) => u.isDefault);
+      const named = list.filter((u) => !u.isDefault).map((u) => u.name).sort();
+      const parts = [def?.name, named.length ? `{ ${named.join(", ")} }` : ""].filter(Boolean).join(", ");
+      lines.push(`import ${parts} from ${quote}${from}${quote};`);
+    }
+    return lines;
+  }
+
+  render(root: El, name: string): GeneratedFile[] {
+    const o = this.opts;
+    const component = o.componentName ?? pascal(name);
+    const standalone = o.componentName === undefined;
+    const css = o.styling === "tailwind" || o.styling === "styled-components" ? [] : this.rules(root);
     const reset =
-      this.opts.styling === "css"
+      standalone && (o.styling === "css" || o.styling === "css-modules")
         ? `*, *::before, *::after { box-sizing: border-box; }\nbody, h1, h2, h3, p { margin: 0; }\nbutton { font: inherit; color: inherit; border: none; background: none; padding: 0; text-align: inherit; }\na { color: inherit; text-decoration: none; }\n\n`
         : "";
     const fontLinks = [...this.fonts.entries()].map(
       ([family, weights]) =>
         `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${family.replace(/ /g, "+")}:wght@${[...weights].sort((a, b) => a - b).join(";")}&display=swap" />`,
     );
+    const fontNote = fontLinks.length ? `Fonts: ${[...this.fonts.keys()].join(", ")} (load them in your app, e.g. from Google Fonts).` : "";
+    const ext = o.typescript ? "tsx" : "jsx";
+    const imageImports = (quote = '"') => [...this.images.entries()].map(([path, v]) => `import ${v} from ${quote}${/^\.{0,2}\//.test(path) ? path : `./${path}`}${quote};`);
 
-    if (this.opts.framework === "html") {
+    if (o.framework === "html") {
       const head = [
         '<meta charset="utf-8" />',
         '<meta name="viewport" content="width=device-width, initial-scale=1" />',
         `<title>${escapeHtml(name)}</title>`,
         ...fontLinks,
-        ...(this.opts.styling === "tailwind" ? ['<script src="https://cdn.tailwindcss.com"></script>'] : []),
-        ...(this.opts.styling === "css" ? [`<style>\n${indent(reset + css.join("\n\n"), 2)}\n</style>`] : []),
+        ...(o.styling === "tailwind" ? ['<script src="https://cdn.tailwindcss.com"></script>'] : []),
+        ...(css.length || reset ? [`<style>\n${indent(reset + css.join("\n\n"), 2)}\n</style>`] : []),
       ];
-      const html = `<!doctype html>\n<html lang="en">\n<head>\n${indent(head.join("\n"), 2)}\n</head>\n<body>\n${this.markup(root, 1, false)}\n</body>\n</html>\n`;
+      const html = `<!doctype html>\n<html lang="en">\n<head>\n${indent(head.join("\n"), 2)}\n</head>\n<body>\n${this.markup(root, 1, "html")}\n</body>\n</html>\n`;
       return [{ path: "index.html", content: html }];
     }
 
-    const imports = [...this.images.entries()].map(([path, v]) => `import ${v} from "./${path}";`);
-    if (this.opts.styling === "css") imports.unshift(`import "./${component}.css";`);
-    const notes = fontLinks.length ? `// Fonts: ${[...this.fonts.keys()].join(", ")} (load them in your app, e.g. from Google Fonts).\n` : "";
-    const jsx = `${imports.join("\n")}${imports.length ? "\n\n" : ""}${notes}export default function ${component}() {\n  return (\n${this.markup(root, 2, true)}\n  );\n}\n`;
-    const files: GeneratedFile[] = [{ path: `${component}.jsx`, content: jsx }];
-    if (this.opts.styling === "css") files.push({ path: `${component}.css`, content: reset + css.join("\n\n") + "\n" });
+    if (o.framework === "react-native") return this.renderNative(root, component, ext, fontNote);
+
+    if (o.framework === "vue") {
+      const script = [...this.importLines(), ...imageImports()];
+      const parts = [`<template>\n${this.markup(root, 1, "vue")}\n</template>`];
+      if (script.length) parts.unshift(`<script setup${o.typescript ? ' lang="ts"' : ""}>\n${script.join("\n")}\n</script>`);
+      if (css.length) parts.push(`<style${o.styling === "css-modules" ? " module" : " scoped"}>\n${css.join("\n\n")}\n</style>`);
+      if (fontNote) parts.unshift(`<!-- ${fontNote} -->`);
+      return [{ path: `${component}.vue`, content: parts.join("\n\n") + "\n" }];
+    }
+
+    if (o.framework === "svelte") {
+      const script = [...this.importLines(), ...imageImports()];
+      const parts = [this.markup(root, 0, "svelte")];
+      if (script.length) parts.unshift(`<script${o.typescript ? ' lang="ts"' : ""}>\n${indent(script.join("\n"), 2)}\n</script>`);
+      if (css.length) parts.push(`<style>\n${indent(css.join("\n\n"), 2)}\n</style>`);
+      if (fontNote) parts.unshift(`<!-- ${fontNote} -->`);
+      return [{ path: `${component}.svelte`, content: parts.join("\n\n") + "\n" }];
+    }
+
+    // React
+    const imports = [...this.importLines(), ...imageImports()];
+    if (o.styling === "css") imports.unshift(`import "./${component}.css";`);
+    if (o.styling === "css-modules") imports.unshift(`import styles from "./${component}.module.css";`);
+    let styled = "";
+    if (o.styling === "styled-components") {
+      imports.unshift('import styled from "styled-components";');
+      styled = this.styledDefinitions(root);
+    }
+    const notes = fontNote ? `// ${fontNote}\n` : "";
+    const jsx = `${imports.join("\n")}${imports.length ? "\n\n" : ""}${styled}${notes}export default function ${component}() {\n  return (\n${this.markup(root, 2, "jsx")}\n  );\n}\n`;
+    const files: GeneratedFile[] = [{ path: `${component}.${ext}`, content: jsx }];
+    if (o.styling === "css") files.push({ path: `${component}.css`, content: reset + css.join("\n\n") + "\n" });
+    if (o.styling === "css-modules") files.push({ path: `${component}.module.css`, content: reset + css.join("\n\n") + "\n" });
     return files;
   }
 
-  private markup(el: El, depth: number, react: boolean): string {
+  /** styled-components: one styled element per styled layer, named after it. */
+  private styledDefinitions(root: El): string {
+    const defs: string[] = [];
+    const walk = (el: El) => {
+      if (el.cls && Object.keys(el.style).length) {
+        const base = el.props ? `styled(${el.tag})` : `styled.${el.tag}`;
+        defs.push(`const ${pascal(el.cls)} = ${base}\`\n${Object.entries(el.style).map(([k, v]) => `  ${k}: ${v};`).join("\n")}\n\`;`);
+      }
+      for (const c of el.children) if (typeof c !== "string") walk(c);
+    };
+    walk(root);
+    return defs.length ? defs.join("\n\n") + "\n\n" : "";
+  }
+
+  private markup(el: El, depth: number, dialect: "html" | "jsx" | "vue" | "svelte"): string {
     const pad = "  ".repeat(depth);
+    const o = this.opts;
     const attrs: string[] = [];
-    const classes = this.opts.styling === "tailwind" ? tailwind(el.style).join(" ") : el.cls && Object.keys(el.style).length ? el.cls : "";
-    if (classes) attrs.push(`${react ? "className" : "class"}="${classes}"`);
+    let tag = el.tag;
+    const styledHere = !!el.cls && Object.keys(el.style).length > 0;
+    if (o.styling === "styled-components" && styledHere) tag = pascal(el.cls);
+    else if (o.styling === "tailwind") {
+      const classes = tailwind(el.style, o.tokens).join(" ");
+      if (classes) attrs.push(`${dialect === "jsx" ? "className" : "class"}="${classes}"`);
+    } else if (styledHere) {
+      const sel = this.selector(el.cls);
+      if (o.styling === "css-modules") attrs.push(dialect === "jsx" ? `className={styles.${sel}}` : dialect === "vue" ? `:class="$style.${sel}"` : `class="${sel}"`);
+      else attrs.push(`${dialect === "jsx" ? "className" : "class"}="${sel}"`);
+    }
+    const isVar = (v: string) => this.importsAssets() && /^[A-Za-z_$][\w$]*$/.test(v);
     for (const [k, v] of el.attrs) {
-      if (react && k === "src" && /^[A-Za-z_$][\w$]*$/.test(v)) attrs.push(`src={${v}}`);
+      if (k === "src" && isVar(v)) attrs.push(dialect === "vue" ? `:src="${v}"` : `src={${v}}`);
       else attrs.push(`${k}="${escapeAttr(v)}"`);
     }
-    if (el.inline?.length) attrs.push(`style={{ ${el.inline.map(([k, v]) => `${k}: ${v}`).join(", ")} }}`);
-    const open = `<${el.tag}${attrs.length ? " " + attrs.join(" ") : ""}`;
-    if (el.tag === "img" || el.tag === "br") return pad + open + (react ? " />" : el.tag === "br" ? ">" : " />");
-    const text = (s: string) => (react ? escapeJsx(s) : escapeHtml(s));
-    const simple = el.children.every((c) => typeof c === "string" || c.tag === "br" || (c.children.every((x) => typeof x === "string") && c.tag !== "img"));
-    if (!el.children.length) return `${pad}${open}></${el.tag}>`;
-    if (simple && el.children.length <= 12) {
-      const inner = el.children.map((c) => (typeof c === "string" ? text(c) : this.markup(c, 0, react).trim())).join("");
-      if (inner.length < 160) return `${pad}${open}>${inner}</${el.tag}>`;
+    for (const [k, v] of el.props ?? []) {
+      if (typeof v === "string") attrs.push(`${k}="${escapeAttr(v)}"`);
+      else if (dialect === "vue") attrs.push(`:${k}="${v}"`);
+      else attrs.push(v && dialect === "jsx" ? k : `${k}={${v}}`);
     }
-    const inner = el.children.map((c) => (typeof c === "string" ? "  ".repeat(depth + 1) + text(c) : this.markup(c, depth + 1, react))).join("\n");
-    return `${pad}${open}>\n${inner}\n${pad}</${el.tag}>`;
+    if (el.inline?.length) {
+      const [, ref] = el.inline[0]!;
+      if (dialect === "jsx") attrs.push(`style={{ backgroundImage: \`url(\${${ref}})\` }}`);
+      else if (dialect === "vue") attrs.push(`:style="{ backgroundImage: \`url(\${${ref}})\` }"`);
+      else attrs.push(`style="background-image: url({${ref}})"`);
+    }
+    const open = `<${tag}${attrs.length ? " " + attrs.join(" ") : ""}`;
+    if (el.tag === "img" || el.tag === "br") return pad + open + (dialect === "html" && el.tag === "br" ? ">" : " />");
+    if (!el.children.length && el.props) return `${pad}${open} />`;
+    const text = (s: string) => (dialect === "jsx" ? escapeJsx(s) : dialect === "svelte" ? escapeHtml(s).replace(/[{}]/g, (c) => (c === "{" ? "&#123;" : "&#125;")) : dialect === "vue" ? escapeHtml(s).replace(/\{\{/g, "&#123;&#123;") : escapeHtml(s));
+    const simple = el.children.every((c) => typeof c === "string" || c.tag === "br" || (c.children.every((x) => typeof x === "string") && c.tag !== "img"));
+    if (!el.children.length) return `${pad}${open}></${tag}>`;
+    if (simple && el.children.length <= 12) {
+      const inner = el.children.map((c) => (typeof c === "string" ? text(c) : this.markup(c, 0, dialect).trim())).join("");
+      if (inner.length < 160) return `${pad}${open}>${inner}</${tag}>`;
+    }
+    const inner = el.children.map((c) => (typeof c === "string" ? "  ".repeat(depth + 1) + text(c) : this.markup(c, depth + 1, dialect))).join("\n");
+    return `${pad}${open}>\n${inner}\n${pad}</${tag}>`;
+  }
+
+  // ─── React Native ─────────────────────────────────────────────────────────
+
+  private renderNative(root: El, component: string, ext: string, fontNote: string): GeneratedFile[] {
+    const styles: string[] = [];
+    const used = new Set<string>(["View"]);
+    const names = new Map<El, string>();
+    const textTags = /^(h1|h2|h3|p|a|span|button)$/;
+    const isText = (el: El) => el.children.length > 0 && el.children.every((c) => typeof c === "string" || (c.tag === "br" || (c.tag === "span" || c.tag === "a")));
+    const nameOf = (el: El) => {
+      if (!Object.keys(el.style).length) return "";
+      let n = names.get(el);
+      if (!n) {
+        n = camel(el.cls || el.tag) || "item";
+        while ([...names.values()].includes(n)) n += "2";
+        names.set(el, n);
+        styles.push(`  ${n}: ${nativeStyle(el.style, this.warnings)},`);
+      }
+      return n;
+    };
+    const render = (el: El, depth: number, inText: boolean): string => {
+      const pad = "  ".repeat(depth);
+      const s = nameOf(el);
+      const style = s ? ` style={styles.${s}}` : "";
+      if (el.props) {
+        const props = el.props.map(([k, v]) => (typeof v === "string" ? `${k}="${escapeAttr(v)}"` : v ? k : `${k}={false}`));
+        const open = `<${el.tag}${props.length ? " " + props.join(" ") : ""}${style}`;
+        return el.children.length ? `${pad}${open}>${escapeJsx(String(el.children[0]))}</${el.tag}>` : `${pad}${open} />`;
+      }
+      if (el.tag === "br") return `${pad}{"\\n"}`;
+      if (el.tag === "img") {
+        used.add("Image");
+        const src = el.attrs.find(([k]) => k === "src")?.[1] ?? "";
+        const source = this.importsAssets() && /^[A-Za-z_$][\w$]*$/.test(src) ? `{${src}}` : `{{ uri: "${src}" }}`;
+        return `${pad}<Image source=${source}${style} />`;
+      }
+      if (inText || textTags.test(el.tag) || isText(el)) {
+        used.add("Text");
+        const inner = el.children.map((c) => (typeof c === "string" ? escapeJsx(c) : render(c, 0, true).trim())).join("");
+        return `${pad}<Text${style}>${inner}</Text>`;
+      }
+      const tag = el.tag === "button" ? "Pressable" : "View";
+      used.add(tag);
+      if (!el.children.length) return `${pad}<${tag}${style} />`;
+      return `${pad}<${tag}${style}>\n${el.children.map((c) => (typeof c === "string" ? `${pad}  <Text>${escapeJsx(c)}</Text>` : render(c, depth + 1, false))).join("\n")}\n${pad}</${tag}>`;
+    };
+    const body = render(root, 2, false);
+    if (used.has("Text") && !body.includes("<Text")) used.delete("Text");
+    const imports = [`import { ${[...used, "StyleSheet"].sort().join(", ")} } from "react-native";`, ...this.importLines(), ...[...this.images.entries()].map(([path, v]) => `const ${v} = require("${/^\.{0,2}\//.test(path) ? path : `./${path}`}");`)];
+    const notes = fontNote ? `// ${fontNote}\n` : "";
+    const content = `${imports.join("\n")}\n\n${notes}export default function ${component}() {\n  return (\n${body}\n  );\n}\n\nconst styles = StyleSheet.create({\n${styles.join("\n")}\n});\n`;
+    return [{ path: `${component}.${ext}`, content }];
   }
 
   fontFamilies() {
@@ -406,6 +630,81 @@ function indent(s: string, n: number) {
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const escapeAttr = (s: string) => escapeHtml(s).replace(/"/g, "&quot;");
 const escapeJsx = (s: string) => escapeHtml(s).replace(/[{}]/g, (c) => `{"${c}"}`);
+
+// ─── React Native styles ────────────────────────────────────────────────────
+
+const RN_DROP = new Set(["display", "cursor", "white-space", "text-overflow", "-webkit-box-orient", "-webkit-line-clamp", "object-fit", "box-sizing", "justify-self", "grid-column", "grid-row", "grid-template-columns", "grid-template-rows", "filter", "backdrop-filter", "mix-blend-mode", "outline", "outline-offset", "background-size", "background-position", "background-repeat"]);
+
+/** CSS declarations → a React Native style object literal. */
+export function nativeStyle(st: Style, warnings: string[]): string {
+  const out: Record<string, string | number> = {};
+  const num = (v: string) => (/^-?[\d.]+px$/.test(v.trim()) ? parseFloat(v) : /^-?[\d.]+$/.test(v.trim()) ? Number(v) : v.trim());
+  const flexContainer = st.display === "flex";
+  if (flexContainer && st["flex-direction"] !== "column") out.flexDirection = "row";
+  if (st.display === "grid") {
+    out.flexDirection = "row";
+    out.flexWrap = "wrap";
+    warnings.push("React Native has no CSS grid: a grid became a wrapping row");
+  }
+  for (const [k, raw] of Object.entries(st)) {
+    const v = raw.trim();
+    if (RN_DROP.has(k) || k === "flex-direction" && v === "column") continue;
+    switch (k) {
+      case "flex":
+        out.flex = v === "1 1 0" ? 1 : parseFloat(v) || 1;
+        break;
+      case "background":
+        if (/gradient|url\(/.test(v)) warnings.push("React Native needs a library for gradients and background images: skipped");
+        else out.backgroundColor = v;
+        break;
+      case "border": {
+        const m = /^([\d.]+)px\s+(\w+)\s+(.+)$/.exec(v);
+        if (m) {
+          out.borderWidth = parseFloat(m[1]!);
+          out.borderColor = m[3]!;
+          if (m[2] !== "solid") out.borderStyle = m[2]!;
+        }
+        break;
+      }
+      case "box-shadow": {
+        const m = /(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+-?[\d.]+px)?\s+(.+?)(?:,|$)/.exec(v);
+        if (m) {
+          out.shadowColor = m[4]!.trim();
+          out.shadowOffset = `{ width: ${parseFloat(m[1]!)}, height: ${parseFloat(m[2]!)} }` as any;
+          out.shadowOpacity = 1;
+          out.shadowRadius = parseFloat(m[3]!) / 2;
+          out.elevation = Math.round(parseFloat(m[3]!) / 2);
+        }
+        break;
+      }
+      case "padding": {
+        const p = v.split(/\s+/).map(num);
+        if (p.length === 1) out.padding = p[0]!;
+        else if (p.length === 2) [out.paddingVertical, out.paddingHorizontal] = [p[0]!, p[1]!];
+        else [out.paddingTop, out.paddingRight, out.paddingBottom, out.paddingLeft] = [p[0]!, p[1]!, p[2]!, p[3] ?? p[1]!];
+        break;
+      }
+      case "font-family":
+        out.fontFamily = v.split(",")[0]!.replace(/['"]/g, "").trim();
+        break;
+      case "font-weight":
+        out.fontWeight = v;
+        break;
+      case "text-decoration":
+        out.textDecorationLine = v;
+        break;
+      case "align-self":
+      case "align-items":
+      case "justify-content":
+        out[camel(k)] = v === "start" ? "flex-start" : v;
+        break;
+      default:
+        out[camel(k)] = num(v);
+    }
+  }
+  const body = Object.entries(out).map(([k, v]) => `${k}: ${typeof v === "number" || /^\{.*\}$/.test(String(v)) ? v : JSON.stringify(v)}`);
+  return `{ ${body.join(", ")} }`;
+}
 
 // ─── Tailwind ───────────────────────────────────────────────────────────────
 
@@ -433,8 +732,20 @@ function paddingClasses(v: string): string[] {
   return [spacing("pt", t!), spacing("pr", r!), spacing("pb", b!), spacing("pl", l!)];
 }
 
-/** CSS declarations → Tailwind classes (scale values when they match, arbitrary values otherwise). */
-export function tailwind(st: Style): string[] {
+/** A color value → the project's Tailwind color name, if it has one. */
+function twColor(v: string, tokens?: TokenLookup): string | null {
+  if (!tokens) return null;
+  const m = /^var\(--([\w-]+)\s*,\s*(.+)\)$/.exec(v.trim());
+  const byName = m ? tokens.byName(m[1]!) : null;
+  const hex = cssColor(m ? m[2]!.trim() : v.trim());
+  const t = byName && byName.kind === "color" ? byName : hex ? tokens.color(hex) : null;
+  if (!t) return null;
+  // A theme color when Tailwind knows it, else the project's CSS variable.
+  return t.tw ?? (t.cssVar ? `[var(--${t.cssVar})]` : null);
+}
+
+/** CSS declarations → Tailwind classes (project tokens and scale values when they match, arbitrary values otherwise). */
+export function tailwind(st: Style, tokens?: TokenLookup): string[] {
   const out: string[] = [];
   for (const [k, raw] of Object.entries(st)) {
     const v = raw.trim();
@@ -480,6 +791,9 @@ export function tailwind(st: Style): string[] {
         break;
       case "flex-shrink":
         out.push(v === "0" ? "shrink-0" : "shrink");
+        break;
+      case "max-width":
+        out.push(spacing("max-w", v));
         break;
       case "min-width":
       case "min-height":
@@ -539,9 +853,11 @@ export function tailwind(st: Style): string[] {
       case "letter-spacing":
         out.push(`tracking-[${arb(v)}]`);
         break;
-      case "color":
-        out.push(isColor(v) ? `text-[${arb(v)}]` : `[color:${arb(v)}]`);
+      case "color": {
+        const t = twColor(v, tokens);
+        out.push(t ? `text-${t}` : isColor(v) ? `text-[${arb(v)}]` : `[color:${arb(v)}]`);
         break;
+      }
       case "text-align":
         out.push(`text-${v}`);
         break;
@@ -551,9 +867,11 @@ export function tailwind(st: Style): string[] {
       case "text-decoration":
         out.push(v === "underline" ? "underline" : v === "line-through" ? "line-through" : `[text-decoration:${arb(v)}]`);
         break;
-      case "background":
-        out.push(isColor(v) ? `bg-[${arb(v)}]` : `[background:${arb(v)}]`);
+      case "background": {
+        const t = twColor(v, tokens);
+        out.push(t ? `bg-${t}` : isColor(v) ? `bg-[${arb(v)}]` : `[background:${arb(v)}]`);
         break;
+      }
       case "background-image":
         out.push(`bg-[${arb(v)}]`);
         break;
@@ -577,7 +895,8 @@ export function tailwind(st: Style): string[] {
         else {
           out.push(m[1] === "1px" ? "border" : `border-[${m[1]}]`);
           if (m[2] !== "solid") out.push(`border-${m[2]}`);
-          out.push(isColor(m[3]!) ? `border-[${arb(m[3]!)}]` : `[border-color:${arb(m[3]!)}]`);
+          const t = twColor(m[3]!, tokens);
+          out.push(t ? `border-${t}` : isColor(m[3]!) ? `border-[${arb(m[3]!)}]` : `[border-color:${arb(m[3]!)}]`);
         }
         break;
       }
@@ -607,9 +926,9 @@ export function tailwind(st: Style): string[] {
   return out;
 }
 
-export function generateCode(tree: IrNode, opts: CodegenOptions): { files: GeneratedFile[]; fonts: string[]; warnings: string[] } {
+export function generateCode(tree: IrNode, opts: CodegenOptions): { files: GeneratedFile[]; fonts: string[]; warnings: string[]; components: ComponentUse[] } {
   const gen = new Generator(opts);
   const root = gen.element(tree, null, "");
   const files = gen.render(root, tree.name || "Design");
-  return { files, fonts: gen.fontFamilies(), warnings: gen.warnings };
+  return { files, fonts: gen.fontFamilies(), warnings: [...new Set(gen.warnings)], components: [...gen.uses.values()] };
 }
