@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { Bridge, BridgeError } from "./bridge";
+import { Bridge, BridgeError, callTarget } from "./bridge";
 import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { generateCode, type IrNode } from "./codegen";
@@ -185,6 +185,22 @@ const server = new McpServer(
     ].join("\n"),
   },
 );
+
+// Every tool takes an optional {file}: the call goes to that connected file without changing the selected one,
+// so an agent can work on several files at once (calls to different files run in parallel).
+const SESSION_TOOLS = new Set(["list_sessions", "select_session"]);
+const registerTool = server.registerTool.bind(server) as (...args: any[]) => unknown;
+(server as any).registerTool = (name: string, config: { inputSchema?: Record<string, z.ZodTypeAny> }, handler: (args: any, extra: unknown) => unknown) => {
+  if (SESSION_TOOLS.has(name)) return registerTool(name, config, handler);
+  const inputSchema = {
+    ...config.inputSchema,
+    file: z.string().optional().describe("Target file name or session id when several files are connected (default: the selected file)"),
+  };
+  return registerTool(name, { ...config, inputSchema }, (args: Record<string, unknown>, extra: unknown) => {
+    const { file, ...rest } = args ?? {};
+    return callTarget.run({ file: typeof file === "string" && file ? file : undefined }, () => handler(rest, extra));
+  });
+};
 
 server.registerTool(
   "run_script",
@@ -945,7 +961,9 @@ server.registerTool(
   "list_sessions",
   {
     title: "List connected Figma files",
-    description: "Figma files that currently have the plugin open, plus bridge status. Needed only when several files are open.",
+    description:
+      "Figma files that currently have the plugin open (with their editor: figma, figjam or slides), plus bridge status. With several files, " +
+      "select_session picks the default one, or pass file:\"<name>\" to any tool to target a file for that call only.",
     inputSchema: {},
   },
   () =>
@@ -959,6 +977,7 @@ server.registerTool(
           fileName: s.fileName,
           page: s.page,
           pluginVersion: s.version,
+          editor: s.editorType,
           ...(s.version && s.version !== VERSION
             ? { versionMismatch: `Plugin v${s.version}, server v${VERSION}: ask the user to reopen the plugin in Figma, or update it.` }
             : {}),

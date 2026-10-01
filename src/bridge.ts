@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
@@ -30,8 +31,13 @@ export interface SessionInfo {
   page: string;
   channel: string;
   version?: string;
+  /** figma, figjam, slides or dev. */
+  editorType?: string;
   connectedAt: number;
 }
+
+/** Per tool call: the file it targets ({file} argument), without changing the selected session. */
+export const callTarget = new AsyncLocalStorage<{ file?: string }>();
 
 export interface Selection {
   id?: string;
@@ -292,6 +298,7 @@ export class Hub {
       } else if (msg.t === "info" && ws.data.session) {
         if (typeof msg.fileName === "string") ws.data.session.fileName = msg.fileName;
         if (typeof msg.page === "string") ws.data.session.page = msg.page;
+        if (typeof msg.editorType === "string") ws.data.session.editorType = msg.editorType;
       }
     } else if (ws.data.role === "agent") {
       if (msg.t === "req") this.handleRequest(msg, (m) => sendFrames(ws, m), ws, ws.data.channel!);
@@ -318,6 +325,7 @@ export class Hub {
         page: String(s.page || ""),
         channel,
         version: msg.version,
+        editorType: typeof s.editorType === "string" ? s.editorType : undefined,
         connectedAt: Date.now(),
       };
       const previous = this.plugins.get(session.id);
@@ -538,7 +546,7 @@ export class Bridge {
         throw new BridgeError(this.lastError ?? `The bridge could not open or join port ${this.opts.port}.`, "OFFLINE");
       }
       try {
-        return await this.send<T>(method, params, timeoutMs);
+        return await this.send<T>(method, params, timeoutMs, await this.selectionFor(method));
       } catch (e) {
         // Only retry when the command was never delivered to Figma.
         const retryable = e instanceof BridgeError && (e.code === "NO_SESSION" || e.code === "OFFLINE");
@@ -548,10 +556,18 @@ export class Bridge {
     }
   }
 
-  private send<T>(method: string, params: Record<string, unknown>, timeoutMs: number): Promise<T> {
+  /** The session a request goes to: the call's own {file}, else the selected session. */
+  private async selectionFor(method: string): Promise<Selection> {
+    const file = method === "$sessions" ? undefined : callTarget.getStore()?.file;
+    if (!file) return this.selection;
+    const s = await this.find(file);
+    return { id: s.id, fileName: s.fileName };
+  }
+
+  private send<T>(method: string, params: Record<string, unknown>, timeoutMs: number, sel: Selection): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const id = randomUUID();
-      const msg: Msg = { t: "req", id, method, params, sel: this.selection, timeoutMs };
+      const msg: Msg = { t: "req", id, method, params, sel, timeoutMs };
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new BridgeError(`${method} got no answer after ${Math.round(timeoutMs / 1000)} s. Figma may be frozen by a long synchronous script.`, "TIMEOUT"));
@@ -584,6 +600,13 @@ export class Bridge {
   }
 
   async select(name: string): Promise<SessionInfo> {
+    const hit = await this.find(name);
+    this.selection = { id: hit.id, fileName: hit.fileName };
+    return hit;
+  }
+
+  /** A connected file by session id, exact name or unique partial name. */
+  async find(name: string): Promise<SessionInfo> {
     const list = await this.sessions();
     const q = name.trim().toLowerCase();
     const hit =
@@ -596,7 +619,6 @@ export class Bridge {
       const names = list.map((s) => `"${s.fileName}"`).join(", ") || "none";
       throw new BridgeError(`No unique connected file matches "${name}". Connected: ${names}.`, "NOT_FOUND");
     }
-    this.selection = { id: hit.id, fileName: hit.fileName };
     return hit;
   }
 }
