@@ -18,9 +18,11 @@ const ENUMS: Record<string, Record<string, number>> = {
   ApplyStrokeMode: { Contextual: 0, Border: 1 },
   LineJoinMode: { Round: 0, Bevel: 1, Miter: 2 },
   TextTruncate: { None: 0, AtEnd: 1, SplitWord: 2 },
+  StrokeSizingMode: { FixedSize: 0, ScaledSize: 1 },
+  BorderStrokePosition: { Outer: 0, Center: 1, Inner: 2 },
 };
 
-const n = (v: number) => String(Math.round(v * 1000) / 1000);
+const n = (v: number) => String(Math.round(v * 10000) / 10000);
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 function xmlProp(name: string, v: RbxValue): string {
@@ -56,8 +58,6 @@ function xmlProp(name: string, v: RbxValue): string {
       return `<NumberSequence name="${name}">${v.keys.map((k) => `${n(k.time)} ${n(k.value)} 0 `).join("")}</NumberSequence>`;
     case "Font":
       return `<Font name="${name}"><Family><url>${xml(v.family)}</url></Family><Weight>${v.weight}</Weight><Style>${v.style}</Style></Font>`;
-    case "Source":
-      return `<ProtectedString name="${name}">${xml(v.v)}</ProtectedString>`;
   }
 }
 
@@ -121,13 +121,6 @@ function luauValue(v: RbxValue): string {
       return `NumberSequence.new({\n${v.keys.map((k) => `\t\tNumberSequenceKeypoint.new(${n(k.time)}, ${n(k.value)}),`).join("\n")}\n\t})`;
     case "Font":
       return `Font.new(${luauString(v.family)}, Enum.FontWeight.${v.weightName}, Enum.FontStyle.${v.style})`;
-    case "Source": {
-      // Long bracket string with enough "=" to never close early.
-      let eq = "";
-      while (v.v.includes(`]${eq}]`)) eq += "=";
-      return `[${eq}[
-${v.v}]${eq}]`;
-    }
   }
 }
 

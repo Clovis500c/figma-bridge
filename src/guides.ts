@@ -91,13 +91,13 @@ Turn ${opt(a.target, "the selected frame")} into code for the project at ${opt(a
     name: "figma-to-roblox",
     title: "Figma to Roblox",
     description: "Turn a frame into Roblox UI and place it in Studio with a Roblox Studio MCP.",
-    args: { target: "Layer name or id (default: the selection)", mode: "scale, offset or hybrid (default hybrid)" },
+    args: { target: "Layer name or id (default: the selection)", mode: "scale (default), offset or hybrid" },
     render: (a) => `
 Turn ${opt(a.target, "the selected frame")} into Roblox UI that looks the same, and put it in the open Roblox Studio place.
-1. export_roblox {${a.target ? `nodeId:"<id of ${a.target}>", ` : ""}mode:"${opt(a.mode, "hybrid")}"}. Read the warnings (approximations, font substitutions).
+1. export_roblox {${a.target ? `nodeId:"<id of ${a.target}>", ` : ""}mode:"${opt(a.mode, "scale")}"}. Read the warnings (approximations, font substitutions).
 2. If assets are not uploaded (placeholders rbxassetid://PENDING_n): upload each file in assets[] with the Roblox Studio MCP (e.g. upload_image), and replace each placeholder in the Luau with the returned id.
 3. Run the Luau with execute_luau: it creates the ScreenGui under StarterGui (replacing an earlier copy) and returns it.
-4. Take a Studio screenshot and compare it with screenshot {returnImage:true} of the Figma frame. Fix differences in the Luau (or in Figma, then export again).
+4. Take a Studio screenshot and compare it with screenshot {returnImage:true} of the Figma frame. Fix differences in the Luau (or in Figma, then export again), keeping every size, position, padding and gap in scale (no offsets) and the PascalCase names.
 5. Report the result and anything Roblox could not reproduce.`,
   },
   {

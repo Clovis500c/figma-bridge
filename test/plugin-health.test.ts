@@ -81,9 +81,9 @@ describe("audit fix", () => {
     expect(card!.boundVariables.topLeftRadius.id).toBe("v5");
     expect(card!.boundVariables.paddingTop).toBeUndefined(); // 24: no matching variable
     expect(title!.textStyleId).toBe("S:h1");
-    expect(card!.name).toBe("Pro plan");
+    expect(card!.name).toBe("Card");
     expect(r.fixed).toEqual({ colors: 4, numbers: 5, textStyles: 1, names: 1 });
-    expect(r.changes.find((c: any) => c.fix === "names")).toMatchObject({ from: "Frame 12", to: "Pro plan" });
+    expect(r.changes.find((c: any) => c.fix === "names")).toMatchObject({ from: "Frame 12", to: "Card" });
     // The report after fixing is part of the result.
     expect(r.summary).toBeDefined();
   });

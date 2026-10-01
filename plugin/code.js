@@ -418,6 +418,304 @@
     return { count: out.length, nodes: out };
   }
 
+  // plugin/lib/naming.ts
+  var GENERIC_NAME = /^(frame|rectangle|ellipse|group|vector|text|line|polygon|star|component|instance|section|image|auto ?layout|union|subtract|intersect|exclude|boolean|layer|shape|slice|mask|container|wrapper|div|span|box)(\s*\d+)?(\s+copy(\s*\d+)?)?$/i;
+  function isGenericName(n) {
+    const name = n.name.trim();
+    if (!name || GENERIC_NAME.test(name))
+      return true;
+    if (n.kind === "text" && n.text !== undefined) {
+      const t = n.text.trim();
+      const a = name.toLowerCase();
+      const b = t.toLowerCase();
+      return a === b || a.length >= 12 && b.indexOf(a) === 0;
+    }
+    return false;
+  }
+  var NUMERIC = /^[\s$€£¥+\-−]*[\d][\d\s.,:%/×x+\-−]*[\s$€£¥%kKmMbB]*$/;
+  var SCREEN_W = [360, 375, 390, 393, 402, 412, 414, 428, 430, 440];
+  function visibleKids(n) {
+    return n.children.filter(function(c) {
+      return !c.hidden;
+    });
+  }
+  function maxFont(n) {
+    let m = n.kind === "text" && n.fontSize ? n.fontSize : 0;
+    for (let i = 0;i < n.children.length; i++) {
+      const c = n.children[i];
+      if (c && !c.hidden)
+        m = Math.max(m, maxFont(c));
+    }
+    return m;
+  }
+  function onlyKinds(list, kinds) {
+    for (let i = 0;i < list.length; i++) {
+      const c = list[i];
+      if (c && kinds.indexOf(c.kind) === -1)
+        return false;
+    }
+    return list.length > 0;
+  }
+  function buttonLike(n) {
+    const kids = visibleKids(n);
+    if (!n.background || n.h > 72 || kids.length === 0 || kids.length > 3)
+      return false;
+    let texts = 0;
+    for (let i = 0;i < kids.length; i++) {
+      const c = kids[i];
+      if (!c)
+        continue;
+      if (c.kind === "text") {
+        texts++;
+        if ((c.text || "").length > 32)
+          return false;
+      } else if (c.kind !== "vector" && c.kind !== "image")
+        return false;
+    }
+    return texts === 1;
+  }
+  function isScreen(n) {
+    return SCREEN_W.indexOf(Math.round(n.w)) !== -1 && n.h >= 640 || n.w >= 1024 && n.h >= 600;
+  }
+  function largestText(n, parent) {
+    const others = parent ? visibleKids(parent).filter(function(c) {
+      return c !== n && c.kind === "text";
+    }) : [];
+    const size = n.fontSize || 14;
+    return others.length > 0 && others.every(function(c) {
+      return (c.fontSize || 14) < size;
+    });
+  }
+  function covers(n, p) {
+    return Math.abs(n.x) <= 1 && Math.abs(n.y) <= 1 && n.w >= p.w - 1 && n.h >= p.h - 1;
+  }
+  function roleOf(n, parent, root, top, inButton) {
+    const kids = visibleKids(n);
+    if (n.kind === "text") {
+      const t = (n.text || "").trim();
+      const size = n.fontSize || 14;
+      if (inButton)
+        return "Label";
+      if (NUMERIC.test(t))
+        return "Value";
+      if (size >= top - 0.5 && size >= 18)
+        return "Title";
+      if (size >= 16 && largestText(n, parent))
+        return "Title";
+      if (size >= 20)
+        return "Heading";
+      if (t.length > 60)
+        return "Description";
+      if (size <= 12)
+        return "Caption";
+      if (t.length > 30)
+        return "Description";
+      return "Label";
+    }
+    if (n.kind === "vector")
+      return "Icon";
+    if (n.kind === "image" && kids.length === 0) {
+      const round = n.ellipse || n.radius !== undefined && Math.abs(n.w - n.h) <= 1 && n.radius >= n.w / 2 - 1;
+      return round ? "Avatar" : "Image";
+    }
+    if (kids.length === 0) {
+      if (Math.min(n.w, n.h) <= 2 && Math.max(n.w, n.h) > 8)
+        return "Divider";
+      if (parent && covers(n, parent))
+        return "Background";
+      if (n.clickable)
+        return "Button";
+      if (n.ellipse)
+        return n.w <= 16 ? "Dot" : "Circle";
+      return "Shape";
+    }
+    if (n.clickable)
+      return "Button";
+    if (buttonLike(n)) {
+      const label = kids.filter(function(c) {
+        return c.kind === "text";
+      })[0];
+      return n.h <= 24 || label && (label.fontSize || 14) <= 12 ? "Badge" : "Button";
+    }
+    if (!parent) {
+      if (isScreen(n))
+        return "Screen";
+    } else if (parent === root && isScreen(root)) {
+      if (n.w >= root.w * 0.9 && n.y <= root.h * 0.1 && n.h <= root.h * 0.25)
+        return "Header";
+      if (n.w >= root.w * 0.9 && n.y + n.h >= root.h * 0.9 && n.h <= root.h * 0.25)
+        return "Footer";
+      if (n.h >= root.h * 0.9 && n.w <= root.w * 0.35 && n.x <= 1)
+        return "Sidebar";
+    }
+    const flow = kids.filter(function(c) {
+      return !c.absolute;
+    });
+    if (flow.length >= 2) {
+      const r = baseName(flow[0]);
+      const same = flow.every(function(c) {
+        return baseName(c) === r;
+      });
+      if (same && r && r !== "Label" && r !== "Value" && r !== "Divider") {
+        if (r === "Button")
+          return "Actions";
+        return r + (n.layout === "GRID" || n.wrap ? "Grid" : "List");
+      }
+    }
+    if (n.background)
+      return n.radius ? "Card" : "Panel";
+    if (onlyKinds(kids, ["text"]))
+      return "TextGroup";
+    if (n.layout === "HORIZONTAL")
+      return "Row";
+    if (n.layout === "GRID")
+      return "Grid";
+    return "Container";
+  }
+  function baseName(n) {
+    return pascalName(n.role || n.name).replace(/\d+$/, "");
+  }
+  function inferRoles(root) {
+    const top = maxFont(root);
+    const walk = function(n, parent, inButton) {
+      const button = n.kind !== "text" && (n.clickable || buttonLike(n) || /button|btn/i.test(n.name));
+      for (let i = 0;i < n.children.length; i++) {
+        const c = n.children[i];
+        if (c)
+          walk(c, n, inButton || button);
+      }
+      if (isGenericName(n))
+        n.role = roleOf(n, parent, root, top, inButton);
+    };
+    walk(root, null, false);
+  }
+  function pascalName(name) {
+    let segs = name.split("/").map(function(s) {
+      return s.replace(/^[\w-]+:/, "").trim();
+    }).filter(function(s) {
+      return s && !/^default$/i.test(s);
+    });
+    if (segs.length > 1)
+      segs = segs.slice(1).concat([segs[0]]);
+    const words = segs.join(" ").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean);
+    const out = words.map(function(w) {
+      return w === w.toUpperCase() && w.length <= 4 ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    }).join("");
+    return out.slice(0, 48);
+  }
+  var ROLE_WORDS = ("Actions Avatar Background Badge Banner Bar Body Button Card Column Container Content Controls Details Dialog Divider Footer Frame Grid Group Gui " + "Header Hero Hud HUD Info Item List Menu Modal Nav Navbar Navigation Overlay Panel Popup Row Screen Section Sidebar Slot Stack Stats Tab Tabs Tile " + "Toolbar Tooltip Window Wrapper").split(" ");
+
+  // plugin/lib/roles.ts
+  var VECTORS = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "LINE"];
+  function visiblePaints(list) {
+    if (!list || list === figma.mixed)
+      return [];
+    return list.filter(function(p) {
+      return p.visible !== false && (p.opacity === undefined || p.opacity > 0);
+    });
+  }
+  function vectorOnly(n) {
+    if (VECTORS.indexOf(n.type) !== -1)
+      return true;
+    if (n.type === "TEXT" || !("children" in n) || !n.children.length)
+      return false;
+    for (let i = 0;i < n.children.length; i++)
+      if (n.children[i].visible !== false && !vectorOnly(n.children[i]))
+        return false;
+    return true;
+  }
+  function fontSizeOf(t) {
+    if (typeof t.fontSize === "number")
+      return t.fontSize;
+    let max = 0;
+    try {
+      const segs = t.getStyledTextSegments(["fontSize"]);
+      for (let i = 0;i < segs.length; i++)
+        max = Math.max(max, segs[i].fontSize);
+    } catch (e) {}
+    return max || 14;
+  }
+  function describe(n, depth) {
+    const fills = "fills" in n ? visiblePaints(n.fills) : [];
+    const strokes = "strokes" in n ? visiblePaints(n.strokes) : [];
+    const kids = "children" in n && n.type !== "TEXT" && depth < 12 ? n.children : [];
+    const image = fills.length === 1 && fills[0].type === "IMAGE";
+    let kind = "shape";
+    if (n.type === "TEXT")
+      kind = "text";
+    else if (vectorOnly(n))
+      kind = "vector";
+    else if (image && !kids.length)
+      kind = "image";
+    else if (kids.length || n.layoutMode && n.layoutMode !== "NONE")
+      kind = "frame";
+    let radius = 0;
+    if (typeof n.cornerRadius === "number")
+      radius = n.cornerRadius;
+    else if ("topLeftRadius" in n)
+      radius = Math.max(n.topLeftRadius, n.topRightRadius, n.bottomRightRadius, n.bottomLeftRadius);
+    const r = {
+      node: n,
+      kind,
+      name: n.name,
+      x: n.x || 0,
+      y: n.y || 0,
+      w: n.width || 0,
+      h: n.height || 0,
+      hidden: n.visible === false,
+      background: fills.length > 0 || strokes.length > 0,
+      radius,
+      ellipse: n.type === "ELLIPSE",
+      clickable: !!(n.reactions && n.reactions.some(function(x) {
+        return x.trigger && (x.trigger.type === "ON_CLICK" || x.trigger.type === "ON_PRESS");
+      })),
+      absolute: n.layoutPositioning === "ABSOLUTE",
+      children: []
+    };
+    if (n.type === "TEXT") {
+      r.text = n.characters;
+      r.fontSize = fontSizeOf(n);
+    }
+    if (n.layoutMode && n.layoutMode !== "NONE")
+      r.layout = n.layoutMode;
+    if (n.layoutWrap === "WRAP")
+      r.wrap = true;
+    if (kind !== "vector") {
+      for (let i = 0;i < kids.length; i++)
+        r.children.push(describe(kids[i], depth + 1));
+    }
+    return r;
+  }
+  function roleNames(root) {
+    const tree = describe(root, 0);
+    inferRoles(tree);
+    const out = {};
+    const walk = function(r) {
+      if (r.role)
+        out[r.node.id] = r.role;
+      for (let i = 0;i < r.children.length; i++)
+        walk(r.children[i]);
+    };
+    walk(tree);
+    return out;
+  }
+  function applyRoleNames(root, rename) {
+    const names = roleNames(root);
+    let count = 0;
+    const walk = function(n) {
+      const role = names[n.id];
+      if (role && rename(n) && n.name !== role) {
+        n.name = role;
+        count++;
+      }
+      if ("children" in n && n.type !== "INSTANCE")
+        for (let i = 0;i < n.children.length; i++)
+          walk(n.children[i]);
+    };
+    walk(root);
+    return count;
+  }
+
   // plugin/lib/health.ts
   var MAX_NODES = 20000;
   var MAX_ISSUES = 100;
@@ -829,6 +1127,15 @@
     }
     const changes = [];
     const counts = { colors: 0, numbers: 0, textStyles: 0, names: 0 };
+    const roleCache = {};
+    const roleFor = function(n) {
+      let top = n;
+      while (top.parent && top.parent.type !== "PAGE" && top.parent.type !== "DOCUMENT" && top.parent.type !== "SECTION")
+        top = top.parent;
+      if (!roleCache[top.id])
+        roleCache[top.id] = roleNames(top);
+      return roleCache[top.id][n.id] || null;
+    };
     const record = function(n, fix, from, to) {
       counts[fix]++;
       if (changes.length < 200)
@@ -935,7 +1242,7 @@
         }
       }
       if (fixes.indexOf("names") !== -1 && n.type !== "TEXT" && DEFAULT_NAME.test(n.name)) {
-        const name = nameFromContent(n);
+        const name = roleFor(n);
         if (name && name !== n.name) {
           const from = n.name;
           n.name = name;
@@ -944,52 +1251,6 @@
       }
     }
     return { scope: scope.label, fixed: counts, changes, truncated: scope.truncated || changes.length >= 200 };
-  }
-  function firstText(n, depth) {
-    if (n.type === "TEXT")
-      return n.characters;
-    if (depth > 3 || !("children" in n))
-      return "";
-    for (let i = 0;i < n.children.length; i++) {
-      if (n.children[i].visible === false)
-        continue;
-      const t = firstText(n.children[i], depth + 1);
-      if (t.trim())
-        return t;
-    }
-    return "";
-  }
-  function hasImage(n) {
-    return "fills" in n && n.fills !== figma.mixed && n.fills.some(function(f) {
-      return f.type === "IMAGE" && f.visible !== false;
-    });
-  }
-  function vectorOnly(n) {
-    if (n.type === "VECTOR" || n.type === "BOOLEAN_OPERATION" || n.type === "STAR" || n.type === "POLYGON")
-      return true;
-    if (!("children" in n) || !n.children.length || n.type === "TEXT")
-      return false;
-    for (let i = 0;i < n.children.length; i++)
-      if (!vectorOnly(n.children[i]))
-        return false;
-    return true;
-  }
-  function nameFromContent(n) {
-    if (hasImage(n))
-      return "Image";
-    if (n.type === "VECTOR" || (n.type === "GROUP" || n.type === "FRAME") && vectorOnly(n))
-      return "Icon";
-    const text = firstText(n, 0).split(`
-`)[0].trim();
-    if (text)
-      return text.length > 32 ? text.slice(0, 31) + "…" : text;
-    if (n.layoutMode === "HORIZONTAL")
-      return "Row";
-    if (n.layoutMode === "VERTICAL")
-      return "Column";
-    if (n.layoutMode === "GRID")
-      return "Grid";
-    return null;
   }
 
   // plugin/lib/audit.ts
@@ -1958,6 +2219,7 @@
       reactions: [],
       connectors: [],
       keys: {},
+      unnamed: {},
       requestId,
       total: countNodes(roots),
       lastProgress: 0
@@ -1980,6 +2242,15 @@
         cursorX = node.x + node.width + 80;
       }
       made.push(node);
+    }
+    for (let i = 0;i < made.length; i++) {
+      try {
+        applyRoleNames(made[i], function(n) {
+          return !!ctx.unnamed[n.id];
+        });
+      } catch (e) {
+        ctx.warnings.push("Layer names: " + (e.message || e));
+      }
     }
     if (ctx.reactions.length)
       await applyBuildReactions(ctx.reactions, ctx.ids, ctx.warnings);
@@ -2173,8 +2444,8 @@
       node.name = String(s.name);
     else if (type === "icon")
       node.name = "icon/" + s.icon;
-    else if (type === "frame" || type === "component")
-      node.name = roleName(s);
+    else if (NAMED_BY_ROLE.indexOf(type) !== -1)
+      ctx.unnamed[node.id] = true;
     if (type === "frame" || type === "component")
       await setupFrame(node, s, ctx, path);
     else if (type === "slide")
@@ -2243,16 +2514,7 @@
     }
     return node;
   }
-  function roleName(s) {
-    const layout = String(s.layout || s.direction || "").toLowerCase();
-    if (layout === "grid")
-      return "Grid";
-    if (layout === "row" || layout === "horizontal")
-      return "Row";
-    if (layout === "column" || layout === "col" || layout === "vertical")
-      return "Column";
-    return Array.isArray(s.children) && s.children.length ? "Container" : "Box";
-  }
+  var NAMED_BY_ROLE = ["frame", "component", "text", "rect", "ellipse", "line", "image", "svg"];
   var FIXED_LOOK = ["sticky", "shape", "table", "codeblock"];
   async function setupFrame(f, s, ctx, path, keepFills) {
     if (!keepFills)
@@ -3135,7 +3397,7 @@
   }
 
   // plugin/lib/describe.ts
-  async function describe(p) {
+  async function describe2(p) {
     let targets;
     if (p.nodeId)
       targets = [await getNode(p.nodeId)];
@@ -3980,7 +4242,7 @@
 
   // plugin/lib/roblox.ts
   var MAX_NODES5 = 2000;
-  var VECTORS = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "LINE"];
+  var VECTORS2 = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "LINE"];
   async function robloxTree(p) {
     const node = p.nodeId ? await getNode(p.nodeId) : figma.currentPage.selection[0];
     if (!node)
@@ -4017,7 +4279,7 @@
     return out;
   }
   function vectorOnly2(n) {
-    if (VECTORS.indexOf(n.type) !== -1)
+    if (VECTORS2.indexOf(n.type) !== -1)
       return true;
     if (n.type === "TEXT" || !("children" in n) || !n.children.length)
       return false;
@@ -4424,7 +4686,7 @@
   var HANDLERS = {
     run_script: runScript,
     build,
-    describe,
+    describe: describe2,
     find: find2,
     get_design_system: getDesignSystem,
     design_tokens: designTokens,
@@ -4675,7 +4937,7 @@
     },
     describe: async function(node, depth) {
       const id = node && typeof node === "object" ? node.id : node;
-      const out = await describe({ nodeId: id, depth });
+      const out = await describe2({ nodeId: id, depth });
       return out.outline;
     }
   };

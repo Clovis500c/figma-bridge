@@ -3,8 +3,13 @@
 `export_roblox` turns a Figma frame into Roblox UI that looks the same. It uses native Roblox UI objects wherever they
 can match the design, and pictures only for what Roblox can't draw.
 
+By default everything is in **scale**: sizes, positions, padding, gaps, grid cells, corner radii, strokes and shadows
+are fractions of their parent, so the UI keeps its proportions on every screen. Nothing is in offset unless you ask for
+`mode: "offset"` or `"hybrid"`. Instances get professional PascalCase names (`ShopGui`, `ItemCard`, `TitleLabel`,
+`BuyButton`, `CoinIcon`): see [Names](#names).
+
 ```json
-{ "nodeId": "12:34", "mode": "scale", "targetResolution": [1920, 1080], "rasterize": "auto" }
+{ "nodeId": "12:34", "targetResolution": [1920, 1080], "rasterize": "auto" }
 ```
 
 It writes to a new folder (or `outDir`):
@@ -13,7 +18,7 @@ It writes to a new folder (or `outDir`):
 |---|---|
 | `<Name>.rbxmx` | A Roblox model: a `ScreenGui` with the UI, or the root `Frame` with `asRootFrame: true`. Drag it into Studio. |
 | `<Name>.luau` | The same UI as a builder script for Studio's command bar or a Studio MCP's `execute_luau` (see below). |
-| `01-<layer>.png`… | The pictures: rasterized layers, 9-slice panels and shadows at 2×, and the original image fills. |
+| `01-<layer>.png`… | The pictures: rasterized layers and 9-slice panels at 2×, and the original image fills. |
 | `assets.json` | One entry per picture: `placeholder`, `file`, `layer`, `kind`, and `assetId` once uploaded. |
 
 The tool returns the paths, the asset list, font substitutions, warnings (everything approximated or skipped), a `next`
@@ -57,36 +62,34 @@ an unchanged picture is never uploaded twice. Rate limits (429) and server error
 
 | Option | Default | Effect |
 |---|---|---|
-| `mode` | `scale` | `scale`: every size, position, padding, gap and corner radius is a share of its parent (no offsets, no `AutomaticSize`), labels use `TextScaled`, and the root keeps the design ratio with a `UIAspectRatioConstraint` sized from the screen height. `fit`: Figma pixels plus a `UIScale` and a `FitToScreen` LocalScript. `offset`: pixels, no scaling. `hybrid`: scale for free-positioned layers, pixels inside auto-layout. |
+| `mode` | `scale` | `scale`: no offsets at all (see [Scale](#scale)). `offset`: pixels everywhere. `hybrid`: scale for free-positioned layers, pixels inside auto-layout. Use the last two only when asked. |
 | `targetResolution` | `[1920, 1080]` | The screen the UI is designed for: sizes the root and scales text (below). |
 | `rasterize` | `auto` | `auto`: pictures only where needed. `none`: never, approximate instead (with a warning). `all`: every styled layer becomes a picture (pixel-exact, not editable). |
 | `asRootFrame` | `false` | The root is a `Frame` instead of a `ScreenGui` (to insert into an existing GUI). |
-| `textScaled` | `false` | `TextScaled` on every label. `UITextSizeConstraint` keeps the design size as the maximum. |
+| `textScaled` | `false` | `TextScaled` on every label in `offset` and `hybrid` modes (always on in `scale` mode). |
 | `fonts` | | Figma family → Roblox family name or `rbxasset`/`rbxassetid` URL, e.g. `{"Inter":"GothamSSm"}`. |
 | `parent` | `game:GetService("StarterGui")` | Luau expression for the parent of the UI in the script. |
 
-### Why `scale` is the default
+## Scale
 
-Everything is relative: a layer's size and position are shares of its parent, the root's size is a share of the screen
-height and its `UIAspectRatioConstraint` keeps the design ratio. The whole UI grows and shrinks in one piece on PC,
-mobile and console, with no script, and it looks the same in Studio's edit mode as in play. Pictures (panels, shadows,
-icons) are stretched rather than 9-sliced, because their box keeps the design proportions.
+In `scale` mode no `UDim` or `UDim2` has an offset:
 
-Only `UIStroke.Thickness` stays in pixels (Roblox has no scale for it).
-
-### Names
-
-Instances get PascalCase names that say what they are, so scripts can use `gui.Popup.CloseButton`:
-
-| Figma layer | Roblox name |
+| What | Scale value |
 |---|---|
-| `Gift popup v2.2` | `GiftPopup` (its ScreenGui: `GiftPopupGui`) |
-| `Button · GIFT FOR 899`, `Icon · search` | `GiftFor899Button`, `SearchIcon` (role last) |
-| Text layer named after its text (`@clovis500c`) | `Clovis500cLabel` |
-| `Frame 12`, `Group 3` | `Row`, `Column`, `Grid` or `Container`, from its layout |
+| Size and position | Fraction of the parent (its content box, inside `UIPadding`, for auto-layout children) |
+| Hug sizing | The designed size as a fraction (no `AutomaticSize`, which works in pixels); content-sized layers centered in their parent stay centered |
+| `UIPadding` | Top and bottom ÷ the frame's height, left and right ÷ its width |
+| `UIListLayout.Padding` | Gap ÷ the content box along the fill direction |
+| `UIGridLayout` | `CellSize` and `CellPadding` ÷ the content box |
+| Panel pictures | Stretched, not 9-sliced: their box keeps the design proportions |
+| `UICorner` | Radius ÷ the shortest side (0.5 for pills and circles) |
+| `UIStroke` | `StrokeSizingMode = ScaledSize`, `Thickness` = stroke weight ÷ the shortest side |
+| `UIShadow` | `BlurRadius` ÷ the shortest side; `Offset` and `Spread` ÷ width and height |
+| Text | `TextScaled = true` with a `UITextSizeConstraint` (below) |
 
-Siblings with the same name get `2`, `3`… A frame with a drop shadow is a wrapper with the layer's name holding
-`Shadow` and `Panel` (or `Button`).
+Text sized to its content (auto width or auto height in Figma) may grow up to twice its design size on larger screens;
+text in a fixed box stays at most at its design size, so a loose box doesn't blow it up. `MinTextSize` is half the
+design size.
 
 ## Mapping
 
@@ -94,10 +97,11 @@ Siblings with the same name get `2`, `3`… A frame with a drop shadow is a wrap
 
 - `ScreenGui` with `ResetOnSpawn = false`, `ZIndexBehavior = Sibling`, `IgnoreGuiInset = true`.
 - The frame inside it is centered: `AnchorPoint (0.5, 0.5)`, `Position {0.5, 0}, {0.5, 0}`.
-- Size: `scale` sizes the root from the screen height with the design ratio. `fit` and `offset` keep the design size in pixels (`fit` then scales it with `FitScale`). Otherwise a frame with the target's aspect ratio (within 10%)
+- Size: `offset` keeps the design size in pixels. Otherwise a frame with the target's aspect ratio (within 10%)
   and at least 40% of its width is a full screen (`{1, 0}, {1, 0}`); anything else is sized as a fraction of the target
   resolution.
-- A `UIAspectRatioConstraint` keeps the frame's proportions.
+- A `UIAspectRatioConstraint` keeps the frame's proportions. A frame that isn't full screen is sized from the screen
+  height (`DominantAxis = Height`), since on phones the width varies most.
 - A full-screen design drawn at another size (say 960×540 for 1920×1080) scales its text by target width ÷ design
   width, except in `offset` mode.
 
@@ -105,14 +109,14 @@ Siblings with the same name get `2`, `3`… A frame with a drop shadow is a wrap
 
 | Figma layer | Roblox |
 |---|---|
-| Text | `TextLabel`; `TextButton` if it has a click/press interaction or its name contains Button, Btn or CTA |
+| Text | `TextLabel`; `TextButton` if it has a click/press interaction or its name contains Button, Btn or CTA, or is Close, Back, Buy, Confirm, Cancel, Next, Exit, Play, Claim, Equip… |
 | Frame, group, rectangle, ellipse with a native look | `Frame`; `CanvasGroup` when it has children and opacity < 1; `TextButton` (`Text = ""`) when clickable or named like a button |
 | Single image fill, no children, no stroke or effects | `ImageLabel` (`ImageButton` for buttons) |
 | Vector, boolean, star, polygon, line, or a frame made only of vectors (icons) | Picture: `ImageLabel` with the 2× PNG |
 | Layer with children whose background Roblox can't draw | 9-slice panel: `ImageLabel` with `ScaleType = Slice`, children on top |
 | Hidden layer | Skipped (counted in the warnings) |
 
-Roblox draws natively: one solid or linear-gradient fill, one solid stroke, corner radii, and opacity. Anything else
+Roblox draws natively: one solid or linear-gradient fill, one solid stroke, corner radii, drop shadows and opacity. Anything else
 (several fills, radial, angular or diamond gradients, a stroke with a gradient or several strokes, dashed strokes,
 blurs, inner shadows, an oval ellipse, an image with a stroke or effects) is rasterized. With `rasterize: "none"` it is
 approximated (first fill, largest radius) and listed in the warnings.
@@ -126,30 +130,30 @@ All buttons get `AutoButtonColor = false` so they keep the design's colors.
 | Solid fill | `BackgroundColor3`, `BackgroundTransparency = 1 − fill opacity × layer opacity` |
 | No fill | `BackgroundTransparency = 1` |
 | Linear gradient | White background + `UIGradient`: `Color` (ColorSequence), `Transparency` (NumberSequence), `Rotation` = gradient angle; at most 20 stops |
-| Image fill behind children | `ImageLabel` named Background filling the frame, below the children |
-| Corner radius | `UICorner`: `CornerRadius {0, r}` with the largest radius; `{0.5, 0}` for circles and full pills, so they stay round at any size |
-| Solid stroke | `UIStroke`: `ApplyStrokeMode = Border`, `Color`, `Thickness`, `Transparency`, `LineJoinMode = Round` |
+| Image fill behind children | `ImageLabel` named BackgroundImage filling the frame, below the children |
+| Corner radius | `UICorner` with the largest radius (scale: ÷ shortest side; offset: pixels); `{0.5, 0}` for circles and full pills, so they stay round at any size |
+| Solid stroke | `UIStroke`: `ApplyStrokeMode = Border`, `Color`, `Thickness`, `Transparency`, `LineJoinMode = Round`, `BorderStrokePosition` Inner / Center / Outer from the stroke's alignment; `StrokeSizingMode = ScaledSize` in scale mode |
 | Clip content | `ClipsDescendants = true` |
 | Opacity with children | `CanvasGroup` with `GroupTransparency` |
 | Rotation | `Rotation` (degrees, clockwise) |
 | Every frame | `BorderSizePixel = 0` |
-| Drop shadows | A wrapper `Frame` that takes the layer's place, holding a `Shadow` `ImageLabel` (9-slice picture of the shadows only, `ZIndex 1`, extended by the shadow's overflow) and the frame itself (`Size {1, 0}, {1, 0}`, `ZIndex 2`) |
+| Drop shadow | Native `UIShadow`: `Color`, `Transparency = 1 − alpha`, `BlurRadius`, `Offset`, `Spread` (2 × Figma's spread); the largest one when there are several (warning). Also on images and 9-slice panels. Text shadows are ignored (warning). |
 
 ### Auto-layout
 
 | Figma | Roblox |
 |---|---|
-| Horizontal / vertical | `UIListLayout`: `FillDirection`, `SortOrder = LayoutOrder`, `Padding = {0, gap}` |
+| Horizontal / vertical | `UIListLayout`: `FillDirection`, `SortOrder = LayoutOrder`, `Padding` = gap |
 | Main-axis alignment start / center / end | `HorizontalAlignment` or `VerticalAlignment` Left/Top, Center, Right/Bottom |
 | Space between | `HorizontalFlex` / `VerticalFlex = SpaceBetween`, `Padding = 0` |
 | Cross-axis alignment | The other alignment property; baseline becomes top (warning) |
 | Wrap | `Wraps = true` |
 | Padding | `UIPadding` (`PaddingTop`, `PaddingRight`, `PaddingBottom`, `PaddingLeft`) |
-| Grid | `UIGridLayout`: `CellSize` from the first cell, `CellPadding = {0, column gap}, {0, row gap}`, `FillDirectionMaxCells` = columns (cells of different sizes: warning) |
+| Grid | `UIGridLayout`: `CellSize` from the first cell, `CellPadding` = column and row gaps, `FillDirectionMaxCells` = columns (cells of different sizes: warning) |
 | Child order | `LayoutOrder` 1, 2, 3… |
 | Fill on the main axis | `UIFlexItem` with `FlexMode = Fill` |
 | Fill on the cross axis | Size scale 1 on that axis |
-| Hug | Size 0 on that axis + `AutomaticSize` X, Y or XY (text and auto-layout frames) |
+| Hug | `scale`: the designed size; `offset` and `hybrid`: size 0 on that axis + `AutomaticSize` X, Y or XY (text and auto-layout frames) |
 | Fixed | `scale` mode: fraction of the parent's content box; `offset` and `hybrid`: pixels |
 | Absolute-positioned children | The layout and the flow children go into a transparent `Content` frame (`Size {1, 0}, {1, 0}`); absolute children sit next to it, placed by their constraints, with a `ZIndex` that keeps Figma's stacking order |
 
@@ -179,12 +183,12 @@ Free-positioned layers get `ZIndex` 1, 2, 3… in Figma's order (later layers on
 | Font family | `FontFace` family `rbxasset://fonts/families/<Name>.json` (table below; `fonts` overrides it) |
 | Font weight | `FontFace` weight: the closest of Thin 100, ExtraLight 200, Light 300, Regular 400, Medium 500, SemiBold 600, Bold 700, ExtraBold 800, Heavy 900 |
 | Italic / oblique style | `FontFace` style Italic |
-| Font size | `TextSize` (scaled for full screens, see Root) + `UITextSizeConstraint`: `MaxTextSize` = size, `MinTextSize` = half |
+| Font size | `TextSize` (scaled for full screens, see Root) + `UITextSizeConstraint` (`MinTextSize` = half; `MaxTextSize` = size, or twice the size for auto-sized text in scale mode) + `TextScaled` in scale mode |
 | Fill color and opacity | `TextColor3`, `TextTransparency` |
 | Horizontal alignment | `TextXAlignment` Left, Center, Right (justified: Left) |
 | Vertical alignment | `TextYAlignment` Top, Center, Bottom |
 | Fixed width or fixed size | `TextWrapped = true` |
-| Auto width | No wrapping; hug sizing adds `AutomaticSize` |
+| Auto width | No wrapping (`AutomaticSize` in offset and hybrid modes) |
 | Line height | `LineHeight` = line height ÷ (1.2 × size), between 1 and 3 |
 | Truncate with max lines | `TextTruncate = AtEnd` |
 | Several styles in one text | `RichText = true`, the longest run sets the label's style and the others become tags: `<font color size weight family transparency>`, `<i>`, `<u>`, `<s>`, `<uc>`, `<sc>` |
@@ -219,23 +223,40 @@ Inconsolata, Arimo, and Gotham (GothamSSm). Close matches stand in for the other
 | Image fill: tile | `ScaleType = Tile` |
 | Image corner radius | `UICorner` |
 | Every image layer and picture | `UIAspectRatioConstraint` with its proportions |
-| Picture of a layer | `ImageLabel`, `ScaleType = Stretch`, 2× PNG; when the picture is larger than the layer (shadows, outside strokes) the box grows by that overflow, in pixels |
+| Picture of a layer | `ImageLabel`, `ScaleType = Stretch`, 2× PNG; when the picture is larger than the layer (shadows, outside strokes) the box grows by that overflow (as a fraction of the parent in scale mode) |
 | 9-slice panel | Picture of the layer's own fill and stroke (no children, no effects), `ScaleType = Slice`, `SliceScale = 0.5`, `SliceCenter` inset by radius + stroke + 2 px (at 2×) |
-| Shadow | Picture of the drop shadows only, `ScaleType = Slice`, `SliceCenter` inset by radius + blur + spread + offset (at 2×) |
 | Layer opacity | `ImageTransparency` |
 
 Image fills keep their original file (Roblox takes PNG, JPG, BMP and TGA: other formats get a warning).
 
-### Names and order
+### Names
 
-Instances keep the Figma layer names. The Luau script declares one `local` per instance (named after the layer, made
-unique), groups each top-level section under a comment, sets every property before `Parent`, and uses `Font.new` /
-`FontFace`, never the deprecated `Font` enum property. Up to 2000 layers are exported per call.
+Instance names follow the convention of Roblox's own UI examples (`HUDContainer`, `CloseButton`, `HeaderTextLabel`,
+`MeterBar`): PascalCase, no spaces, the role first and the kind of instance last.
+
+- A layer with a real name keeps it in PascalCase: `Shop card` → `ShopCard`, `Button/Primary` → `PrimaryButton`,
+  `icon/lucide:coins` → `CoinsIcon`.
+- A layer Figma named (`Frame 12`, `Rectangle 3`, a text layer named after its text) gets its role, the same rules as
+  `build` and `audit {fix:true}` use in Figma ([docs/naming.md](naming.md)): `Header`, `Card`, `CardList`, `Actions`,
+  `Row`, `Container`, `Title`, `Description`, `Label`, `Value`, `Button`, `Badge`, `Icon`, `Image`, `Avatar`, `Divider`…
+- The kind of instance is added when the name doesn't say it: `TextLabel` → `…Label` (`TitleLabel`), buttons →
+  `…Button` (`Btn` becomes `Button`), icons → `…Icon`, images → `…Image`, frames with a background → `…Frame`, other
+  frames → `…Container`, unless the name already ends with a role word (`Card`, `Panel`, `Bar`, `List`, `Header`,
+  `Badge`, `Content`…).
+- The `ScreenGui` is the root's name + `Gui` (`ShopCardGui`).
+- Siblings that would share a name are numbered: `Card1`, `Card2`, `Card3`.
+
+The Luau script declares one `local` per instance (camelCase of its name, made unique), groups each top-level section
+under a comment, sets every property before `Parent`, and uses `Font.new` / `FontFace`, never the deprecated `Font`
+enum property. Up to 2000 layers are exported per call.
 
 ## Limits
 
 - Not verifiable without Roblox Studio: how close a font substitution looks, and exact text metrics (Roblox and Figma
   lay out text differently: check line breaks in the Studio screenshot).
 - Text strokes, text shadows, paragraph spacing and letter spacing have no Roblox equivalent.
+- `TextScaled` fits text to its box: rich text with several sizes may not keep their ratio (warning).
+- `UIShadow` blur and spread are converted 1:1 from Figma's values; how close the softness looks is only visible in
+  Studio.
 - Prototype interactions are not converted to scripts: buttons are created, their behavior is up to you.
 - Component variants export as their current state only.

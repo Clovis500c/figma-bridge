@@ -14,6 +14,7 @@ import {
 } from "./util";
 import { createCodeBlock, createConnector, createShape, createSlide, createSticky, createTable, requireEditor } from "./figjam";
 import { applyBuildReactions } from "./prototype";
+import { applyRoleNames } from "./roles";
 import { applyModes } from "./tokens";
 
 interface Ctx {
@@ -31,6 +32,8 @@ interface Ctx {
   connectors: { spec: any; parent: BaseNode & ChildrenMixin; path: string }[];
   /** key → node id: a stable handle for connectors that layer names can't give. */
   keys: { [key: string]: string };
+  /** Layers created without a name: named after their role (Card, Title, Button…) once their children exist. */
+  unnamed: { [id: string]: boolean };
   requestId?: string;
   total: number;
   lastProgress: number;
@@ -62,6 +65,7 @@ export async function build(p: any, _timeoutMs?: number, requestId?: string) {
     reactions: [],
     connectors: [],
     keys: {},
+    unnamed: {},
     requestId: requestId,
     total: countNodes(roots),
     lastProgress: 0,
@@ -84,6 +88,15 @@ export async function build(p: any, _timeoutMs?: number, requestId?: string) {
       cursorX = node.x + node.width + 80;
     }
     made.push(node);
+  }
+  for (let i = 0; i < made.length; i++) {
+    try {
+      applyRoleNames(made[i], function (n) {
+        return !!ctx.unnamed[n.id];
+      });
+    } catch (e) {
+      ctx.warnings.push("Layer names: " + ((e as Error).message || e));
+    }
   }
   if (ctx.reactions.length) await applyBuildReactions(ctx.reactions, ctx.ids, ctx.warnings);
   const connectors = await createConnectors(ctx);
@@ -269,7 +282,7 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
 
   if (s.name) node.name = String(s.name);
   else if (type === "icon") node.name = "icon/" + s.icon;
-  else if (type === "frame" || type === "component") node.name = roleName(s);
+  else if (NAMED_BY_ROLE.indexOf(type) !== -1) ctx.unnamed[node.id] = true;
 
   if (type === "frame" || type === "component") await setupFrame(node as FrameNode, s, ctx, path);
   else if (type === "slide") await setupFrame(node as any, s, ctx, path, true);
@@ -318,14 +331,8 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
   return node;
 }
 
-/** A name from what an unnamed frame does, never Figma's "Frame 12". */
-function roleName(s: any): string {
-  const layout = String(s.layout || s.direction || "").toLowerCase();
-  if (layout === "grid") return "Grid";
-  if (layout === "row" || layout === "horizontal") return "Row";
-  if (layout === "column" || layout === "col" || layout === "vertical") return "Column";
-  return Array.isArray(s.children) && s.children.length ? "Container" : "Box";
-}
+/** Types that get a role name (Card, Title, Divider…) when the spec gives none. */
+const NAMED_BY_ROLE = ["frame", "component", "text", "rect", "ellipse", "line", "image", "svg"];
 
 /** FigJam nodes with their own look (set when created): no generic fills, radius or resizing. */
 const FIXED_LOOK = ["sticky", "shape", "table", "codeblock"];

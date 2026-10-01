@@ -19,14 +19,14 @@ and any other MCP client.
 
 ## Features
 
-- **Build whole layouts in one call** from a JSON spec: auto-layout and grid, rich text, icons, images, component sets with variants and properties, prototype links.
+- **Build whole layouts in one call** from a JSON spec: auto-layout and grid, rich text, icons, images, component sets with variants and properties, prototype links, and professional layer names (Header, Card, Title, PrimaryButton) ([naming](docs/naming.md)).
 - **Import any website or HTML** as editable auto-layout frames, one per viewport ([details](docs/import-web.md)).
 - **Round-trip the design system**: write variables with Light/Dark modes and styles from JSON, W3C tokens or Tailwind; export them to DTCG, CSS, Tailwind v3/v4, SCSS or TypeScript ([details](docs/design-system.md)).
 - **Score and fix design system health**: token coverage, contrast, text styles, detached instances, duplicates, naming, with safe automatic fixes.
 - **Read existing designs** compactly, search every page, and reuse the file's design system.
 - **Check its own work** with screenshots, a design audit, and a pixel diff against a mockup.
 - **Hand off to your codebase**: export a frame into your project with its own components, tokens and stack (React, Next, Vue, Svelte, React Native; Tailwind, CSS modules, styled-components; shadcn, MUI, Chakra) ([details](docs/export-code.md)), plus Dev Mode annotations.
-- **Ship to Roblox**: turn a frame into native Roblox UI (ScreenGui, UIListLayout, UICorner, UIStroke, 9-slice panels) as an `.rbxmx` model and a Luau script for a Roblox Studio MCP, with optional asset upload ([details](docs/roblox.md)).
+- **Ship to Roblox**: turn a frame into native Roblox UI (ScreenGui, UIListLayout, UICorner, UIStroke, UIShadow, 9-slice panels), all in scale with professional names, as an `.rbxmx` model and a Luau script for a Roblox Studio MCP, with optional asset upload ([details](docs/roblox.md)).
 - **Figma Design, FigJam and Slides**: stickies, shapes, connectors, tables, Mermaid flowcharts laid out as diagrams, and slide decks; several files at once ([details](docs/figjam-slides.md)).
 - **200 000+ icons** through Iconify, checkpoints to roll back, and a library of reusable scripts.
 - **Zero-friction connection**: the plugin connects and reconnects on its own. Each AI command is one Ctrl+Z step, and you can cancel it from the plugin.
@@ -165,7 +165,7 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 | `prototype` | Link frames (click, hover, transitions) and set flow starting points |
 | `annotate` | Add, list or clear Dev Mode annotations |
 | `export_code` | Export a frame to code; with `projectPath`, code that uses the project's components and tokens |
-| `export_roblox` | Export a frame to Roblox UI: `.rbxmx`, a Luau builder script and PNG assets, optionally uploaded |
+| `export_roblox` | Export a frame to Roblox UI in scale: `.rbxmx`, a Luau builder script and PNG assets, optionally uploaded |
 | `insert_icon` · `search_icons` | Iconify icons as editable vectors |
 | `place_image` · `import_svg` | Images from disk or URL, SVG as vectors |
 | `checkpoint` | Save layers and restore them later |

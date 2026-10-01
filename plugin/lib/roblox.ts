@@ -243,7 +243,7 @@ export async function robloxImages(p: any) {
       // Roblox shrinks images over 1024 px, which breaks 9-slice centers: stay under it.
       const box = node.absoluteRenderBounds || node.absoluteBoundingBox;
       if (box) scale = Math.min(scale, Math.floor((1024 / Math.max(1, box.width, box.height)) * 1000) / 1000);
-      const bytes = await withTimeout(node.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: scale } }), 20000, "export timed out");
+      const bytes = await withTimeout<Uint8Array>(node.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: scale } }), 20000, "export timed out");
       const rb = node.absoluteRenderBounds || node.absoluteBoundingBox;
       const bb = node.absoluteBoundingBox;
       out.push({
