@@ -214,6 +214,46 @@ const tokenCleanup = await call("run_script", {
 });
 check("design_tokens cleanup", !tokenCleanup.isError, tokenCleanup.data.result ?? tokenCleanup.data);
 
+const set = await call("build", {
+  select: false,
+  spec: {
+    type: "componentSet",
+    name: "selftest Button",
+    base: { layout: "row", padding: [8, 16], radius: 8, children: [{ name: "Label", text: "Button", bind: "Label" }, { name: "Dot", type: "ellipse", size: 8, fill: "#FFFFFF", bind: { visible: "Show dot" } }] },
+    properties: { "Show dot": { type: "boolean", default: false } },
+    variants: [{ props: { Variant: "Primary" }, fill: "#0D99FF" }, { props: { Variant: "Secondary" }, fill: "#E5E7EB" }],
+  },
+});
+const setInfo = await call("run_script", {
+  code: `const n = await figma.getNodeByIdAsync(${JSON.stringify(set.data.rootId)}); return { type: n.type, variants: n.children.length, props: Object.keys(n.componentPropertyDefinitions).map((k) => k.split("#")[0]).sort() }`,
+});
+check(
+  "build componentSet",
+  !set.isError && setInfo.data.result?.type === "COMPONENT_SET" && setInfo.data.result.variants === 2 && setInfo.data.result.props.join() === "Label,Show dot,Variant",
+  setInfo.data.result ?? set.data,
+);
+
+const grid = await call("build", {
+  select: false,
+  spec: { name: "selftest grid", layout: "grid", columns: 3, gap: 8, children: [{ w: 40, h: 40, fill: "#0D99FF", span: [1, 2] }, ...Array.from({ length: 4 }, () => ({ w: 40, h: 40, fill: "#E5E7EB" }))] },
+});
+const gridInfo = await call("run_script", { code: `const n = await figma.getNodeByIdAsync(${JSON.stringify(grid.data.rootId)}); return { mode: n.layoutMode, cols: n.gridColumnCount, rows: n.gridRowCount }` });
+check("build grid", !grid.isError && (gridInfo.data.result?.mode === "GRID" ? gridInfo.data.result.cols === 3 : /grid/.test(String(grid.data.warnings))), { ...gridInfo.data.result, warnings: grid.data.warnings });
+
+const rich = await call("build", {
+  select: false,
+  spec: { name: "selftest rich", spans: [{ text: "Read the " }, { text: "docs", weight: 700, color: "#0D99FF", link: "https://figma.com" }, { text: " now", size: 20 }] },
+});
+const richInfo = await call("run_script", {
+  code: `const t = await figma.getNodeByIdAsync(${JSON.stringify(rich.data.rootId)}); return { text: t.characters, style: t.getRangeFontName(9, 13).style, link: t.getRangeHyperlink(9, 13)?.value, size: t.getRangeFontSize(13, 17) }`,
+});
+check("build spans", !rich.isError && richInfo.data.result?.style === "Bold" && richInfo.data.result.size === 20 && !!richInfo.data.result.link, richInfo.data.result ?? rich.data);
+
+const buildCleanup = await call("run_script", {
+  code: `for (const id of ${JSON.stringify([set.data.rootId, grid.data.rootId, rich.data.rootId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,
+});
+check("build 1.4 cleanup", !buildCleanup.isError, buildCleanup.data.result);
+
 const cleanup = await call("run_script", {
   code: `for (const id of ${JSON.stringify([frameId, img.data.nodeId, svg.data.nodeId, newCardId ?? cardId, icon.data.nodeId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,
 });

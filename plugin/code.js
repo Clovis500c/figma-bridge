@@ -765,7 +765,8 @@
       count: 0,
       images: p.imageBytes || {},
       fonts: {},
-      defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 }
+      defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 },
+      binds: []
     };
     await preloadFonts(roots, ctx);
     const parent = await parentFor(p.parentId);
@@ -786,6 +787,8 @@
       }
       made.push(node);
     }
+    for (let i = 0;i < ctx.binds.length; i++)
+      ctx.warnings.push(ctx.binds[i].path + ": bind needs a component or componentSet ancestor, ignored");
     if (p.select !== false && made.length && parent.type === "PAGE" && parent === figma.currentPage) {
       figma.currentPage.selection = made;
       figma.viewport.scrollAndZoomIntoView(made);
@@ -805,6 +808,11 @@
   function fontKey(s, ctx) {
     return parseFont(s.font || ctx.defaults.font, s.weight, ctx.defaults.font);
   }
+  function spanFont(s, span, ctx) {
+    if (!span.font && span.weight === undefined)
+      return null;
+    return parseFont(span.font || s.font || ctx.defaults.font, span.weight !== undefined ? span.weight : span.font ? undefined : s.weight, ctx.defaults.font);
+  }
   async function preloadFonts(roots, ctx) {
     const wanted = {};
     const walk = function(s) {
@@ -813,9 +821,19 @@
       if (nodeType(s) === "text") {
         const f = fontKey(s, ctx);
         wanted[f.family + ":" + f.style] = f;
+        const spans = Array.isArray(s.spans) ? s.spans : [];
+        for (let i = 0;i < spans.length; i++) {
+          const sf = spanFont(s, spans[i] || {}, ctx);
+          if (sf)
+            wanted[sf.family + ":" + sf.style] = sf;
+        }
       }
       if (Array.isArray(s.children))
         s.children.forEach(walk);
+      if (Array.isArray(s.variants)) {
+        for (let i = 0;i < s.variants.length; i++)
+          walk(Object.assign({}, s.base || {}, s.variants[i], { type: "component" }));
+      }
     };
     roots.forEach(walk);
     const keys = Object.keys(wanted);
@@ -835,10 +853,12 @@
   }
   function nodeType(s) {
     if (s.type) {
-      const t = String(s.type).toLowerCase();
-      return t === "rectangle" ? "rect" : t === "circle" ? "ellipse" : t;
+      const t = String(s.type).toLowerCase().replace(/[_\s-]/g, "");
+      return t === "rectangle" ? "rect" : t === "circle" ? "ellipse" : t === "variants" ? "componentset" : t;
     }
-    if (s.text !== undefined)
+    if (Array.isArray(s.variants))
+      return "componentset";
+    if (s.text !== undefined || Array.isArray(s.spans))
       return "text";
     if (s.svg)
       return "svg";
@@ -888,18 +908,26 @@
       case "instance":
         node = await createInstance(s, path);
         break;
+      case "componentset":
+        node = await createComponentSet(s, parent, ctx, path);
+        break;
       default:
         throw codeError(path + ': unknown type "' + s.type + '"', "BAD_ARGS");
     }
     ctx.count++;
     parent.appendChild(node);
     const parentAuto = isAutoLayout(parent);
+    if (s.bind)
+      ctx.binds.push({ node, bind: s.bind, path });
+    const bindStart = ctx.binds.length;
     if (s.name)
       node.name = String(s.name);
     else if (type === "icon")
       node.name = "icon/" + s.icon;
     if (type === "frame" || type === "component")
       await setupFrame(node, s, ctx, path);
+    else if (type === "componentset")
+      await setupLayout(node, Object.assign({ layout: "row", wrap: true, gap: 16, padding: 16 }, s), ctx, path);
     else if (type === "text")
       await setupText(node, s, ctx);
     else if (type === "image")
@@ -913,8 +941,20 @@
     }
     if (type === "instance" && s.text && typeof s.text === "object")
       await overrideTexts(node, s.text, ctx);
+    if (type === "componentset" && s.stroke === undefined) {
+      const set = node;
+      set.strokes = [solid("#9747FF")];
+      set.dashPattern = [10, 5];
+      set.cornerRadius = 5;
+    }
     await applyVisuals(node, s, ctx, type);
+    if (type === "text" && Array.isArray(s.spans))
+      await applySpans(node, s, ctx, path);
     applySize(node, s, parentAuto, type, ctx, path);
+    if (type === "component" && !s.variantOf)
+      await addProperties(node, s.properties, ctx.binds.splice(bindStart), ctx, path);
+    if (parent.layoutMode === "GRID")
+      placeInGrid(node, s, ctx, path);
     if (s.absolute && parentAuto)
       node.layoutPositioning = "ABSOLUTE";
     if (!parentAuto || s.absolute) {
@@ -944,9 +984,28 @@
   }
   async function setupFrame(f, s, ctx, path) {
     f.fills = [];
+    await setupLayout(f, s, ctx, path);
+    const children = Array.isArray(s.children) ? s.children : [];
+    for (let i = 0;i < children.length; i++) {
+      try {
+        await createNode(children[i], f, ctx, path + ".children[" + i + "]");
+      } catch (e) {
+        if (e.code === "TOO_LARGE")
+          throw e;
+        ctx.warnings.push(path + ".children[" + i + "]: " + (e.message || e));
+      }
+    }
+  }
+  async function setupLayout(f, s, ctx, path) {
     const layout = String(s.layout || s.direction || "").toLowerCase();
-    const mode = layout === "row" || layout === "horizontal" ? "HORIZONTAL" : layout === "column" || layout === "col" || layout === "vertical" ? "VERTICAL" : "NONE";
+    let mode = layout === "row" || layout === "horizontal" ? "HORIZONTAL" : layout === "column" || layout === "col" || layout === "vertical" ? "VERTICAL" : layout === "grid" ? "GRID" : "NONE";
     f.clipsContent = !!s.clip;
+    if (mode === "GRID") {
+      if (await setupGrid(f, s, ctx, path))
+        return;
+      mode = "HORIZONTAL";
+      s = Object.assign({}, s, { wrap: true, rowGap: s.rowGap !== undefined ? s.rowGap : s.gap, gap: s.columnGap !== undefined ? s.columnGap : s.gap });
+    }
     if (mode !== "NONE") {
       f.layoutMode = mode;
       f.primaryAxisSizingMode = "AUTO";
@@ -973,21 +1032,118 @@
     } else if (s.w === undefined && s.width === undefined && s.size === undefined) {
       f.resize(100, 100);
     }
-    const children = Array.isArray(s.children) ? s.children : [];
-    for (let i = 0;i < children.length; i++) {
+  }
+  function track(v, fallback) {
+    if (typeof v === "number")
+      return { type: "FIXED", value: v };
+    const str = String(v === undefined ? "" : v).toLowerCase();
+    if (str === "hug" || str === "auto")
+      return { type: "HUG" };
+    const fr = /^([\d.]+)fr$/.exec(str);
+    if (fr)
+      return { type: "FLEX", value: parseFloat(fr[1]) };
+    const px = /^([\d.]+)(px)?$/.exec(str);
+    if (px)
+      return { type: "FIXED", value: parseFloat(px[1]) };
+    return fallback === "FLEX" ? { type: "FLEX", value: 1 } : { type: "HUG" };
+  }
+  async function setupGrid(f, s, ctx, path) {
+    try {
+      f.layoutMode = "GRID";
+    } catch (e) {
+      ctx.warnings.push(path + ": grid auto-layout is not available in this Figma version, used a wrapping row");
+      return false;
+    }
+    const kids = Array.isArray(s.children) ? s.children : [];
+    const cols = Array.isArray(s.columns) ? s.columns : null;
+    const rows = Array.isArray(s.rows) ? s.rows : null;
+    const colCount = Math.max(1, cols ? cols.length : Number(s.columns) || 2);
+    let cells = 0;
+    for (let i = 0;i < kids.length; i++)
+      cells += spanOf(kids[i], "col") * spanOf(kids[i], "row");
+    const rowCount = Math.max(1, rows ? rows.length : Number(s.rows) || Math.ceil(cells / colCount));
+    const fixedW = typeof s.w === "number" || typeof s.width === "number" || s.w === "fill";
+    const fixedH = typeof s.h === "number" || typeof s.height === "number" || s.h === "fill";
+    const set = function(what, fn) {
       try {
-        await createNode(children[i], f, ctx, path + ".children[" + i + "]");
+        fn();
       } catch (e) {
-        if (e.code === "TOO_LARGE")
-          throw e;
-        ctx.warnings.push(path + ".children[" + i + "]: " + (e.message || e));
+        ctx.warnings.push(path + ": grid " + what + ": " + (e.message || e));
       }
+    };
+    set("columns", function() {
+      f.gridColumnCount = colCount;
+    });
+    set("rows", function() {
+      f.gridRowCount = rowCount;
+    });
+    set("column sizes", function() {
+      for (let i = 0;i < colCount; i++)
+        applyTrack(f.gridColumnSizes[i], track(cols ? cols[i] : undefined, fixedW ? "FLEX" : "HUG"));
+    });
+    set("row sizes", function() {
+      for (let i = 0;i < rowCount; i++)
+        applyTrack(f.gridRowSizes[i], track(rows ? rows[i] : undefined, fixedH ? "FLEX" : "HUG"));
+    });
+    if (!fixedW)
+      set("sizing", function() {
+        f.layoutSizingHorizontal = "HUG";
+      });
+    if (!fixedH)
+      set("sizing", function() {
+        f.layoutSizingVertical = "HUG";
+      });
+    if ("gridItemsPositioning" in f)
+      set("auto flow", function() {
+        f.gridItemsPositioning = "ROW_AUTO_FLOW";
+      });
+    const colGap = s.columnGap !== undefined ? s.columnGap : s.gap;
+    const rowGap = s.rowGap !== undefined ? s.rowGap : s.gap;
+    if (colGap !== undefined && colGap !== "auto")
+      await setNumber(f, "gridColumnGap", colGap);
+    if (rowGap !== undefined && rowGap !== "auto")
+      await setNumber(f, "gridRowGap", rowGap);
+    if (s.padding !== undefined)
+      await setPadding(f, s.padding);
+    return true;
+  }
+  function applyTrack(t, spec) {
+    if (!t)
+      return;
+    t.type = spec.type;
+    if (spec.value !== undefined && spec.type !== "HUG")
+      t.value = spec.value;
+  }
+  function spanOf(s, axis) {
+    if (!s || typeof s !== "object")
+      return 1;
+    if (Array.isArray(s.span))
+      return Math.max(1, Number(axis === "row" ? s.span[0] : s.span[1]) || 1);
+    const v = axis === "col" ? s.colSpan !== undefined ? s.colSpan : s.span : s.rowSpan;
+    return Math.max(1, Number(v) || 1);
+  }
+  function placeInGrid(node, s, ctx, path) {
+    try {
+      if (spanOf(s, "col") > 1)
+        node.gridColumnSpan = spanOf(s, "col");
+      if (spanOf(s, "row") > 1)
+        node.gridRowSpan = spanOf(s, "row");
+      const align = { start: "MIN", center: "CENTER", end: "MAX" };
+      if (s.cellAlign && align[s.cellAlign])
+        node.gridChildHorizontalAlign = align[s.cellAlign];
+      if (s.cellValign && align[s.cellValign])
+        node.gridChildVerticalAlign = align[s.cellValign];
+    } catch (e) {
+      ctx.warnings.push(path + ": grid span: " + (e.message || e));
     }
   }
   async function setupText(t, s, ctx) {
     const wanted = fontKey(s, ctx);
     t.fontName = ctx.fonts[wanted.family + ":" + wanted.style] || { family: "Inter", style: "Regular" };
-    t.characters = String(s.text === undefined ? "" : s.text);
+    const spans = Array.isArray(s.spans) ? s.spans : [];
+    t.characters = spans.length ? spans.map(function(sp) {
+      return sp && sp.text !== undefined ? String(sp.text) : "";
+    }).join("") : String(s.text === undefined ? "" : s.text);
     t.fontSize = typeof s.size === "number" ? s.size : ctx.defaults.size;
     if (s.lineHeight !== undefined)
       t.lineHeight = lineHeight(s.lineHeight);
@@ -1020,6 +1176,42 @@
       await t.setTextStyleIdAsync(style.id);
     }
   }
+  async function applySpans(t, s, ctx, path) {
+    let at = 0;
+    for (let i = 0;i < s.spans.length; i++) {
+      const sp = s.spans[i] || {};
+      const end = at + String(sp.text === undefined ? "" : sp.text).length;
+      if (end === at)
+        continue;
+      try {
+        const f = spanFont(s, sp, ctx);
+        if (f)
+          t.setRangeFontName(at, end, ctx.fonts[f.family + ":" + f.style] || f);
+        if (typeof sp.size === "number")
+          t.setRangeFontSize(at, end, sp.size);
+        const color = sp.color !== undefined ? sp.color : sp.fill;
+        if (typeof color === "string" && color.indexOf("style:") === 0) {
+          await t.setRangeFillStyleIdAsync(at, end, (await findStyle("paint", stripPrefix(color))).id);
+        } else if (color !== undefined) {
+          t.setRangeFills(at, end, [await toPaint(color)]);
+        }
+        const deco = { underline: "UNDERLINE", strike: "STRIKETHROUGH", strikethrough: "STRIKETHROUGH", none: "NONE" };
+        if (sp.link) {
+          t.setRangeHyperlink(at, end, { type: "URL", value: String(sp.link) });
+          if (sp.decoration === undefined)
+            t.setRangeTextDecoration(at, end, "UNDERLINE");
+        }
+        if (sp.decoration && deco[sp.decoration])
+          t.setRangeTextDecoration(at, end, deco[sp.decoration]);
+        const cases = { upper: "UPPER", lower: "LOWER", title: "TITLE" };
+        if (sp.case && cases[sp.case])
+          t.setRangeTextCase(at, end, cases[sp.case]);
+      } catch (e) {
+        ctx.warnings.push(path + ".spans[" + i + "]: " + (e.message || e));
+      }
+      at = end;
+    }
+  }
   async function setupImage(r, s, ctx, path) {
     const bytes = ctx.images[s.imageKey];
     if (!bytes)
@@ -1041,8 +1233,7 @@
     if (!s.name)
       r.name = "Image";
   }
-  async function createInstance(s, path) {
-    const ref = String(s.component);
+  async function findComponent(ref, path) {
     let comp = null;
     if (/^[\dI;:]+$/.test(ref)) {
       const n = await figma.getNodeByIdAsync(ref);
@@ -1061,6 +1252,10 @@
     }
     if (!comp)
       throw codeError(path + ': component "' + ref + '" not found. Use get_design_system to list components.', "NOT_FOUND");
+    return comp;
+  }
+  async function createInstance(s, path) {
+    const comp = await findComponent(String(s.component), path);
     const main = comp.type === "COMPONENT_SET" ? comp.defaultVariant : comp;
     const inst = main.createInstance();
     if (s.props && typeof s.props === "object") {
@@ -1083,6 +1278,98 @@
         inst.setProperties(out);
     }
     return inst;
+  }
+  async function createComponentSet(s, parent, ctx, path) {
+    const variants = Array.isArray(s.variants) ? s.variants : [];
+    if (!variants.length)
+      throw codeError(path + ': a componentSet needs variants:[{props:{Variant:"Primary"}, ...}]', "BAD_ARGS");
+    const start = ctx.binds.length;
+    const comps = [];
+    for (let i = 0;i < variants.length; i++) {
+      const v = Object.assign({}, s.base || {}, variants[i] || {});
+      const props = v.props || {};
+      const keys = Object.keys(props);
+      if (!keys.length)
+        throw codeError(path + ".variants[" + i + ']: props:{Name:"value"} is required', "BAD_ARGS");
+      const spec = Object.assign({}, v, {
+        type: "component",
+        variantOf: true,
+        name: keys.map(function(k) {
+          return k + "=" + props[k];
+        }).join(", ")
+      });
+      delete spec.props;
+      comps.push(await createNode(spec, parent, ctx, path + ".variants[" + i + "]"));
+    }
+    const set = figma.combineAsVariants(comps, parent);
+    set.name = String(s.name || "Component");
+    await addProperties(set, s.properties, ctx.binds.splice(start), ctx, path);
+    return set;
+  }
+  async function addProperties(owner, properties, binds, ctx, path) {
+    const keys = {};
+    const types = {};
+    const props = properties && typeof properties === "object" ? properties : {};
+    const names = Object.keys(props);
+    for (let i = 0;i < names.length; i++) {
+      const name = names[i];
+      let def = props[name];
+      if (typeof def === "string")
+        def = { type: "text", default: def };
+      else if (typeof def === "boolean")
+        def = { type: "boolean", default: def };
+      const t = String(def.type || "text").toLowerCase();
+      try {
+        if (t === "boolean" || t === "bool") {
+          keys[name] = owner.addComponentProperty(name, "BOOLEAN", def.default !== false);
+          types[name] = "BOOLEAN";
+        } else if (t === "instance" || t === "instance_swap" || t === "swap") {
+          const comp = await findComponent(String(def.default), path + ".properties." + name);
+          const main = comp.type === "COMPONENT_SET" ? comp.defaultVariant : comp;
+          const preferred = [];
+          const list = Array.isArray(def.preferred) ? def.preferred : [];
+          for (let k = 0;k < list.length; k++) {
+            const p = await findComponent(String(list[k]), path + ".properties." + name);
+            preferred.push({ type: p.type === "COMPONENT_SET" ? "COMPONENT_SET" : "COMPONENT", key: p.key });
+          }
+          keys[name] = owner.addComponentProperty(name, "INSTANCE_SWAP", main.id, preferred.length ? { preferredValues: preferred } : undefined);
+          types[name] = "INSTANCE_SWAP";
+        } else {
+          keys[name] = owner.addComponentProperty(name, "TEXT", String(def.default === undefined ? "" : def.default));
+          types[name] = "TEXT";
+        }
+      } catch (e) {
+        ctx.warnings.push(path + ".properties." + name + ": " + (e.message || e));
+      }
+    }
+    for (let i = 0;i < binds.length; i++) {
+      const b = binds[i];
+      const map = typeof b.bind === "string" ? { auto: b.bind } : b.bind;
+      const refs = {};
+      const fields = Object.keys(map || {});
+      for (let k = 0;k < fields.length; k++) {
+        const prop = String(map[fields[k]]);
+        let field = fields[k];
+        if (!keys[prop] && b.node.type === "TEXT" && (field === "auto" || field === "characters")) {
+          keys[prop] = owner.addComponentProperty(prop, "TEXT", b.node.characters);
+          types[prop] = "TEXT";
+        }
+        if (!keys[prop]) {
+          ctx.warnings.push(b.path + ': no component property "' + prop + '" (declare it in properties)');
+          continue;
+        }
+        if (field === "auto")
+          field = types[prop] === "TEXT" ? "characters" : types[prop] === "BOOLEAN" ? "visible" : "mainComponent";
+        refs[field] = keys[prop];
+      }
+      if (!Object.keys(refs).length)
+        continue;
+      try {
+        b.node.componentPropertyReferences = Object.assign({}, b.node.componentPropertyReferences || {}, refs);
+      } catch (e) {
+        ctx.warnings.push(b.path + ": bind: " + (e.message || e));
+      }
+    }
   }
   async function overrideTexts(inst, texts, ctx) {
     const names = Object.keys(texts);
@@ -1580,6 +1867,10 @@
     return parts.join(" ");
   }
   function layoutText(n) {
+    if (n.layoutMode === "GRID") {
+      const gaps = n.gridColumnGap === n.gridRowGap ? "gap:" + round(n.gridColumnGap) : "gap:" + round(n.gridColumnGap) + "/" + round(n.gridRowGap);
+      return "grid " + n.gridColumnCount + "×" + n.gridRowCount + (n.gridColumnGap || n.gridRowGap ? " " + gaps : "");
+    }
     const out = [n.layoutMode === "HORIZONTAL" ? "row" : "column"];
     if (n.primaryAxisAlignItems === "SPACE_BETWEEN")
       out.push("gap:auto");

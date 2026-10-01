@@ -127,6 +127,8 @@ async function prepareSpec(spec: unknown, defaultColor: string) {
       delete node.src;
     }
     if (Array.isArray(node.children)) node.children.forEach(walk);
+    if (Array.isArray(node.variants)) node.variants.forEach(walk);
+    if (node.base) walk(node.base);
   };
   walk(spec);
   await Promise.all(jobs);
@@ -185,14 +187,18 @@ server.registerTool(
   {
     title: "Build a layout from a JSON spec",
     description: `Create a whole layout in ONE call from a declarative spec. Fonts load automatically, icons are fetched, images loaded. Much faster and safer than run_script for new UI.
-Node: {type?, name?, ...props, children?: Node[]}. type is inferred (text→text, icon→icon, src→image, component→instance, else frame). Types: frame, component, text, rect, ellipse, line, icon, image, svg, instance.
-FRAME: layout "row"|"column" (auto-layout; omit for free positioning), gap (number|"auto"), padding (n | [v,h] | [t,r,b,l]), align (cross axis: start|center|end|baseline), justify (main axis: start|center|end|between), wrap, rowGap, clip. Frames have no fill unless set.
+Node: {type?, name?, ...props, children?: Node[]}. type is inferred (text/spans→text, icon→icon, src→image, component→instance, variants→componentSet, else frame). Types: frame, component, componentSet, text, rect, ellipse, line, icon, image, svg, instance.
+FRAME: layout "row"|"column"|"grid" (auto-layout; omit for free positioning), gap (number|"auto"), padding (n | [v,h] | [t,r,b,l]), align (cross axis: start|center|end|baseline), justify (main axis: start|center|end|between), wrap, rowGap, clip. Frames have no fill unless set.
+GRID: layout:"grid", columns (count | tracks like [200,"1fr","2fr","hug"]), rows (same; default: enough rows, hugging), columnGap, rowGap (or gap). Children: span:[rows,cols] or colSpan/rowSpan, cellAlign/cellValign. Give the grid a w for "fr" columns.
 SIZE: w / h: number (fixed) | "fill" (stretch inside an auto-layout parent) | "hug". Auto-layout frames hug by default. grow:true. absolute:true with x/y inside auto-layout; x/y for children of free frames.
 TEXT: text, font ("Inter" | "Inter:Bold"), weight (400|500|600|700 or style name), size, color, lineHeight (1.5 | 24 | "150%"), letterSpacing (px | "2%"), align (left|center|right|justify), case (upper|lower|title), decoration (underline|strike), maxLines, textStyle "style:Name". Give w:"fill" or a number to wrap text.
+RICH TEXT: spans:[{text:"Read the "},{text:"docs",weight:600,color:"#0D99FF",link:"https://…"}] instead of text; a span may set font, weight, size, color, decoration, case, link.
 PAINT (fill, stroke, color): "#RRGGBB[AA]", "style:<paint style>", "var:<color variable>", {gradient:["#a","#b"], angle:90, type?:"radial"}, null. stroke + strokeWidth + strokeAlign (inside|center|outside).
 EFFECTS: radius (n | [tl,tr,br,bl] | "var:x"), opacity, shadow (true | {x,y,blur,spread,color} | [...] | "style:Name"), blur, backgroundBlur, rotation, visible.
 ICON: {icon:"lucide:house", size:20, color:"#111"} (any Iconify set). IMAGE: {src:"C:/img.png" | "https://…", w, h, fit:"fill"|"fit"|"crop"|"tile"}. SVG: {svg:"<svg…>"}.
 INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary", Label:"Buy"}, text:{"Label layer name":"Buy"}}.
+COMPONENT SET: {type:"componentSet", name:"Button", base:{shared frame spec}, variants:[{props:{Variant:"Primary",Size:"M"}, fill:"#0D99FF", children:[…]}, …], properties:{Label:"Button", "Show icon":{type:"boolean",default:true}, Icon:{type:"instance",default:"Icon/Star"}}}. One component per variant, combined as variants.
+On a layer inside a component: bind:"Label" links a text to a text property (created if missing); bind:{visible:"Show icon"} or {mainComponent:"Icon"} for the others. type:"component" takes properties too.
 gap/padding/radius accept "var:<number variable>". MODES: modes:{"Theme":"Dark"} sets a collection's variable mode on a frame and its children.
 Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
 Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`,

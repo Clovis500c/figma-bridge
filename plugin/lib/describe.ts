@@ -134,6 +134,10 @@ async function line(n: any): Promise<string> {
 }
 
 function layoutText(n: any): string {
+  if (n.layoutMode === "GRID") {
+    const gaps = n.gridColumnGap === n.gridRowGap ? "gap:" + round(n.gridColumnGap) : "gap:" + round(n.gridColumnGap) + "/" + round(n.gridRowGap);
+    return "grid " + n.gridColumnCount + "×" + n.gridRowCount + (n.gridColumnGap || n.gridRowGap ? " " + gaps : "");
+  }
   const out = [n.layoutMode === "HORIZONTAL" ? "row" : "column"];
   if (n.primaryAxisAlignItems === "SPACE_BETWEEN") out.push("gap:auto");
   else if (n.itemSpacing) out.push("gap:" + round(n.itemSpacing));
