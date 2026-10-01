@@ -4,12 +4,12 @@
     "module": "Preserve",
     "moduleResolution": "bundler",
     "lib": ["ESNext"],
-    "types": ["bun"],
+    "types": ["node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "test", "scripts"]
+  "include": ["src"]
 }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -71,6 +72,6 @@ export function loadLibrary(): { hash: string; lib: Record<string, string> } {
   if (cached && cached.stamp === stamp) return cached;
   const lib: Record<string, string> = {};
   for (const f of list) lib[f.slice(0, -3)] = readFileSync(join(SNIPPETS_DIR, f), "utf8");
-  cached = { stamp, hash: stamp ? Bun.hash(stamp + JSON.stringify(lib)).toString(36) : "empty", lib };
+  cached = { stamp, hash: stamp ? createHash("sha1").update(stamp + JSON.stringify(lib)).digest("base64url").slice(0, 12) : "empty", lib };
   return cached;
 }

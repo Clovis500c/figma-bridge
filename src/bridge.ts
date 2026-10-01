@@ -1,4 +1,7 @@
-import type { ServerWebSocket } from "bun";
+import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
+import { connect } from "node:net";
+import WebSocket, { WebSocketServer } from "ws";
 
 /**
  * Local WebSocket bridge between MCP agents and Figma plugin sessions.
@@ -17,6 +20,7 @@ const PARTIAL_TTL_MS = 60_000;
 const INFLIGHT_TTL_MS = 180_000;
 const HANDSHAKE_MS = 2_500;
 const PING_MS = 20_000;
+const IDLE_MS = 120_000;
 
 export type Msg = { t: string; [key: string]: any };
 
@@ -49,27 +53,20 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** True if anything accepts TCP connections on the port (IPv4 or IPv6 loopback). */
 async function portInUse(port: number): Promise<boolean> {
-  const probe = (hostname: string) =>
+  const probe = (host: string) =>
     new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), 500);
+      let settled = false;
+      const sock = connect({ host, port });
       const done = (v: boolean) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
+        sock.destroy();
         resolve(v);
       };
-      Bun.connect({
-        hostname,
-        port,
-        socket: {
-          open(sock) {
-            sock.end();
-            done(true);
-          },
-          data() {},
-          connectError() {
-            done(false);
-          },
-        },
-      }).catch(() => done(false));
+      const timer = setTimeout(() => done(false), 500);
+      sock.once("connect", () => done(true));
+      sock.once("error", () => done(false));
     });
   const [v4, v6] = await Promise.all([probe("127.0.0.1"), probe("::1")]);
   return v4 || v6;
@@ -89,7 +86,7 @@ export class Framer {
     if (text.length > MAX_MESSAGE_CHARS) {
       throw new BridgeError(`Message too large (${mb(text.length)}, max ${mb(MAX_MESSAGE_CHARS)})`, "TOO_LARGE");
     }
-    const cid = crypto.randomUUID();
+    const cid = randomUUID();
     const n = Math.ceil(text.length / CHUNK_CHARS);
     const frames: string[] = [];
     for (let i = 0; i < n; i++) {
@@ -126,9 +123,16 @@ interface PeerData {
   role?: "plugin" | "agent";
   channel?: string;
   session?: SessionInfo;
+  seen: number;
 }
 
-type Peer = ServerWebSocket<PeerData>;
+interface Peer {
+  ws: WebSocket;
+  data: PeerData;
+  send(text: string): void;
+  close(code: number, reason: string): void;
+}
+
 type Reply = (msg: Msg) => void;
 
 function sendFrames(ws: { send(data: string): unknown }, msg: Msg) {
@@ -142,51 +146,83 @@ function pluginOriginAllowed(origin: string | null) {
 }
 
 export class Hub {
-  private readonly server: ReturnType<typeof Bun.serve<PeerData>>;
   private plugins = new Map<string, Peer>();
+  private peers = new Set<Peer>();
   private inflight = new Map<string, { reply: Reply; plugin: string; owner: object; at: number }>();
   private sweeper: ReturnType<typeof setInterval>;
 
-  constructor(
+  private constructor(
     readonly port: number,
     private log: (line: string) => void,
-    readonly version = "",
+    readonly version: string,
+    private server: Server,
+    private wss: WebSocketServer,
   ) {
-    this.server = Bun.serve<PeerData>({
-      hostname: "127.0.0.1",
-      port,
-      fetch: (req, server) => {
-        const url = new URL(req.url);
-        if (url.pathname === "/health") {
-          return Response.json({ bridge: BRIDGE_NAME, protocol: PROTOCOL_VERSION, version: this.version, sessions: this.sessions() });
-        }
-        const origin = req.headers.get("origin");
-        if (server.upgrade(req, { data: { origin, framer: new Framer() } })) return undefined;
-        return new Response(`${BRIDGE_NAME} is running. Open the Figma plugin to connect.`);
-      },
-      websocket: {
-        maxPayloadLength: 8 << 20,
-        idleTimeout: 120,
-        perMessageDeflate: false,
-        message: (ws, raw) => this.onFrame(ws, typeof raw === "string" ? raw : raw.toString()),
-        close: (ws) => this.onClose(ws),
-      },
+    server.on("request", (req, res) => {
+      if (new URL(req.url ?? "/", "http://localhost").pathname === "/health") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ bridge: BRIDGE_NAME, protocol: PROTOCOL_VERSION, version: this.version, sessions: this.sessions() }));
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end(`${BRIDGE_NAME} is running. Open the Figma plugin to connect.`);
+    });
+    server.on("upgrade", (req, socket, head) => {
+      wss.handleUpgrade(req, socket, head, (ws) => this.onOpen(ws, req.headers.origin ?? null));
     });
     this.sweeper = setInterval(() => {
       const now = Date.now();
       for (const [id, f] of this.inflight) if (now - f.at > INFLIGHT_TTL_MS) this.inflight.delete(id);
+      // Plugins and agents ping every 20 s: a silent socket is a dead one.
+      for (const peer of this.peers) if (now - peer.data.seen > IDLE_MS) peer.ws.terminate();
     }, 30_000);
   }
 
-  stop() {
+  /** Binds 127.0.0.1:port; rejects with code EADDRINUSE when it is taken. */
+  static start(port: number, log: (line: string) => void, version = ""): Promise<Hub> {
+    return new Promise((resolve, reject) => {
+      const server = createServer();
+      const wss = new WebSocketServer({ noServer: true, maxPayload: 8 << 20, perMessageDeflate: false });
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => {
+        server.off("error", reject);
+        server.on("error", (e) => log(`hub: ${e.message}`));
+        resolve(new Hub(port, log, version, server, wss));
+      });
+    });
+  }
+
+  private onOpen(ws: WebSocket, origin: string | null) {
+    const peer: Peer = {
+      ws,
+      data: { origin, framer: new Framer(), seen: Date.now() },
+      send: (text) => ws.readyState === WebSocket.OPEN && ws.send(text),
+      close: (code, reason) => ws.close(code, reason),
+    };
+    this.peers.add(peer);
+    ws.on("message", (raw) => {
+      peer.data.seen = Date.now();
+      this.onFrame(peer, raw.toString());
+    });
+    ws.on("close", () => {
+      this.peers.delete(peer);
+      this.onClose(peer);
+    });
+    ws.on("error", () => {});
+  }
+
+  stop(): Promise<void> {
     clearInterval(this.sweeper);
-    this.server.stop(true);
+    for (const peer of this.peers) peer.ws.terminate();
+    this.wss.close();
+    this.server.closeAllConnections();
+    return new Promise((resolve) => this.server.close(() => resolve()));
   }
 
   sessions(channel?: string): SessionInfo[] {
     const list: SessionInfo[] = [];
-    for (const ws of this.plugins.values()) {
-      if (ws.data.session && (!channel || ws.data.channel === channel)) list.push(ws.data.session);
+    for (const peer of this.plugins.values()) {
+      if (peer.data.session && (!channel || peer.data.channel === channel)) list.push(peer.data.session);
     }
     return list.sort((a, b) => a.connectedAt - b.connectedAt);
   }
@@ -277,7 +313,7 @@ export class Hub {
       }
       const s = msg.session ?? {};
       const session: SessionInfo = {
-        id: String(s.id || crypto.randomUUID()),
+        id: String(s.id || randomUUID()),
         fileName: String(s.fileName || "Untitled"),
         page: String(s.page || ""),
         channel,
@@ -344,11 +380,21 @@ export class Bridge {
   private framer = new Framer();
   private pending = new Map<string, Pending>();
   private readyWaiters: (() => void)[] = [];
+  private stopped = false;
 
   constructor(private opts: BridgeOptions) {}
 
   start() {
     void this.loop();
+  }
+
+  /** Releases the port or leaves the hub (another process can then take over). */
+  async stop() {
+    this.stopped = true;
+    this.mode = "offline";
+    this.ws?.close();
+    await this.hub?.stop();
+    this.hub = undefined;
   }
 
   get port() {
@@ -362,10 +408,11 @@ export class Bridge {
   /** Stays hub or client forever; becomes hub if the hosting process goes away. */
   private async loop() {
     let delay = 200;
-    for (;;) {
+    while (!this.stopped) {
       // Probe first: on Windows another program can listen on the same port
       // (0.0.0.0 or ::1 vs our 127.0.0.1), so EADDRINUSE alone is not enough.
-      if (!(await portInUse(this.opts.port)) && this.tryHost()) return;
+      if (!(await portInUse(this.opts.port)) && (await this.tryHost())) return;
+      if (this.stopped) return;
       const lost = await this.tryJoin();
       if (lost) {
         await lost;
@@ -378,15 +425,19 @@ export class Bridge {
     }
   }
 
-  private tryHost(): boolean {
+  private async tryHost(): Promise<boolean> {
     try {
-      this.hub = new Hub(this.opts.port, this.opts.log, this.opts.version);
+      this.hub = await Hub.start(this.opts.port, this.opts.log, this.opts.version);
     } catch (e) {
       const err = e as { code?: string; message?: string };
       if (err.code !== "EADDRINUSE" && !/in use/i.test(String(err.message))) {
         this.lastError = `Cannot open port ${this.opts.port}: ${err.message}`;
       }
       return false;
+    }
+    if (this.stopped) {
+      await this.hub.stop();
+      return true;
     }
     this.mode = "hub";
     this.lastError = undefined;
@@ -448,7 +499,7 @@ export class Bridge {
         if (!joined) return finish(null);
         this.ws = undefined;
         this.mode = "offline";
-        this.opts.log("Bridge hub went away; reconnecting");
+        if (!this.stopped) this.opts.log("Bridge hub went away; reconnecting");
         for (const [id, p] of this.pending) {
           this.pending.delete(id);
           clearTimeout(p.timer);
@@ -499,7 +550,7 @@ export class Bridge {
 
   private send<T>(method: string, params: Record<string, unknown>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const id = crypto.randomUUID();
+      const id = randomUUID();
       const msg: Msg = { t: "req", id, method, params, sel: this.selection, timeoutMs };
       const timer = setTimeout(() => {
         this.pending.delete(id);

@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # GitHub release
+  id-token: write # npm provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: bun install
+      - run: bun run build
+      - run: bun run check
+      - run: bun test
+
+      - name: Tag matches package.json
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json ($version)"; exit 1
+          fi
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The zip is the source plus the built server, for the Bun install method.
+      - name: Zip
+        run: |
+          mkdir -p stage
+          git archive HEAD --prefix=figma-bridge/ | tar -x -C stage
+          rm -rf stage/figma-bridge/.github
+          cp -r dist stage/figma-bridge/
+          (cd stage && zip -qr "../figma-bridge-$GITHUB_REF_NAME.zip" figma-bridge)
+
+      - name: GitHub release
+        run: gh release create "$GITHUB_REF_NAME" "figma-bridge-$GITHUB_REF_NAME.zip" --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
