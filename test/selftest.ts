@@ -45,7 +45,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 27, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 28, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -208,6 +208,16 @@ check(
 );
 rmSync(projectCopy, { recursive: true, force: true });
 if (inProject.data.preview) rmSync(inProject.data.preview, { recursive: true, force: true });
+
+const robloxDir = join(tmpdir(), `figma-bridge-selftest-roblox-${process.pid}`);
+const roblox = await call("export_roblox", { nodeId: cardId, outDir: robloxDir });
+const robloxLuau = roblox.data.luau && existsSync(roblox.data.luau) ? readFileSync(roblox.data.luau, "utf8") : "";
+check(
+  "export_roblox",
+  !roblox.isError && existsSync(roblox.data.rbxmx ?? "") && /^<roblox [^>]*version="4">/.test(readFileSync(roblox.data.rbxmx, "utf8")) && /Instance\.new\("TextLabel"\)/.test(robloxLuau) && (roblox.data.assets ?? []).every((a: any) => existsSync(a.file)),
+  { instances: roblox.data.instances, assets: roblox.data.assets?.length, warnings: roblox.data.warnings?.length ?? 0, error: roblox.data.error },
+);
+rmSync(robloxDir, { recursive: true, force: true });
 
 const saved = await call("checkpoint", { action: "save", nodeIds: [cardId], label: "selftest" });
 await call("run_script", { code: `(await figma.getNodeByIdAsync(${JSON.stringify(cardId)})).name = "changed"` });

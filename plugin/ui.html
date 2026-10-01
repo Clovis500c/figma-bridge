@@ -488,6 +488,8 @@ const METHODS = {
   annotate: { label: "Annotate", color: "#f59e0b", icon: "i-note" },
   export_tree: { label: "Export code", color: "#64748b", icon: "i-braces" },
   node_info: { label: "Layer names", color: "#64748b", icon: "i-tree" },
+  roblox_tree: { label: "Roblox export", color: "#e11d48", icon: "i-braces" },
+  roblox_images: { label: "Roblox images", color: "#e11d48", icon: "i-image" },
   ping: { label: "Ping", color: "#64748b", icon: "i-pulse" },
 };
 const methodOf = (m) => METHODS[m] || { label: m, color: "#64748b", icon: "i-pulse" };
@@ -775,6 +777,8 @@ function summarize(msg) {
       return action.charAt(0).toUpperCase() + action.slice(1) + (p.nodeId ? " · " + p.nodeId : "");
     }
     case "export_tree": return p.nodeId ? "Node " + p.nodeId : "Selection";
+    case "roblox_tree": return p.nodeId ? "Node " + p.nodeId : "Selection";
+    case "roblox_images": return (p.items || []).length + " picture" + ((p.items || []).length === 1 ? "" : "s") + " at " + ((p.items && p.items[0] && p.items[0].scale) || 2) + "×";
     case "node_info": return (p.ids || []).length + " layer" + ((p.ids || []).length === 1 ? "" : "s");
     case "wait_for_selection": return p.message || "Select layers";
     case "build": {
