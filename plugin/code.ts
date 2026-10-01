@@ -7,6 +7,7 @@ import { describe } from "./lib/describe";
 import { getDesignSystem } from "./lib/design-system";
 import { designTokens } from "./lib/tokens";
 import { find } from "./lib/find";
+import { prototype } from "./lib/prototype";
 import { cancelWait, waitForSelection } from "./lib/selection";
 import {
   codeError,
@@ -144,6 +145,7 @@ const HANDLERS: { [method: string]: Handler } = {
   get_context: getContext,
   list_fonts: listFonts,
   wait_for_selection: waitForSelection,
+  prototype: prototype,
   ping: function () {
     return Promise.resolve({ pong: true, session: sessionInfo() });
   },

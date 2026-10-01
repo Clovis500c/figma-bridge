@@ -40,7 +40,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 21, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 22, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;
@@ -270,8 +270,34 @@ check("find", !found.isError && found.data.matches?.some((m: any) => m.id === ri
 const foundInst = await call("find", { component: "selftest Button" });
 check("find (component)", !foundInst.isError && typeof foundInst.data.total === "number", foundInst.data.total ?? foundInst.data);
 
+// Prototype destinations are top-level frames: one build per screen.
+const screenB = await call("build", { select: false, spec: { name: "selftest Screen B", w: 120, h: 200, fill: "#F3F4F6", reactions: [{ action: "back" }] } });
+const screenA = await call("build", {
+  select: false,
+  spec: { name: "selftest Screen A", w: 120, h: 200, fill: "#FFFFFF", children: [{ name: "Go", text: "Go", reactions: [{ to: "selftest Screen B", transition: "smart", duration: 250 }] }] },
+});
+const links = await call("prototype", { nodeId: screenA.data.rootId });
+check(
+  "build reactions",
+  !screenA.isError && !screenA.data.warnings && !screenB.data.warnings && links.data.interactions?.links?.[0]?.toName === "selftest Screen B",
+  links.data.interactions?.links ?? screenA.data,
+);
+const relink = await call("prototype", {
+  links: [{ from: screenB.data.rootId, to: screenA.data.rootId, trigger: "after", delay: 1000, transition: "slide-in-right" }],
+  flows: [{ nodeId: screenA.data.rootId, name: "selftest flow" }],
+  replace: true,
+  list: true,
+  nodeId: screenB.data.rootId,
+});
+check(
+  "prototype links + flows",
+  !relink.isError && relink.data.interactions?.links?.[0]?.trigger === "AFTER_TIMEOUT" && relink.data.flows?.some((f: any) => f.name === "selftest flow"),
+  relink.data.interactions?.links ?? relink.data,
+);
+await call("run_script", { code: `figma.currentPage.flowStartingPoints = figma.currentPage.flowStartingPoints.filter((f) => f.name !== "selftest flow")` });
+
 const buildCleanup = await call("run_script", {
-  code: `for (const id of ${JSON.stringify([set.data.rootId, grid.data.rootId, rich.data.rootId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,
+  code: `for (const id of ${JSON.stringify([set.data.rootId, grid.data.rootId, rich.data.rootId, screenA.data.rootId, screenB.data.rootId])}) { const n = id && await figma.getNodeByIdAsync(id); if (n) n.remove(); } return "removed"`,
 });
 check("build 1.4 cleanup", !buildCleanup.isError, buildCleanup.data.result);
 

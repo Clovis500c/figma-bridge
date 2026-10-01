@@ -331,6 +331,7 @@
       <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></symbol>
       <symbol id="i-diff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="10" height="14" rx="2"/><path d="M17 5h1.5A2 2 0 0 1 20.5 7v10a2 2 0 0 1-2 2H17" stroke-dasharray="2 2.5"/><path d="M8.5 9.5v5M6 12h5"/></symbol>
       <symbol id="i-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 3.5 13.5 6-5.8 1.9-2 5.9z"/><path d="m13 13 5.5 5.5"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.8v6.4l5-3.2z"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5.5 12.5 4 4 9-9"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     </defs>
@@ -472,6 +473,7 @@ const METHODS = {
   get_context: { label: "Context", color: "#64748b", icon: "i-layers" },
   list_fonts: { label: "Fonts", color: "#ec4899", icon: "i-type" },
   wait_for_selection: { label: "Wait for selection", color: "#0d99ff", icon: "i-pointer" },
+  prototype: { label: "Prototype", color: "#8b5cf6", icon: "i-play" },
   ping: { label: "Ping", color: "#64748b", icon: "i-pulse" },
 };
 const methodOf = (m) => METHODS[m] || { label: m, color: "#64748b", icon: "i-pulse" };
@@ -741,6 +743,13 @@ function summarize(msg) {
     case "compare_images": return "Design vs reference" + (p.sideBySide ? " · side by side" : "");
     case "list_fonts": return p.filter ? "Matching “" + p.filter + "”" : "All fonts";
     case "get_context": return "File, pages and selection";
+    case "prototype": {
+      const parts = [];
+      if (p.links && p.links.length) parts.push(p.links.length + " link" + (p.links.length === 1 ? "" : "s"));
+      if (p.flows && p.flows.length) parts.push(p.flows.length + " flow" + (p.flows.length === 1 ? "" : "s"));
+      if (p.clear && p.clear.length) parts.push("clear " + p.clear.length);
+      return parts.join(" · ") || "List interactions";
+    }
     case "wait_for_selection": return p.message || "Select layers";
     case "build": {
       let count = 0;

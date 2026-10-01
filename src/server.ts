@@ -200,6 +200,7 @@ ICON: {icon:"lucide:house", size:20, color:"#111"} (any Iconify set). IMAGE: {sr
 INSTANCE: {component:"Button" | node id | library key, props:{Variant:"Primary", Label:"Buy"}, text:{"Label layer name":"Buy"}}.
 COMPONENT SET: {type:"componentSet", name:"Button", base:{shared frame spec}, variants:[{props:{Variant:"Primary",Size:"M"}, fill:"#0D99FF", children:[…]}, …], properties:{Label:"Button", "Show icon":{type:"boolean",default:true}, Icon:{type:"instance",default:"Icon/Star"}}}. One component per variant, combined as variants.
 On a layer inside a component: bind:"Label" links a text to a text property (created if missing); bind:{visible:"Show icon"} or {mainComponent:"Icon"} for the others. type:"component" takes properties too.
+PROTOTYPE: reactions:[{trigger:"click", action:"navigate", to:"Details", transition:"smart", duration:300}] on any layer (see the prototype tool).
 gap/padding/radius accept "var:<number variable>". MODES: modes:{"Theme":"Dark"} sets a collection's variable mode on a frame and its children.
 Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
 Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`,
@@ -433,6 +434,30 @@ server.registerTool(
       if (diff.sideBySide) content.push({ type: "image", data: diff.sideBySide, mimeType: "image/png" });
       return { content };
     }),
+);
+
+server.registerTool(
+  "prototype",
+  {
+    title: "Prototype links and flows",
+    description: `Wire prototype interactions between frames, set flow starting points, or list them (no arguments → list for the current page).
+links: [{from, to?, trigger?, action?, transition?, duration?, easing?, direction?, delay?, url?}]
+ from: layer id or name; to: id or name of a top-level frame (a screen). trigger: click (default) | hover | press | drag | after (delay ms) | mouse-enter | mouse-leave.
+ action: navigate (default with to) | overlay | swap | scroll-to | change-to (variants) | back | close | url.
+ transition: instant (default) | dissolve | smart | move-in | move-out | push | slide-in | slide-out (+ direction left|right|top|bottom, or "push-left"); duration ms (default 300); easing: ease-out (default) | ease-in | ease-in-out | linear | gentle | quick | bouncy | slow.
+flows: [{nodeId (top-level frame id or name), name?}] start points of the prototype on the current page.
+Links are added to existing interactions unless replace:true; clear:[ids] removes all interactions of those layers. Inside build, use reactions:[{trigger, action, to:"<layer name in the spec>", …}] on any layer.`,
+    inputSchema: {
+      links: z.array(z.object({}).passthrough()).optional(),
+      flows: z.array(z.object({}).passthrough()).optional(),
+      clear: z.array(z.string()).optional().describe("Layer ids whose interactions are removed first"),
+      replace: z.boolean().optional().describe("Replace the interactions of each linked layer instead of adding"),
+      list: z.boolean().optional().describe("Also return the interactions after the change"),
+      nodeId: z.string().optional().describe("Limit the listing to this layer and its children"),
+    },
+  },
+  (args) =>
+    track("prototype", `${args.links?.length ?? 0} links, ${args.flows?.length ?? 0} flows`, async () => ok(await bridge.request("prototype", args, 60_000))),
 );
 
 server.registerTool(

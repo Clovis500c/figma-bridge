@@ -417,6 +417,252 @@
     return a.x >= b.x - 0.5 && a.y >= b.y - 0.5 && a.x + a.width <= b.x + b.width + 0.5 && a.y + a.height <= b.y + b.height + 0.5;
   }
 
+  // plugin/lib/prototype.ts
+  var TRIGGERS = {
+    click: "ON_CLICK",
+    tap: "ON_CLICK",
+    hover: "ON_HOVER",
+    press: "ON_PRESS",
+    drag: "ON_DRAG",
+    after: "AFTER_TIMEOUT",
+    timeout: "AFTER_TIMEOUT",
+    "mouse-enter": "MOUSE_ENTER",
+    "mouse-leave": "MOUSE_LEAVE",
+    "mouse-down": "MOUSE_DOWN",
+    "mouse-up": "MOUSE_UP"
+  };
+  var NAVIGATION = {
+    navigate: "NAVIGATE",
+    overlay: "OVERLAY",
+    swap: "SWAP",
+    "swap-overlay": "SWAP",
+    scroll: "SCROLL_TO",
+    "scroll-to": "SCROLL_TO",
+    "change-to": "CHANGE_TO"
+  };
+  var EASINGS = {
+    linear: "LINEAR",
+    "ease-in": "EASE_IN",
+    "ease-out": "EASE_OUT",
+    "ease-in-out": "EASE_IN_AND_OUT",
+    "ease-in-back": "EASE_IN_BACK",
+    "ease-out-back": "EASE_OUT_BACK",
+    "ease-in-out-back": "EASE_IN_AND_OUT_BACK",
+    gentle: "GENTLE",
+    quick: "QUICK",
+    bouncy: "BOUNCY",
+    slow: "SLOW"
+  };
+  var DIRECTIONAL = {
+    "move-in": "MOVE_IN",
+    "move-out": "MOVE_OUT",
+    push: "PUSH",
+    slide: "SLIDE_IN",
+    "slide-in": "SLIDE_IN",
+    "slide-out": "SLIDE_OUT"
+  };
+  var key = function(v) {
+    return String(v || "").toLowerCase().replace(/[_\s]+/g, "-");
+  };
+  function transition(spec) {
+    let t = key(spec.transition || "instant");
+    if (t === "instant" || t === "none")
+      return null;
+    let direction = key(spec.direction || "left");
+    const m = /^(.*)-(left|right|top|bottom|up|down)$/.exec(t);
+    if (m && DIRECTIONAL[m[1]]) {
+      t = m[1];
+      direction = m[2];
+    }
+    direction = direction === "up" ? "top" : direction === "down" ? "bottom" : direction;
+    let ms = typeof spec.duration === "number" ? spec.duration : 300;
+    if (ms <= 10)
+      ms = ms * 1000;
+    const easing = { type: EASINGS[key(spec.easing || "ease-out")] || "EASE_OUT" };
+    const duration = ms / 1000;
+    if (t === "dissolve" || t === "fade")
+      return { type: "DISSOLVE", easing, duration };
+    if (t === "smart" || t === "smart-animate")
+      return { type: "SMART_ANIMATE", easing, duration };
+    if (DIRECTIONAL[t]) {
+      return {
+        type: DIRECTIONAL[t],
+        direction: direction.toUpperCase(),
+        matchLayers: !!spec.matchLayers,
+        easing,
+        duration
+      };
+    }
+    throw codeError('Unknown transition "' + spec.transition + '" (instant, dissolve, smart, move-in, move-out, push, slide-in, slide-out)', "BAD_ARGS");
+  }
+  function trigger(spec) {
+    const t = TRIGGERS[key(spec.trigger || "click")];
+    if (!t)
+      throw codeError('Unknown trigger "' + spec.trigger + '" (click, hover, press, drag, after, mouse-enter, mouse-leave)', "BAD_ARGS");
+    if (t === "AFTER_TIMEOUT")
+      return { type: t, timeout: (typeof spec.delay === "number" ? spec.delay : 800) / 1000 };
+    if (t === "MOUSE_ENTER" || t === "MOUSE_LEAVE")
+      return { type: t, delay: (spec.delay || 0) / 1000, deprecatedVersion: false };
+    if (t === "MOUSE_DOWN" || t === "MOUSE_UP")
+      return { type: t, delay: (spec.delay || 0) / 1000 };
+    return { type: t };
+  }
+  async function toReaction(spec, resolve) {
+    const action = key(spec.action || (spec.url ? "url" : spec.to ? "navigate" : "back"));
+    let act;
+    if (action === "back")
+      act = { type: "BACK" };
+    else if (action === "close")
+      act = { type: "CLOSE" };
+    else if (action === "url" || action === "open-url")
+      act = { type: "URL", url: String(spec.url) };
+    else if (NAVIGATION[action]) {
+      if (!spec.to)
+        throw codeError('Action "' + action + '" needs `to` (a frame name or id)', "BAD_ARGS");
+      act = { type: "NODE", destinationId: await resolve(String(spec.to)), navigation: NAVIGATION[action], transition: transition(spec), preserveScrollPosition: !!spec.preserveScroll };
+    } else {
+      throw codeError('Unknown action "' + spec.action + '" (navigate, overlay, swap, scroll-to, change-to, back, close, url)', "BAD_ARGS");
+    }
+    return { trigger: trigger(spec), actions: [act] };
+  }
+  async function resolveFrame(ref) {
+    if (/^[\dI;:]+$/.test(ref))
+      return (await getNode(ref)).id;
+    const top = figma.currentPage.children;
+    for (let i = 0;i < top.length; i++)
+      if (top[i].name === ref)
+        return top[i].id;
+    const any = figma.currentPage.findOne(function(n) {
+      return n.name === ref;
+    });
+    if (!any)
+      throw codeError('No frame named "' + ref + '" on this page', "NOT_FOUND");
+    return any.id;
+  }
+  async function setReactions(node, reactions, replace) {
+    if (typeof node.setReactionsAsync !== "function")
+      throw codeError("A " + node.type + " node cannot have prototype interactions", "BAD_ARGS");
+    const current = replace ? [] : (node.reactions || []).slice();
+    await node.setReactionsAsync(current.concat(reactions));
+  }
+  async function applyBuildReactions(pending, ids, warnings) {
+    const resolve = function(ref) {
+      return ids[ref] ? Promise.resolve(ids[ref]) : resolveFrame(ref);
+    };
+    for (let i = 0;i < pending.length; i++) {
+      const item = pending[i];
+      const list = Array.isArray(item.reactions) ? item.reactions : [item.reactions];
+      const out = [];
+      for (let k = 0;k < list.length; k++) {
+        try {
+          out.push(await toReaction(list[k] || {}, resolve));
+        } catch (e) {
+          warnings.push(item.path + ".reactions[" + k + "]: " + (e.message || e));
+        }
+      }
+      try {
+        if (out.length)
+          await setReactions(item.node, out, false);
+      } catch (e) {
+        warnings.push(item.path + ".reactions: " + (e.message || e));
+      }
+    }
+  }
+  async function prototype(p) {
+    const links = Array.isArray(p.links) ? p.links : [];
+    const flows = Array.isArray(p.flows) ? p.flows : [];
+    const clear = Array.isArray(p.clear) ? p.clear : [];
+    const out = {};
+    for (let i = 0;i < clear.length; i++)
+      await setReactions(await getNode(clear[i]), [], true);
+    if (clear.length)
+      out.cleared = clear.length;
+    const bySource = {};
+    const order = [];
+    for (let i = 0;i < links.length; i++) {
+      const l = links[i] || {};
+      if (!l.from)
+        throw codeError("links[" + i + "]: `from` is required (the layer that reacts)", "BAD_ARGS");
+      const from = await resolveFrame(String(l.from));
+      let r;
+      try {
+        r = await toReaction(l, resolveFrame);
+      } catch (e) {
+        throw codeError("links[" + i + "]: " + (e.message || e), e.code || "BAD_ARGS");
+      }
+      if (!bySource[from]) {
+        bySource[from] = [];
+        order.push(from);
+      }
+      bySource[from].push(r);
+    }
+    for (let i = 0;i < order.length; i++)
+      await setReactions(await getNode(order[i]), bySource[order[i]], !!p.replace);
+    if (links.length)
+      out.linked = links.length;
+    if (flows.length) {
+      const page = figma.currentPage;
+      const points = page.flowStartingPoints.slice();
+      for (let i = 0;i < flows.length; i++) {
+        const f = flows[i] || {};
+        const id = await resolveFrame(String(f.nodeId || f.frame || f.start || ""));
+        const node = await getNode(id);
+        if (!node.parent || node.parent.type !== "PAGE")
+          throw codeError('Flow start "' + node.name + '" must be a top-level frame', "BAD_ARGS");
+        const name = String(f.name || node.name);
+        let found = false;
+        for (let k = 0;k < points.length; k++) {
+          if (points[k].nodeId === id) {
+            points[k] = { nodeId: id, name };
+            found = true;
+          }
+        }
+        if (!found)
+          points.push({ nodeId: id, name });
+      }
+      page.flowStartingPoints = points;
+      out.flows = points;
+    }
+    if (p.list || !links.length && !flows.length && !clear.length)
+      out.interactions = await listReactions(p.nodeId);
+    return out;
+  }
+  async function listReactions(nodeId) {
+    const root = nodeId ? await getNode(nodeId) : figma.currentPage;
+    const nodes = (root.type === "PAGE" ? [] : [root]).concat("findAll" in root ? root.findAll(function(n) {
+      return n.reactions && n.reactions.length > 0;
+    }) : []);
+    const names = {};
+    const out = [];
+    for (let i = 0;i < nodes.length && out.length < 300; i++) {
+      const n = nodes[i];
+      const reactions = n.reactions || [];
+      for (let k = 0;k < reactions.length; k++) {
+        const r = reactions[k];
+        const actions = r.actions || (r.action ? [r.action] : []);
+        for (let a = 0;a < actions.length; a++) {
+          const act = actions[a];
+          const item = { from: n.id, fromName: n.name, trigger: r.trigger ? r.trigger.type : null, action: act.type };
+          if (act.type === "NODE") {
+            item.navigation = act.navigation;
+            item.to = act.destinationId;
+            if (act.destinationId && names[act.destinationId] === undefined) {
+              const dest = await figma.getNodeByIdAsync(act.destinationId);
+              names[act.destinationId] = dest ? dest.name : "";
+            }
+            item.toName = names[act.destinationId] || undefined;
+            if (act.transition)
+              item.transition = act.transition.type + (act.transition.direction ? " " + act.transition.direction : "") + " " + Math.round(act.transition.duration * 1000) + "ms";
+          }
+          if (act.type === "URL")
+            item.url = act.url;
+          out.push(item);
+        }
+      }
+    }
+    return { flows: figma.currentPage.flowStartingPoints, links: out };
+  }
+
   // plugin/lib/tokens.ts
   var TYPES = { color: "COLOR", number: "FLOAT", string: "STRING", boolean: "BOOLEAN" };
   function counter() {
@@ -766,7 +1012,8 @@
       images: p.imageBytes || {},
       fonts: {},
       defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 },
-      binds: []
+      binds: [],
+      reactions: []
     };
     await preloadFonts(roots, ctx);
     const parent = await parentFor(p.parentId);
@@ -787,6 +1034,8 @@
       }
       made.push(node);
     }
+    if (ctx.reactions.length)
+      await applyBuildReactions(ctx.reactions, ctx.ids, ctx.warnings);
     for (let i = 0;i < ctx.binds.length; i++)
       ctx.warnings.push(ctx.binds[i].path + ": bind needs a component or componentSet ancestor, ignored");
     if (p.select !== false && made.length && parent.type === "PAGE" && parent === figma.currentPage) {
@@ -837,13 +1086,13 @@
     };
     roots.forEach(walk);
     const keys = Object.keys(wanted);
-    await Promise.all(keys.map(async function(key) {
-      const f = wanted[key];
+    await Promise.all(keys.map(async function(key2) {
+      const f = wanted[key2];
       const candidates = [f, { family: f.family, style: "Regular" }, { family: "Inter", style: f.style }, { family: "Inter", style: "Regular" }];
       for (let i = 0;i < candidates.length; i++) {
         try {
           await loadFont(candidates[i]);
-          ctx.fonts[key] = candidates[i];
+          ctx.fonts[key2] = candidates[i];
           if (i > 0)
             ctx.warnings.push('Font "' + f.family + " " + f.style + '" unavailable, used "' + candidates[i].family + " " + candidates[i].style + '"');
           return;
@@ -973,12 +1222,14 @@
       node.locked = true;
     if (s.modes)
       await applyModes(node, s.modes, ctx.warnings, path);
+    if (s.reactions)
+      ctx.reactions.push({ node, reactions: s.reactions, path });
     if (s.name) {
-      let key = String(s.name);
-      for (let n = 2;ctx.ids[key]; n++)
-        key = s.name + " #" + n;
+      let key2 = String(s.name);
+      for (let n = 2;ctx.ids[key2]; n++)
+        key2 = s.name + " #" + n;
       if (Object.keys(ctx.ids).length < 300)
-        ctx.ids[key] = node.id;
+        ctx.ids[key2] = node.id;
     }
     return node;
   }
@@ -2334,6 +2585,7 @@
     get_context: getContext,
     list_fonts: listFonts,
     wait_for_selection: waitForSelection,
+    prototype,
     ping: function() {
       return Promise.resolve({ pong: true, session: sessionInfo() });
     }

@@ -11,6 +11,7 @@ import {
   parseHex,
   place,
 } from "./util";
+import { applyBuildReactions } from "./prototype";
 import { applyModes } from "./tokens";
 
 interface Ctx {
@@ -22,6 +23,8 @@ interface Ctx {
   defaults: { font: string; color: string; size: number };
   /** Layers with `bind`, linked to component properties once their component exists. */
   binds: { node: SceneNode; bind: any; path: string }[];
+  /** Prototype links, applied at the end because destinations may come later in the spec. */
+  reactions: { node: SceneNode; reactions: any; path: string }[];
 }
 
 const MAX_NODES = 3000;
@@ -40,6 +43,7 @@ export async function build(p: any) {
     fonts: {},
     defaults: { font: d.font || "Inter", color: d.color || "#111111", size: d.size || 14 },
     binds: [],
+    reactions: [],
   };
   await preloadFonts(roots, ctx);
 
@@ -60,6 +64,7 @@ export async function build(p: any) {
     }
     made.push(node);
   }
+  if (ctx.reactions.length) await applyBuildReactions(ctx.reactions, ctx.ids, ctx.warnings);
   for (let i = 0; i < ctx.binds.length; i++) ctx.warnings.push(ctx.binds[i].path + ": bind needs a component or componentSet ancestor, ignored");
   if (p.select !== false && made.length && parent.type === "PAGE" && parent === figma.currentPage) {
     figma.currentPage.selection = made;
@@ -227,6 +232,7 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
   if (s.visible === false) node.visible = false;
   if (s.locked) node.locked = true;
   if (s.modes) await applyModes(node, s.modes, ctx.warnings, path);
+  if (s.reactions) ctx.reactions.push({ node: node, reactions: s.reactions, path: path });
 
   if (s.name) {
     let key = String(s.name);
