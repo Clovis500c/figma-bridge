@@ -135,6 +135,40 @@ describe("hub", () => {
     expect(sessions.map((s) => [s.id, s.fileName, s.version])).toEqual([["s1", "File A", "9.9.9"]]);
   });
 
+  test("run_script carries the snippet library only until the plugin holds that version", async () => {
+    const { agent, plugin } = await setup();
+    const p = plugin("s1", "File A");
+    await p.ready();
+    const seen: [string, boolean][] = [];
+    p.onRequest = (m) => {
+      seen.push([m.params.code, "lib" in m.params]);
+      p.send({ t: "res", id: m.id, ok: true, result: null });
+    };
+    await agent.request("run_script", { code: "1", lib: { a: "return 1" }, libHash: "h1" });
+    await agent.request("run_script", { code: "2", lib: { a: "return 1" }, libHash: "h1" });
+    await agent.request("run_script", { code: "3", lib: { a: "return 2" }, libHash: "h2" });
+    expect(seen).toEqual([["1", true], ["2", false], ["3", true]]);
+  });
+
+  test("a plugin that answers NEED_LIB gets the library with the next script", async () => {
+    const { agent, plugin } = await setup();
+    const p = plugin("s1", "File A");
+    await p.ready();
+    const seen: [string, boolean][] = [];
+    let lose = false;
+    p.onRequest = (m) => {
+      seen.push([m.params.code, "lib" in m.params]);
+      if (lose) p.send({ t: "res", id: m.id, ok: false, error: "library lost", code: "NEED_LIB" });
+      else p.send({ t: "res", id: m.id, ok: true, result: null });
+      lose = false;
+    };
+    await agent.request("run_script", { code: "1", lib: {}, libHash: "h1" });
+    lose = true;
+    await expect(agent.request("run_script", { code: "2", lib: {}, libHash: "h1" })).rejects.toMatchObject({ code: "NEED_LIB" });
+    await agent.request("run_script", { code: "3", lib: {}, libHash: "h1" });
+    expect(seen).toEqual([["1", true], ["2", false], ["3", true]]);
+  });
+
   test("large results cross the hub in chunks", async () => {
     const { agent, plugin } = await setup();
     const p = plugin("s1", "File A");

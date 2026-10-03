@@ -8,13 +8,13 @@
     "url": "https://github.com/Clovis500c/figma-bridge",
     "source": "github"
   },
-  "version": "1.14.2",
+  "version": "1.14.3",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@clovis500c/figma-bridge",
-      "version": "1.14.2",
+      "version": "1.14.3",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         {

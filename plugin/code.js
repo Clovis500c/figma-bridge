@@ -207,6 +207,21 @@
     styleCache = null;
     variableCache = null;
   }
+  var BREATH_MS = 250;
+  var lastBreath = Date.now();
+  function markBusy() {
+    lastBreath = Date.now();
+  }
+  function breathe() {
+    if (Date.now() - lastBreath < BREATH_MS)
+      return Promise.resolve();
+    return new Promise(function(resolve) {
+      setTimeout(function() {
+        lastBreath = Date.now();
+        resolve();
+      }, 0);
+    });
+  }
   async function findVariable(ref) {
     const cache = await localVariables();
     const byId = {};
@@ -2370,6 +2385,7 @@
     }
     if (ctx.count >= MAX_NODES3)
       throw codeError("Spec is too large (max " + MAX_NODES3 + " nodes). Split it into several build calls.", "TOO_LARGE");
+    await breathe();
     checkCancelled(ctx.requestId);
     const type = nodeType(s);
     requireEditor(type, path);
@@ -4572,7 +4588,7 @@
     finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
   }
   // package.json
-  var version = "1.14.2";
+  var version = "1.14.3";
 
   // plugin/code.ts
   var DEFAULT_SIZE = { width: 340, height: 540 };
@@ -4735,6 +4751,7 @@
   };
   async function handleRequest(msg) {
     const started = Date.now();
+    markBusy();
     const mutates = !READ_ONLY[msg.method] || !!(msg.params && (msg.params.fix === true || msg.params.fixes && msg.params.fixes.length));
     let reply;
     if (mutates)
@@ -4793,25 +4810,31 @@
   function loadLibrary(hash, sources) {
     if (!hash || hash === libHash)
       return;
+    if (!sources)
+      throw codeError("The snippet library changed but was not sent with this script.", "NEED_LIB");
     const names = Object.keys(lib);
     for (let i = 0;i < names.length; i++)
       delete lib[names[i]];
-    const keys = Object.keys(sources || {});
-    for (let i = 0;i < keys.length; i++) {
-      const name = keys[i];
-      try {
-        const fn = new AsyncFunction("figma", "utils", "lib", "console", "args", sources[name]);
-        lib[name] = function(args) {
-          return fn(figma, utils, lib, currentConsole, args);
-        };
-      } catch (e) {
-        const message = "Snippet " + name + " does not compile: " + (e.message || e);
-        lib[name] = function() {
-          return Promise.reject(new Error(message));
-        };
-      }
-    }
+    const keys = Object.keys(sources);
+    for (let i = 0;i < keys.length; i++)
+      lib[keys[i]] = lazySnippet(keys[i], sources[keys[i]]);
     libHash = hash;
+  }
+  function lazySnippet(name, source) {
+    let fn = null;
+    let failure = null;
+    return function(args) {
+      if (!fn && !failure) {
+        try {
+          fn = new AsyncFunction("figma", "utils", "lib", "console", "args", source);
+        } catch (e) {
+          failure = "Snippet " + name + " does not compile: " + (e.message || e);
+        }
+      }
+      if (failure)
+        return Promise.reject(new Error(failure));
+      return fn(figma, utils, lib, currentConsole, args);
+    };
   }
   function compile(code) {
     if (!/\breturn\b/.test(code)) {
@@ -4928,6 +4951,7 @@
       const c = parseHex(hex);
       return c.a === 1 ? { r: c.r, g: c.g, b: c.b } : c;
     },
+    breathe,
     solid: function(hex, opacity) {
       const c = parseHex(hex);
       return [{ type: "SOLID", color: { r: c.r, g: c.g, b: c.b }, opacity: opacity === undefined ? c.a : opacity }];

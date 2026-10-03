@@ -14,12 +14,14 @@ import { prototype } from "./lib/prototype";
 import { robloxImages, robloxTree } from "./lib/roblox";
 import { cancelWait, waitForSelection } from "./lib/selection";
 import {
+  breathe,
   clearCancelled,
   codeError,
   fontNamesOf,
   getNode,
   invalidateCaches,
   loadFont,
+  markBusy,
   markCancelled,
   pageOf,
   parentFor,
@@ -207,6 +209,7 @@ const READ_ONLY: { [method: string]: boolean } = {
 
 async function handleRequest(msg: any) {
   const started = Date.now();
+  markBusy();
   // audit is read-only unless it applies fixes.
   const mutates = !READ_ONLY[msg.method] || !!(msg.params && (msg.params.fix === true || (msg.params.fixes && msg.params.fixes.length)));
   let reply: any;
@@ -260,30 +263,38 @@ const SCRIPT_ARGS = ["figma", "console", "utils", "lib"];
 let lineBase: number | null = null;
 let currentConsole: any = console;
 
-// Snippet library sent by the server (saved with the `snippets` tool), compiled once per version.
+// Snippet library sent by the server (saved with the `snippets` tool). The sources only travel when the
+// library changed (the hub and the UI drop them once this thread has the hash), and each snippet compiles
+// on its first call: a library of a few MB (base64 asset snippets) used to be cloned into this thread and
+// recompiled on every change, which froze Figma on every script.
 const lib: { [name: string]: (args?: any) => Promise<any> } = {};
 let libHash = "";
 
-function loadLibrary(hash: string, sources: { [name: string]: string }) {
+function loadLibrary(hash: string, sources: { [name: string]: string } | undefined) {
   if (!hash || hash === libHash) return;
+  // A newer library that did not come with the request: the server resends it on NEED_LIB.
+  if (!sources) throw codeError("The snippet library changed but was not sent with this script.", "NEED_LIB");
   const names = Object.keys(lib);
   for (let i = 0; i < names.length; i++) delete lib[names[i]];
-  const keys = Object.keys(sources || {});
-  for (let i = 0; i < keys.length; i++) {
-    const name = keys[i];
-    try {
-      const fn = new AsyncFunction("figma", "utils", "lib", "console", "args", sources[name]);
-      lib[name] = function (args?: any) {
-        return fn(figma, utils, lib, currentConsole, args);
-      };
-    } catch (e) {
-      const message = "Snippet " + name + " does not compile: " + ((e as Error).message || e);
-      lib[name] = function () {
-        return Promise.reject(new Error(message));
-      };
-    }
-  }
+  const keys = Object.keys(sources);
+  for (let i = 0; i < keys.length; i++) lib[keys[i]] = lazySnippet(keys[i], sources[keys[i]]);
   libHash = hash;
+}
+
+function lazySnippet(name: string, source: string) {
+  let fn: any = null;
+  let failure: string | null = null;
+  return function (args?: any): Promise<any> {
+    if (!fn && !failure) {
+      try {
+        fn = new AsyncFunction("figma", "utils", "lib", "console", "args", source);
+      } catch (e) {
+        failure = "Snippet " + name + " does not compile: " + ((e as Error).message || e);
+      }
+    }
+    if (failure) return Promise.reject(new Error(failure));
+    return fn(figma, utils, lib, currentConsole, args);
+  };
 }
 
 function compile(code: string): { fn: any; offset: number } {
@@ -398,6 +409,8 @@ const utils = {
     const c = parseHex(hex);
     return c.a === 1 ? { r: c.r, g: c.g, b: c.b } : c;
   },
+  /** await utils.breathe() inside long loops: lets Figma repaint every 250 ms instead of freezing (free in between). */
+  breathe: breathe,
   solid: function (hex: string, opacity?: number): SolidPaint[] {
     const c = parseHex(hex);
     return [{ type: "SOLID", color: { r: c.r, g: c.g, b: c.b }, opacity: opacity === undefined ? c.a : opacity }];

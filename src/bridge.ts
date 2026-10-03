@@ -133,6 +133,8 @@ interface PeerData {
   channel?: string;
   session?: SessionInfo;
   seen: number;
+  /** Snippet library version this plugin already holds: run_script stops carrying the sources. */
+  libHash?: string;
 }
 
 interface Peer {
@@ -146,6 +148,22 @@ type Reply = (msg: Msg) => void;
 
 function sendFrames(ws: { send(data: string): unknown }, msg: Msg) {
   for (const frame of Framer.encode(msg)) ws.send(frame);
+}
+
+/**
+ * run_script carries the whole snippet library (MBs once snippets hold base64 assets), and Figma clones it into
+ * its own thread with every message. A plugin keeps the last library it loaded, so once it holds a hash the
+ * sources are dropped. Plugins of any version ignore the sources when the hash is unchanged.
+ */
+export function withoutKnownLibrary(plugin: { data: { libHash?: string } }, msg: Msg): unknown {
+  const params = msg.params;
+  if (msg.method !== "run_script" || !params || typeof params.libHash !== "string") return params;
+  if (plugin.data.libHash === params.libHash) {
+    const { lib: _sources, ...rest } = params;
+    return rest;
+  }
+  if (params.lib) plugin.data.libHash = params.libHash;
+  return params;
 }
 
 // Browsers always send Origin; Figma plugin iframes are sandboxed ("null").
@@ -254,7 +272,7 @@ export class Hub {
     const sid = plugin.data.session!.id;
     this.inflight.set(msg.id, { reply, plugin: sid, owner, at: Date.now() });
     try {
-      sendFrames(plugin, { t: "req", id: msg.id, method: msg.method, params: msg.params, timeoutMs: msg.timeoutMs });
+      sendFrames(plugin, { t: "req", id: msg.id, method: msg.method, params: withoutKnownLibrary(plugin, msg), timeoutMs: msg.timeoutMs });
     } catch (e) {
       this.inflight.delete(msg.id);
       fail((e as Error).message, (e as BridgeError).code ?? "SEND_FAILED");
@@ -293,6 +311,8 @@ export class Hub {
 
     if (ws.data.role === "plugin") {
       if (msg.t === "res") {
+        // The plugin lost the library (or never got it): send the sources with the next script.
+        if (!msg.ok && msg.code === "NEED_LIB") ws.data.libHash = undefined;
         const f = this.inflight.get(msg.id);
         if (f) {
           this.inflight.delete(msg.id);
