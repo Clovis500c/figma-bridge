@@ -1,5 +1,6 @@
 // Declarative builder: turns a JSON layout spec into Figma nodes in one pass.
 import {
+  breathe,
   checkCancelled,
   codeError,
   findStyle,
@@ -211,6 +212,8 @@ async function createNode(s: any, parent: BaseNode & ChildrenMixin, ctx: Ctx, pa
     return null;
   }
   if (ctx.count >= MAX_NODES) throw codeError("Spec is too large (max " + MAX_NODES + " nodes). Split it into several build calls.", "TOO_LARGE");
+  // A 2000-layer build is seconds of work: let Figma repaint along the way instead of freezing.
+  await breathe();
   checkCancelled(ctx.requestId);
   const type = nodeType(s);
   requireEditor(type, path);

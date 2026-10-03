@@ -264,7 +264,8 @@ server.registerTool(
     description:
       "Execute JavaScript in the Figma plugin main thread (full Plugin API via `figma`). The code is the body of an async " +
       "function: use top-level await and `return` the output (JSON-serialized; a single expression is returned automatically). " +
-      "Helpers: utils.loadFonts, utils.node, utils.page, utils.hex, utils.solid, utils.build, utils.describe; lib.<snippet>(args); " +
+      "Helpers: utils.loadFonts, utils.node, utils.page, utils.hex, utils.solid, utils.build, utils.describe, " +
+      "utils.breathe (await it inside long loops so Figma keeps repainting instead of freezing); lib.<snippet>(args); " +
       "console.log is captured. On error returns {ok:false, error, line, stack}. Prefer build for creating new layouts. " +
       "If the user presses Cancel in the plugin you get code CANCELLED, but a script cannot be interrupted and may still finish: check the file before retrying.",
     inputSchema: {
@@ -276,7 +277,13 @@ server.registerTool(
     track("run_script", oneLine(code), async () => {
       const t0 = performance.now();
       const { hash, lib } = loadLibrary();
-      const out = await bridge.request<{ result: unknown; logs?: string[] }>("run_script", { code, lib, libHash: hash }, timeoutMs ?? 30_000);
+      const run = () => bridge.request<{ result: unknown; logs?: string[] }>("run_script", { code, lib, libHash: hash }, timeoutMs ?? 30_000);
+      // The hub drops the sources once a plugin holds this hash; a plugin that lost them answers NEED_LIB before
+      // running anything, and the hub forgets the hash, so the retry carries them.
+      const out = await run().catch((e) => {
+        if (e instanceof BridgeError && e.code === "NEED_LIB") return run();
+        throw e;
+      });
       return ok({ ok: true, result: out.result ?? null, ...(out.logs ? { logs: out.logs } : {}), ms: Math.round(performance.now() - t0) });
     }),
 );

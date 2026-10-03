@@ -232,6 +232,30 @@ export function invalidateCaches() {
   variableCache = null;
 }
 
+// ─── Responsiveness ─────────────────────────────────────────────────────────
+
+// The plugin shares Figma's thread: long synchronous work freezes the canvas until it ends.
+// Measured on a 2000-layer build: a yield every 250 ms costs nothing; every 100 ms costs ~10% (Figma
+// relayouts the growing tree at each yield). Hiding the tree while it builds did not help.
+const BREATH_MS = 250;
+let lastBreath = Date.now();
+
+/** Starts a command's busy clock (the idle time before it is not work). */
+export function markBusy() {
+  lastBreath = Date.now();
+}
+
+/** Yields one macrotask to Figma after 250 ms of work, so it repaints and takes input; free in between. */
+export function breathe(): Promise<void> {
+  if (Date.now() - lastBreath < BREATH_MS) return Promise.resolve();
+  return new Promise(function (resolve) {
+    setTimeout(function () {
+      lastBreath = Date.now();
+      resolve();
+    }, 0);
+  });
+}
+
 /** Finds a variable by "name" or "Collection/name". */
 export async function findVariable(ref: string): Promise<Variable> {
   const cache = await localVariables();

@@ -872,10 +872,24 @@ async function onRequest(msg) {
   } catch (e) {
     return onResult({ t: "res", id: msg.id, ok: false, code: "BAD_IMAGE", error: "Could not decode the image: " + (e && e.message || e) });
   }
+  if (msg.method === "run_script") params = withoutKnownLibrary(params);
   toPlugin({ t: "req", id: msg.id, method: msg.method, params, timeoutMs: msg.timeoutMs });
 }
 
+// The snippet library (MBs once asset snippets hold base64) is cloned into Figma's own thread with every
+// message: only let it through when the plugin thread does not hold that version yet.
+let libHashSent = "";
+function withoutKnownLibrary(params) {
+  if (!params.libHash) return params;
+  if (params.libHash === libHashSent) {
+    params = Object.assign({}, params);
+    delete params.lib;
+  } else if (params.lib) libHashSent = params.libHash;
+  return params;
+}
+
 function onResult(res) {
+  if (!res.ok && res.code === "NEED_LIB") libHashSent = "";
   if (cancelled.has(res.id)) {
     cancelled.delete(res.id);
     const late = entries.find((e) => e.id === res.id);
