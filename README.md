@@ -1,6 +1,7 @@
 # Figma Bridge
 
 [![CI](https://github.com/Clovis500c/figma-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/Clovis500c/figma-bridge/actions/workflows/ci.yml)
+[![M8ven Verified](https://m8ven.ai/badge/mcp/clovis500c-figma-bridge-12c1xn?variant=verified)](https://m8ven.ai/mcp/clovis500c-figma-bridge-12c1xn?s=readme)
 
 **Let any AI agent design in the Figma desktop app, with no rate limits.**
 
