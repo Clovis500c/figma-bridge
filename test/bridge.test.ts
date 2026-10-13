@@ -256,6 +256,8 @@ describe("hub", () => {
     const fake = plugin("x", "Evil", "null");
     expect(await fake.closed()).toBe(1008);
     expect(fake.refused).toMatchObject({ code: "PAIRING" });
+    // A plugin from before pairing (no token field) learns the server version, to show "Update installed".
+    expect(fake.welcome).toMatchObject({ version: "1.5.0", role: "refused" });
     expect(await plugin("y", "Wrong", "null", "cd".repeat(24)).closed()).toBe(1008);
     await expect(agent.request("ping", {}, 5000, 300)).rejects.toThrow(/pairing token/);
     const real = plugin("s1", "File A", "null", token);

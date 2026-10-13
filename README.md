@@ -204,8 +204,9 @@ bun test          # unit tests (bridge, setup, schemas, tokens, code generation,
 bun run test      # end-to-end test against an open Figma file
 ```
 
-To release, change `version` in `package.json` and `server.json`, then run **Actions → Release → Run workflow** on `main`:
-it publishes to npm and creates the GitHub release. Directory listings (MCP Registry, Glama, Smithery, LobeHub) are
+To release, change `version` in `package.json` and `server.json` in your PR and merge it: the **Release** workflow
+starts on its own, publishes to npm and creates the GitHub release, and every AI client runs the new version at its
+next start (npx `@latest`). **Actions → Release → Run workflow** on `main` still works by hand. Directory listings (MCP Registry, Glama, Smithery, LobeHub) are
 described in [docs/publishing.md](docs/publishing.md).
 
 Options: `FIGMA_BRIDGE_PORT` (default `3055`), `FIGMA_BRIDGE_CHANNEL`, `FIGMA_BRIDGE_OUT`, `FIGMA_BRIDGE_SNIPPETS`,

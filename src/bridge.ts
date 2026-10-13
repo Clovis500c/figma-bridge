@@ -355,6 +355,9 @@ export class Hub {
         this.refusedAt = Date.now();
         this.log(`hub: refused a plugin without the pairing token (origin ${ws.data.origin})`);
         sendFrames(ws, { t: "refused", code: "PAIRING", error: "This plugin copy is not paired with the bridge: close and reopen it." });
+        // Plugins from before pairing send no token and don't know "refused": the server version in a welcome makes
+        // them show "Update installed · Reopen", and reopening loads the paired copy the startup sync wrote.
+        if (msg.token === undefined) sendFrames(ws, { t: "welcome", bridge: BRIDGE_NAME, protocol: PROTOCOL_VERSION, version: this.version, role: "refused" });
         return void ws.close(1008, "pairing token mismatch");
       }
       const s = msg.session ?? {};

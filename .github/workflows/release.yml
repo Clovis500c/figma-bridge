@@ -1,11 +1,14 @@
 name: Release
 
 # Publishes the version written in package.json to npm and creates the GitHub release.
-# Start it with Actions → Release → Run workflow (on main), or by pushing a tag vX.Y.Z,
-# or by publishing a release vX.Y.Z on github.com.
+# It runs by itself when a change to package.json lands on main with a version that isn't on npm yet (bump the
+# version in the PR, merge it, and every AI client picks it up at its next start through npx @latest).
+# Manual starts still work: Actions → Release → Run workflow (on main), or pushing a tag vX.Y.Z.
 on:
   workflow_dispatch:
   push:
+    branches: [main]
+    paths: [package.json]
     tags: ["v*"]
 
 permissions:
@@ -35,23 +38,33 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$GITHUB_REF_NAME" != "main" ]; then
             echo "::error::Run this workflow on main."; exit 1
           fi
-          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$tag" != "$GITHUB_REF_NAME" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$tag" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match the version in package.json ($tag)."; exit 1
           fi
           # Already on npm (a re-run after a failed release step): only create the GitHub release.
           if npm view "$name@${tag#v}" version > /dev/null 2>&1; then
+            # A package.json change on main without a version bump: nothing to release.
+            if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "branch" ]; then
+              echo "::notice::$name ${tag#v} is already on npm: nothing to release."
+              echo "SKIP=true" >> "$GITHUB_ENV"
+              exit 0
+            fi
             echo "::notice::$name ${tag#v} is already on npm: skipping npm publish. For a new release, change \"version\" in package.json."
             echo "PUBLISHED=true" >> "$GITHUB_ENV"
           fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
 
-      - run: bun install
-      - run: bun run build
-      - run: bun run check
-      - run: bun test
+      - if: env.SKIP != 'true'
+        run: bun install
+      - if: env.SKIP != 'true'
+        run: bun run build
+      - if: env.SKIP != 'true'
+        run: bun run check
+      - if: env.SKIP != 'true'
+        run: bun test
 
       - name: Publish to npm
-        if: env.PUBLISHED != 'true'
+        if: env.SKIP != 'true' && env.PUBLISHED != 'true'
         shell: bash
         run: |
           if ! npm publish --provenance --access public 2>&1 | tee publish.log; then
@@ -65,6 +78,7 @@ jobs:
 
       # The zip is the source plus the built server and plugin, for the Bun install method.
       - name: Zip
+        if: env.SKIP != 'true'
         run: |
           mkdir -p stage
           git archive HEAD --prefix=figma-bridge/ | tar -x -C stage
@@ -75,6 +89,7 @@ jobs:
 
       # A release published on github.com already exists: attach the zip to it.
       - name: GitHub release
+        if: env.SKIP != 'true'
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "figma-bridge-$TAG.zip" --clobber

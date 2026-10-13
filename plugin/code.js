@@ -4588,7 +4588,7 @@
     finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
   }
   // package.json
-  var version = "1.14.3";
+  var version = "1.15.0";
 
   // plugin/code.ts
   var DEFAULT_SIZE = { width: 340, height: 540 };
