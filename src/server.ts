@@ -11,14 +11,16 @@ import { iconSvg, searchIcons } from "./icons";
 import { imageInfo } from "./image";
 import { generateCode, type IrNode } from "./codegen";
 import { diagramSpec } from "./diagram";
-import { registerGuides, type ToolDoc } from "./guides";
+import { buildSpecMarkdown, registerGuides, type ToolDoc, workflowMarkdown } from "./guides";
 import { exportRoblox } from "./roblox/export";
 import { diffTrees, fileKeyFrom, FigmaRest, threadComments, TOKEN_HELP } from "./rest";
 import { planProjectExport, writePlan } from "./project/plan";
 import { normalizeTokens } from "./tokens";
 import { type ExportData, exportTokenFiles, type Format, FORMATS } from "./tokens-export";
 import { importWeb } from "./web/import";
+import { pairingEnabled, pairingToken } from "./pairing";
 import { syncPlugin } from "./setup";
+import { lintSpec } from "./spec-lint";
 import { deleteSnippet, getSnippet, listSnippets, loadLibrary, saveSnippet, SNIPPETS_DIR } from "./snippets";
 import { version as VERSION } from "../package.json";
 
@@ -45,7 +47,17 @@ function log(line: string) {
   } catch {}
 }
 
-const bridge = new Bridge({ port: PORT, channel: CHANNEL, version: VERSION, log });
+// Only plugins carrying this machine's token may connect (FIGMA_BRIDGE_PAIRING=0 turns it off).
+let PLUGIN_TOKEN: string | undefined;
+if (pairingEnabled()) {
+  try {
+    PLUGIN_TOKEN = pairingToken();
+  } catch (e) {
+    log(`Could not read or create the pairing token, plugins connect without it: ${(e as Error).message}`);
+  }
+}
+
+const bridge = new Bridge({ port: PORT, channel: CHANNEL, version: VERSION, log, pluginToken: PLUGIN_TOKEN });
 bridge.start();
 
 // Restarting the AI client updates the Figma plugin too: keep ~/.figma-bridge/plugin in step with this server.
@@ -53,7 +65,7 @@ bridge.start();
 if (process.env.FIGMA_BRIDGE_PLUGIN_SYNC !== "0") {
   try {
     const target = process.env.FIGMA_BRIDGE_PLUGIN_DIR || join(homedir(), ".figma-bridge", "plugin");
-    const status = syncPlugin(join(dirname(fileURLToPath(import.meta.url)), "..", "plugin"), target, VERSION);
+    const status = syncPlugin(join(dirname(fileURLToPath(import.meta.url)), "..", "plugin"), target, VERSION, PLUGIN_TOKEN);
     if (status === "installed" || status === "updated") log(`Figma plugin ${status} to v${VERSION} in ${target}; reopen it in Figma`);
   } catch (e) {
     log(`Could not update the Figma plugin copy: ${(e as Error).message}`);
@@ -183,32 +195,62 @@ async function prepareSpec(spec: unknown, defaultColor: string) {
 
 const safeName = (s: string) => s.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "node";
 
+// Kept short on purpose: several clients cut server instructions at about 2 000 characters. The details live in
+// WORKFLOW and GUIDES, served by the guide tool and the figma-bridge://docs resources.
 const INSTRUCTIONS = [
   "Figma Bridge drives the user's Figma desktop app through a local plugin. No rate limits: iterate freely.",
-  "Workflow:",
+  "1. get_context first, then get_design_system when the file has styles, variables or components: reuse them (style:, var:, {component}) instead of raw values.",
+  "2. New UI → build, one call per screen or section, with auto-layout. Existing design → find/describe it first, then build into it (parentId) or run_script.",
+  "3. Verify → screenshot {returnImage:true} and audit, then fix. To reproduce a mockup: compare {nodeId, reference}, fix the largest regions, compare again until mismatchPercent stops dropping.",
+  "4. checkpoint {action:'save'} before risky edits to existing work. Each command is one Ctrl+Z step for the user.",
+  "Read build's warnings: they name every property it ignored or converted, with the right name.",
+  "Name every layer by its role (Header, CardList, Title, PrimaryButton; components as Category/Variant), never Frame 12: names become class names in code.",
+  "Target unclear → wait_for_selection. No file connected → ask the user to run Plugins → Development → Figma Bridge in Figma; versionMismatch in list_sessions → ask them to reopen it.",
+  "Full reference: the guide tool, topics workflow, build-spec, run-script, figjam-slides, naming, roblox.",
+];
+
+/** The long form of the workflow, for the guide tool and the workflow resource. */
+const WORKFLOW = [
   "1. get_context, then get_design_system when the file has styles, variables or components: reuse them instead of raw values. find locates layers by name, text, type, style or component across pages.",
   "2. New UI → build (one call per screen or section, with auto-layout; grid, rich text spans, component sets with variants, prototype reactions). Editing existing design → describe it first, then build into it (parentId) or run_script.",
-  "Name every layer by its role, like a design system would: Header, NavBar, HeroSection, Content, PricingCard, CardTitle, Price, PrimaryButton, Avatar & Info, Icon/Search; components as Category/Variant (Button/Primary). Never leave Frame 12 or Rectangle 3: names become class names in code and instance names in Roblox.",
-  "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes.",
+  "3. Design system → design_tokens writes variables (with Light/Dark modes) and styles from simple JSON, W3C tokens or a Tailwind theme; build uses them via var:, style: and modes. design_tokens {action:'export'} writes them back as CSS, Tailwind, SCSS, TS or DTCG.",
   "4. Verify → screenshot with returnImage:true, and audit to catch contrast, overflow and naming issues. Fix, then check again. audit {scope:'design-system'} scores the file's design system; audit {fix:true} binds raw values to variables and styles.",
   "Reproduce a mockup or screenshot: build it at the mockup's size → compare {nodeId, reference, returnImage:true} → fix the largest regions → compare again until mismatchPercent stops dropping.",
   "5. Before risky changes to existing work → checkpoint {action:'save'}; restore if the result is worse. Each command is one Ctrl+Z step for the user.",
+  "build checks the spec before running it: CSS-style names (borderRadius, backgroundColor, fontSize), units (\"16px\"), \"100%\" sizes and rgb() colors are converted and reported; unknown properties are reported with the closest valid name. Fix the spec when warnings say something was ignored.",
   "Existing website or HTML → import_web turns it into editable auto-layout frames (one per viewport); then compare against the returned reference screenshot.",
   "When the target is unclear, wait_for_selection asks the user to pick it in Figma. prototype links screens, annotate leaves Dev Mode notes, export_code turns a frame into code; give it projectPath to reuse the project's components and tokens.",
-  "run_script: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}).",
-  "Script helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?),",
-  "utils.build(spec, {parentId}), utils.describe(nodeOrId, depth); lib.<name>(args) runs a saved snippet; console.log is returned as `logs`.",
-  "Save helpers you will reuse with the snippets tool. Icons: search_icons, then insert_icon or {icon:'set:name'} in build.",
-  "Rules: load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync); keep results small.",
+  "Icons: search_icons, then insert_icon or {icon:'set:name'} in build. Save helpers you will reuse with the snippets tool.",
   "The user can cancel a command from the plugin (code CANCELLED): build stops, a script may still finish, so check the file before retrying.",
   "With FIGMA_TOKEN set: comments reads and posts file comments pinned to layers, versions lists the history and diffs a version against now.",
-  "Names: give every layer you create a professional name for its role, as a design system or a developer would: Screen, Header, Navbar, Sidebar, Section, Container, Card, CardList, Row, Grid, Title, Subtitle, Description, Label, Price, PrimaryButton, Icon, Avatar, Badge, Input, Divider, Background. Never leave Frame 12, Rectangle 3 or a text named after its content; build names unnamed layers by role and audit {fix:true} renames default names.",
-  "Roblox: export_roblox turns a frame into a ScreenGui (.rbxmx + Luau for execute_luau + PNG assets), in scale only (no offsets) with PascalCase names (ShopGui, ItemCard, TitleLabel, BuyButton); with a Roblox Studio MCP, upload the assets, run the Luau and check a Studio screenshot. Any Roblox UI you write by hand follows the same rules: UDim2.fromScale, scale padding and gaps, UIStroke ScaledSize, TextScaled + UITextSizeConstraint, UIAspectRatioConstraint on the root.",
-  "Prompts new-screen, apply-design-system, reproduce-screenshot, import-website, figma-to-code, audit-and-fix and figma-to-roblox are ready-made workflows; the resources figma-bridge://docs/build-spec and figma-bridge://docs/workflow are the full reference.",
-  "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it). If list_sessions reports versionMismatch, ask them to reopen or update the plugin.",
+  "Prompts new-screen, apply-design-system, reproduce-screenshot, import-website, figma-to-code, audit-and-fix and figma-to-roblox are ready-made workflows.",
+  "If no file is connected, tell the user to run Plugins → Development → Figma Bridge in Figma (Ctrl+Alt+P re-runs it). If list_sessions reports versionMismatch, ask them to reopen or update the plugin. If the error mentions the pairing token, ask them to close and reopen the plugin.",
 ];
 
-const BUILD_DESCRIPTION = `Create a whole layout in ONE call from a declarative spec. Fonts load automatically, icons are fetched, images loaded. Much faster and safer than run_script for new UI.
+const RUN_SCRIPT_GUIDE = [
+  "run_script runs the body of an async function in the plugin main thread: `figma` global, top-level await, `return` a small JSON value (nodes come back as {id,name,type}). console.log is returned as `logs`.",
+  "Helpers: utils.loadFonts('Inter:Bold', …), utils.node(id), utils.page(name), utils.hex('#hex'), utils.solid('#hex', opacity?), utils.build(spec, {parentId}), utils.describe(nodeOrId, depth), utils.breathe() inside long loops.",
+  "lib.<name>(args) runs a snippet saved with the snippets tool: save anything you write twice.",
+  "Rules: load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync); keep results small (ids and names, not whole nodes).",
+  "Errors come back as {ok:false, error, line, stack}. A script cannot be interrupted: after CANCELLED or a timeout, check the file before retrying.",
+  "Prefer build for new layouts: one declarative call instead of many imperative steps.",
+];
+
+const NAMING_GUIDE = [
+  "Give every layer you create a professional name for its role, as a design system or a developer would: Screen, Header, Navbar, Sidebar, Section, Container, Card, CardList, Row, Grid, Title, Subtitle, Description, Label, Price, PrimaryButton, Icon, Avatar, Badge, Input, Divider, Background.",
+  "Components: Category/Variant (Button/Primary, Icon/Search). Never leave Frame 12, Rectangle 3 or a text named after its content.",
+  "Names become class and component names in export_code and instance names in export_roblox. build names unnamed layers by role, and audit {fix:true} renames default names.",
+];
+
+const ROBLOX_GUIDE = [
+  "export_roblox turns a frame into a ScreenGui (.rbxmx + Luau for execute_luau + PNG assets), in scale only (no offsets) with PascalCase names (ShopGui, ItemCard, TitleLabel, BuyButton).",
+  "With a Roblox Studio MCP: upload the assets (unless upload:true did it), replace the rbxassetid://PENDING_n placeholders in the Luau, run it with execute_luau and check a Studio screenshot against screenshot {returnImage:true} of the frame.",
+  "Roblox UI written by hand follows the same rules: UDim2.fromScale, scale padding and gaps, UIStroke ScaledSize, TextScaled + UITextSizeConstraint, UIAspectRatioConstraint on the root, PascalCase role names.",
+  "The figma-to-roblox prompt is the whole workflow.",
+];
+
+/** Every node type and property: the build-spec guide. The tool description leaves out FigJam and Slides. */
+const BUILD_SPEC = `Create a whole layout in ONE call from a declarative spec. Fonts load automatically, icons are fetched, images loaded. Much faster and safer than run_script for new UI.
 Node: {type?, name?, ...props, children?: Node[]}. Name layers by role (Header, Card, CardList, Title, Description, PrimaryButton, Icon); unnamed layers get a role name (Container, Row, Card, Title, Label, Button, Icon, Divider…). type is inferred (text/spans→text, icon→icon, src→image, component→instance, variants→componentSet, else frame). Types: frame, component, componentSet, text, rect, ellipse, line, icon, image, svg, instance.
 FRAME: layout "row"|"column"|"grid" (auto-layout; omit for free positioning), gap (number|"auto"), padding (n | [v,h] | [t,r,b,l]), align (cross axis: start|center|end|baseline), justify (main axis: start|center|end|between), wrap, rowGap, clip. Frames have no fill unless set.
 GRID: layout:"grid", columns (count | tracks like [200,"1fr","2fr","hug"]), rows (same; default: enough rows, hugging), columnGap, rowGap (or gap). Children: span:[rows,cols] or colSpan/rowSpan, cellAlign/cellValign. Give the grid a w for "fr" columns.
@@ -228,7 +270,25 @@ DIAGRAM (FigJam): {type:"diagram", source:"flowchart LR\\n A[Start] --> B{Valid?
 SLIDES files: {slides:[{name, fill?, children:[…]}, …]} or {type:"slide", …}: one 1920×1080 slide per entry, children placed with x/y or auto-layout.
 gap/padding/radius accept "var:<number variable>". MODES: modes:{"Theme":"Dark"} sets a collection's variable mode on a frame and its children.
 Example: {"name":"Card","layout":"column","w":320,"padding":24,"gap":12,"fill":"#FFFFFF","radius":16,"shadow":true,"children":[{"text":"Pro plan","size":20,"weight":600},{"text":"Everything you need","color":"#6B7280","w":"fill"},{"layout":"row","gap":8,"align":"center","children":[{"icon":"lucide:check","size":16,"color":"#16A34A"},{"text":"Unlimited projects"}]}]}
-Returns {rootId, ids:{layerName:id}, created, warnings}. The result is selected and zoomed to unless select:false.`;
+Returns {rootId, ids:{layerName:id}, created, warnings}. warnings lists every property that was ignored (with the closest valid name) or converted from CSS habits (borderRadius → radius, "16px" → 16): read it. The result is selected and zoomed to unless select:false.`;
+
+const BOARD_LINES = BUILD_SPEC.split("\n").filter((l) => /^(FIGJAM files|DIAGRAM \(FigJam\)|SLIDES files):/.test(l));
+const BUILD_DESCRIPTION = BUILD_SPEC.split("\n")
+  .map((l) => (l === BOARD_LINES[0] ? 'FIGJAM and SLIDES: stickies, shapes, connectors, tables, code blocks, Mermaid diagrams and slides, see guide {topic:"figjam-slides"}.' : l))
+  .filter((l) => !BOARD_LINES.includes(l))
+  .join("\n");
+
+const bullets = (title: string, lines: string[]) => [`# ${title}`, "", ...lines.map((l) => `- ${l}`), ""].join("\n");
+
+/** Guide topics, served by the guide tool. */
+const GUIDES: Record<string, () => string> = {
+  workflow: () => workflowMarkdown([INSTRUCTIONS[0]!, ...WORKFLOW, ...NAMING_GUIDE], toolDocs),
+  "build-spec": () => buildSpecMarkdown(BUILD_SPEC),
+  "run-script": () => bullets("run_script", RUN_SCRIPT_GUIDE),
+  "figjam-slides": () => buildSpecMarkdown(["Nodes for FigJam boards and Slides decks, used in build like any other node.", ...BOARD_LINES].join("\n")),
+  naming: () => bullets("Layer names", NAMING_GUIDE),
+  roblox: () => bullets("Figma to Roblox", ROBLOX_GUIDE),
+};
 
 // ─── MCP server ─────────────────────────────────────────────────────────────
 
@@ -241,10 +301,13 @@ const server = new McpServer(
 
 // Every tool takes an optional {file}: the call goes to that connected file without changing the selected one,
 // so an agent can work on several files at once (calls to different files run in parallel).
-const SESSION_TOOLS = new Set(["list_sessions", "select_session"]);
+const SESSION_TOOLS = new Set(["list_sessions", "select_session", "guide"]);
+// FIGMA_BRIDGE_DISABLE_TOOLS=export_roblox,comments hides tools a user never needs, to keep the agent's context small.
+const DISABLED_TOOLS = new Set((process.env.FIGMA_BRIDGE_DISABLE_TOOLS ?? "").split(/[\s,]+/).filter(Boolean));
 const registerTool = server.registerTool.bind(server) as (...args: any[]) => unknown;
 const toolDocs: ToolDoc[] = [];
 (server as any).registerTool = (name: string, config: { title?: string; description?: string; inputSchema?: Record<string, z.ZodTypeAny> }, handler: (args: any, extra: unknown) => unknown) => {
+  if (DISABLED_TOOLS.has(name) && name !== "guide") return;
   toolDocs.push({ name, title: config.title, description: config.description ?? "" });
   if (SESSION_TOOLS.has(name)) return registerTool(name, config, handler);
   const inputSchema = {
@@ -267,6 +330,7 @@ server.registerTool(
       "Helpers: utils.loadFonts, utils.node, utils.page, utils.hex, utils.solid, utils.build, utils.describe, " +
       "utils.breathe (await it inside long loops so Figma keeps repainting instead of freezing); lib.<snippet>(args); " +
       "console.log is captured. On error returns {ok:false, error, line, stack}. Prefer build for creating new layouts. " +
+      "Load fonts before editing text; pages load on demand (await figma.setCurrentPageAsync / getNodeByIdAsync); return ids and names, not whole nodes. " +
       "If the user presses Cancel in the plugin you get code CANCELLED, but a script cannot be interrupted and may still finish: check the file before retrying.",
     inputSchema: {
       code: z.string().min(1).describe("Script body, e.g. `const f = figma.createFrame(); f.name = 'Card'; return f.id`"),
@@ -308,8 +372,17 @@ server.registerTool(
   },
   (args) =>
     track("build", typeof (args.spec as any).name === "string" ? (args.spec as any).name : "spec", async () => {
+      // Before prepareSpec, which swaps src and icon for image data and SVG markup.
+      let lint: { warnings: string[] } = { warnings: [] };
+      try {
+        lint = lintSpec(args.spec);
+      } catch (e) {
+        log(`spec check failed: ${(e as Error).message}`); // never block a build on the checker itself
+      }
       const images = await prepareSpec(args.spec, args.defaults?.color ?? "#111111");
-      return ok(await bridge.request("build", { ...args, images }, 90_000));
+      const out = await bridge.request<Record<string, unknown>>("build", { ...args, images }, 90_000);
+      const warnings = [...lint.warnings, ...((out?.warnings as string[] | undefined) ?? [])];
+      return ok(warnings.length ? { ...out, warnings } : out);
     }),
 );
 
@@ -1020,7 +1093,7 @@ server.registerTool(
       "mode: scale (default, recommended); offset (pixels) or hybrid (pixels inside auto-layout) only when the user asks for them. " +
       "Assets: with upload:true and ROBLOX_API_KEY + ROBLOX_CREATOR_ID set, pictures are uploaded through Open Cloud and their ids written in; otherwise each asset has a " +
       "placeholder (rbxassetid://PENDING_n): upload the files with your Roblox Studio tools (e.g. upload_image), replace the placeholders in the Luau, run it with execute_luau and check a Studio screenshot. " +
-      'When writing Roblox UI yourself, follow the same rules: scale only, PascalCase role names. Example: {"nodeId":"12:34"}',
+      'Example: {"nodeId":"12:34"}. Workflow and rules for hand-written Roblox UI: guide {topic:"roblox"}.',
     inputSchema: {
       nodeId: z.string().optional(),
       mode: z.enum(["scale", "offset", "hybrid"]).optional().describe("Default scale (no offsets); offset or hybrid only if the user asks"),
@@ -1218,7 +1291,7 @@ server.registerTool(
     }),
 );
 
-registerGuides(server, { instructions: INSTRUCTIONS, buildSpec: BUILD_DESCRIPTION, tools: () => toolDocs });
+registerGuides(server, { guides: GUIDES, tools: () => toolDocs });
 
 await server.connect(new StdioServerTransport());
 log(`Figma Bridge MCP ${VERSION} ready (port ${PORT}, channel ${CHANNEL}, files in ${OUT_DIR})`);

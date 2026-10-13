@@ -39,6 +39,44 @@ test("prompts and resources over MCP", async () => {
     const { tools } = await client.listTools();
     for (const t of tools) expect(flowText).toContain(`**${t.name}**`);
     for (const p of PROMPTS) expect(flowText).toContain(`**${p.name}**`);
+
+    // Clients such as Claude Code cut longer instructions: the essentials must fit.
+    expect(client.getInstructions()!.length).toBeLessThan(2000);
+    const build = tools.find((t) => t.name === "build")!;
+    expect(build.description).not.toContain("DIAGRAM (FigJam)");
+    expect(build.description).toContain('guide {topic:"figjam-slides"}');
+    const guide = async (topic: string) => ((await client.callTool({ name: "guide", arguments: { topic } })).content as { text: string }[])[0]!.text;
+    expect(await guide("figjam-slides")).toContain("## Diagram (figjam)");
+    expect(await guide("build-spec")).toBe(specText);
+    expect(await guide("run-script")).toContain("utils.loadFonts");
+    expect(await guide("roblox")).toContain("UDim2.fromScale");
+    expect(await guide("workflow")).toBe(flowText);
+  } finally {
+    await client.close();
+  }
+}, 30_000);
+
+test("FIGMA_BRIDGE_DISABLE_TOOLS hides tools", async () => {
+  const client = new Client({ name: "guides-test", version: "1" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: ["run", join(import.meta.dir, "..", "src", "server.ts")],
+      stderr: "ignore",
+      env: {
+        ...process.env,
+        FIGMA_BRIDGE_PORT: String(46000 + Math.floor(Math.random() * 4000)),
+        FIGMA_BRIDGE_OUT: mkdtempSync(join(tmpdir(), "fb-guides-")),
+        FIGMA_BRIDGE_DISABLE_TOOLS: "export_roblox, comments,guide",
+      } as Record<string, string>,
+    }),
+  );
+  try {
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).not.toContain("export_roblox");
+    expect(names).not.toContain("comments");
+    expect(names).toContain("guide"); // the instructions point to it
+    expect(names).toContain("build");
   } finally {
     await client.close();
   }

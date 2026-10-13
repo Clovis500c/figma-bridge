@@ -4675,7 +4675,7 @@
       figma.notify("Figma Bridge updated: run it again (Ctrl+Alt+P)", { timeout: 6000 });
       figma.closePlugin();
     } else if (msg.t === "notify")
-      figma.notify(String(msg.text), { timeout: 2500 });
+      figma.notify(String(msg.text), msg.error ? { timeout: 1e4, error: true } : { timeout: 2500 });
     else if (msg.t === "focus")
       focusNode(String(msg.nodeId));
     else if (msg.t === "cancelWait")

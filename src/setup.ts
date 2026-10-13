@@ -2,6 +2,7 @@
 // and `npx @clovis500c/figma-bridge setup`). Originals are backed up as <file>.bak-figma-bridge.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { TOKEN_PLACEHOLDER } from "./pairing";
 
 export const SERVER_NAME = "FigmaBridge";
 
@@ -115,10 +116,19 @@ export function runSetup(opts: SetupOptions): SetupResult {
 
 const PLUGIN_FILES = ["manifest.json", "code.js", "ui.html"];
 
+/** A plugin file as installed: ui.html gets the pairing token in place of its placeholder. */
+function pluginFile(from: string, f: string, token?: string): Buffer {
+  const data = readFileSync(join(from, f));
+  return token && f === "ui.html" ? Buffer.from(data.toString("utf8").split(TOKEN_PLACEHOLDER).join(token)) : data;
+}
+
 /** Copies manifest.json, code.js and ui.html to a stable folder; returns the manifest path. */
-export function installPlugin(from: string, to: string, version?: string): string {
+export function installPlugin(from: string, to: string, version?: string, token?: string): string {
   mkdirSync(to, { recursive: true });
-  for (const f of PLUGIN_FILES) copyFileSync(join(from, f), join(to, f));
+  for (const f of PLUGIN_FILES) {
+    if (token && f === "ui.html") writeFileSync(join(to, f), pluginFile(from, f, token));
+    else copyFileSync(join(from, f), join(to, f));
+  }
   if (version) writeFileSync(join(to, "version.json"), JSON.stringify({ version }) + "\n");
   return join(to, "manifest.json");
 }
@@ -136,9 +146,10 @@ export function compareVersions(a: string, b: string): number {
 
 /**
  * Keeps the installed Figma plugin in step with this server: called at startup, so restarting the
- * AI client is enough to update both. Never downgrades a copy installed by a newer server.
+ * AI client is enough to update both. Never downgrades a copy installed by a newer server. At the same
+ * version, a copy whose files differ (another pairing token, a rebuilt plugin) is replaced.
  */
-export function syncPlugin(from: string, to: string, version: string): "installed" | "updated" | "current" | "newer" | "skipped" {
+export function syncPlugin(from: string, to: string, version: string, token?: string): "installed" | "updated" | "current" | "newer" | "skipped" {
   if (!PLUGIN_FILES.every((f) => existsSync(join(from, f)))) return "skipped";
   const had = existsSync(join(to, "manifest.json"));
   let installed = "";
@@ -148,9 +159,9 @@ export function syncPlugin(from: string, to: string, version: string): "installe
   if (installed) {
     const order = compareVersions(installed, version);
     if (order > 0) return "newer";
-    if (order === 0 && PLUGIN_FILES.every((f) => existsSync(join(to, f)))) return "current";
+    if (order === 0 && PLUGIN_FILES.every((f) => existsSync(join(to, f)) && readFileSync(join(to, f)).equals(pluginFile(from, f, token)))) return "current";
   }
-  installPlugin(from, to, version);
+  installPlugin(from, to, version, token);
   return had ? "updated" : "installed";
 }
 

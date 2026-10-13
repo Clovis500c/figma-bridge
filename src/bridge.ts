@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import WebSocket, { WebSocketServer } from "ws";
+import { PAIRING_HELP, sameToken } from "./pairing";
 
 /**
  * Local WebSocket bridge between MCP agents and Figma plugin sessions.
@@ -20,6 +21,8 @@ const MAX_MESSAGE_CHARS = 256 << 20;
 const PARTIAL_TTL_MS = 60_000;
 const INFLIGHT_TTL_MS = 180_000;
 const HANDSHAKE_MS = 2_500;
+/** How long NO_SESSION errors mention a refused, unpaired plugin. */
+const REFUSED_HINT_MS = 10 * 60_000;
 const PING_MS = 20_000;
 const IDLE_MS = 120_000;
 
@@ -177,6 +180,8 @@ export class Hub {
   private peers = new Set<Peer>();
   private inflight = new Map<string, { reply: Reply; plugin: string; owner: object; at: number }>();
   private sweeper: ReturnType<typeof setInterval>;
+  /** When a plugin was last refused for a missing or wrong pairing token. */
+  private refusedAt = 0;
 
   private constructor(
     readonly port: number,
@@ -184,6 +189,7 @@ export class Hub {
     readonly version: string,
     private server: Server,
     private wss: WebSocketServer,
+    private pluginToken?: string,
   ) {
     server.on("request", (req, res) => {
       if (new URL(req.url ?? "/", "http://localhost").pathname === "/health") {
@@ -206,7 +212,7 @@ export class Hub {
   }
 
   /** Binds 127.0.0.1:port; rejects with code EADDRINUSE when it is taken. */
-  static start(port: number, log: (line: string) => void, version = ""): Promise<Hub> {
+  static start(port: number, log: (line: string) => void, version = "", pluginToken?: string): Promise<Hub> {
     return new Promise((resolve, reject) => {
       const server = createServer();
       const wss = new WebSocketServer({ noServer: true, maxPayload: 8 << 20, perMessageDeflate: false });
@@ -214,7 +220,7 @@ export class Hub {
       server.listen(port, "127.0.0.1", () => {
         server.off("error", reject);
         server.on("error", (e) => log(`hub: ${e.message}`));
-        resolve(new Hub(port, log, version, server, wss));
+        resolve(new Hub(port, log, version, server, wss, pluginToken));
       });
     });
   }
@@ -281,7 +287,10 @@ export class Hub {
 
   private resolve(channel: string, sel: Selection = {}): Peer {
     const list = [...this.plugins.values()].filter((ws) => ws.data.channel === channel);
-    if (!list.length) throw new BridgeError(NO_PLUGIN_HELP, "NO_SESSION");
+    if (!list.length) {
+      const refused = Date.now() - this.refusedAt < REFUSED_HINT_MS;
+      throw new BridgeError(refused ? `${NO_PLUGIN_HELP} ${PAIRING_HELP}` : NO_PLUGIN_HELP, "NO_SESSION");
+    }
     const names = list.map((ws) => `"${ws.data.session!.fileName}"`).join(", ");
     if (sel.id) {
       const hit = list.find((ws) => ws.data.session!.id === sel.id);
@@ -342,6 +351,12 @@ export class Hub {
         this.log(`hub: rejected plugin from origin ${ws.data.origin}`);
         return void ws.close(1008, "origin not allowed");
       }
+      if (this.pluginToken && !sameToken(msg.token, this.pluginToken)) {
+        this.refusedAt = Date.now();
+        this.log(`hub: refused a plugin without the pairing token (origin ${ws.data.origin})`);
+        sendFrames(ws, { t: "refused", code: "PAIRING", error: "This plugin copy is not paired with the bridge: close and reopen it." });
+        return void ws.close(1008, "pairing token mismatch");
+      }
       const s = msg.session ?? {};
       const session: SessionInfo = {
         id: String(s.id || randomUUID()),
@@ -396,6 +411,8 @@ export interface BridgeOptions {
   log: (line: string) => void;
   /** How long a request waits for a Figma plugin to connect before failing. */
   waitForPluginMs?: number;
+  /** When set, the hub only accepts plugins that send this token (see pairing.ts). */
+  pluginToken?: string;
 }
 
 interface Pending {
@@ -461,7 +478,7 @@ export class Bridge {
 
   private async tryHost(): Promise<boolean> {
     try {
-      this.hub = await Hub.start(this.opts.port, this.opts.log, this.opts.version);
+      this.hub = await Hub.start(this.opts.port, this.opts.log, this.opts.version, this.opts.pluginToken);
     } catch (e) {
       const err = e as { code?: string; message?: string };
       if (err.code !== "EADDRINUSE" && !/in use/i.test(String(err.message))) {

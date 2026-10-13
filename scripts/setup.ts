@@ -5,8 +5,10 @@
 //   bun run setup --print            only print the config snippets
 // With npm, `npx @clovis500c/figma-bridge setup` does the same with an npx command.
 import { homedir } from "node:os";
+import { version } from "../package.json";
 import { join, resolve } from "node:path";
-import { bold, green, dim, parseClients, printSetup, printSnippets, runSetup, yellow } from "../src/setup";
+import { pairingEnabled, pairingToken } from "../src/pairing";
+import { bold, green, dim, installPlugin, parseClients, printSetup, printSnippets, runSetup, yellow } from "../src/setup";
 
 const root = resolve(import.meta.dir, "..");
 const command = process.execPath;
@@ -26,10 +28,12 @@ try {
   console.log(yellow((e as Error).message));
   process.exit(1);
 }
+// The installed copy carries this machine's pairing token; the server keeps it in step at each start.
+const manifest = installPlugin(join(root, "plugin"), join(homedir(), ".figma-bridge", "plugin"), version, pairingEnabled() ? pairingToken() : undefined);
 console.log(`
 ${bold("Next")}
   1. Figma desktop → Plugins → Development → Import plugin from manifest…
-     ${green(join(root, "plugin", "manifest.json"))}
+     ${green(manifest)}
   2. Restart your AI client, then run Plugins → Development → Figma Bridge in a Figma file.
 ${dim("Modified files are backed up as <file>.bak-figma-bridge")}
 `);

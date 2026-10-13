@@ -20,7 +20,7 @@ and any other MCP client.
 
 ## Features
 
-- **Build whole layouts in one call** from a JSON spec: auto-layout and grid, rich text, icons, images, component sets with variants and properties, prototype links, and professional layer names (Header, Card, Title, PrimaryButton) ([naming](docs/naming.md)).
+- **Build whole layouts in one call** from a JSON spec: auto-layout and grid, rich text, icons, images, component sets with variants and properties, prototype links, and professional layer names (Header, Card, Title, PrimaryButton) ([naming](docs/naming.md)). The spec is checked first: CSS habits (`borderRadius`, `"16px"`, `rgb()`, `"100%"`) are converted and unknown properties come back as warnings with the right name, so nothing is silently ignored.
 - **Import any website or HTML** as editable auto-layout frames, one per viewport ([details](docs/import-web.md)).
 - **Round-trip the design system**: write variables with Light/Dark modes and styles from JSON, W3C tokens or Tailwind; export them to DTCG, CSS, Tailwind v3/v4, SCSS or TypeScript ([details](docs/design-system.md)).
 - **Score and fix design system health**: token coverage, contrast, text styles, detached instances, duplicates, naming, with safe automatic fixes.
@@ -39,7 +39,7 @@ and any other MCP client.
 | Setup | `npx … setup` configures every AI client found and installs the plugin | npx, a personal access token, plugin import | Plugin zip import, MCP config | OAuth (remote) or the desktop app |
 | Figma plan or seat | Any, free included | Any | Any, free included | Writing to the canvas: Full or Dev seat on a paid plan |
 | API token | Not needed (only for comments and versions) | Required | Not needed | OAuth sign-in |
-| Tools | 28 | 121 | 116 | 16 |
+| Tools | 29 | 121 | 116 | 16 |
 | Whole layout in one call | ✓ `build` spec (auto-layout, grid, variants, prototype) | Component sets from a variant matrix | — | — |
 | Pixel diff against a mockup | ✓ `compare`, with heatmap | — | Diff against a saved baseline | — |
 | Checkpoints to roll back | ✓ | — | — | — |
@@ -70,6 +70,7 @@ Requires [Node.js](https://nodejs.org) 20+ and the Figma **desktop** app.
 3. Restart your AI client, open a Figma file and run **Plugins → Development → Figma Bridge**. A green **Live** badge means it's connected.
 
 **Updates are automatic:** each time your AI client starts, it runs the latest release and refreshes the plugin. Reopen the plugin in Figma when it shows **Update installed**.
+To review each release yourself instead, run `npx @clovis500c/figma-bridge setup --pin`: your clients then run that exact version until you run setup again.
 
 <details>
 <summary>With Bun instead of npm</summary>
@@ -81,7 +82,7 @@ bun install
 bun run setup
 ```
 
-Then import `plugin/manifest.json` in Figma as in step 2.
+Then import the `manifest.json` it prints (in `~/.figma-bridge/plugin`) in Figma as in step 2.
 
 </details>
 
@@ -174,8 +175,11 @@ To reopen the plugin later, use **Ctrl+Alt+P** or the **Figma Bridge** button in
 | `get_context` · `get_css` · `list_fonts` | File info, generated CSS, installed fonts |
 | `comments` · `versions` | Optional, with a Figma token: read, post and answer comments; version history and diffs ([setup](docs/rest.md)) |
 | `list_sessions` · `select_session` | Choose a file when several are open (or pass `file` to any tool) |
+| `guide` | Reference docs the agent reads on demand: workflow, full build spec, run_script, FigJam and Slides, naming, Roblox |
 
-Each tool describes its parameters to the agent, which needs no extra instructions.
+Each tool describes its parameters to the agent, which needs no extra instructions. The server's instructions stay
+under 2 000 characters (some clients cut longer ones); the details are one `guide` call away. To hide tools you never
+use, list them in `FIGMA_BRIDGE_DISABLE_TOOLS`, e.g. `export_roblox,comments,versions`.
 
 ## Troubleshooting
 
@@ -185,6 +189,7 @@ Each tool describes its parameters to the agent, which needs no extra instructio
 | **Port busy** | Another program uses port 3055. Close it; the plugin reconnects. |
 | **Update installed** | A newer version was installed: click **Reopen**, then run the plugin again (Ctrl+Alt+P). |
 | **Older server** | Your AI client still runs an older release: restart it. |
+| "reopen this plugin to pair it" | The plugin copy doesn't have this machine's pairing token: close and reopen it. If you imported it from another folder, import `~/.figma-bridge/plugin/manifest.json` instead. |
 
 Logs, screenshots, comparison heatmaps and exported code are written to `%TEMP%\figma-bridge`.
 `import_web` uses your installed Chrome or Edge; set `FIGMA_BRIDGE_BROWSER` to use another Chromium-based browser.
@@ -204,6 +209,12 @@ it publishes to npm and creates the GitHub release. Directory listings (MCP Regi
 described in [docs/publishing.md](docs/publishing.md).
 
 Options: `FIGMA_BRIDGE_PORT` (default `3055`), `FIGMA_BRIDGE_CHANNEL`, `FIGMA_BRIDGE_OUT`, `FIGMA_BRIDGE_SNIPPETS`,
-`FIGMA_BRIDGE_BROWSER`, `FIGMA_TOKEN` for the optional REST tools, and `ROBLOX_API_KEY` + `ROBLOX_CREATOR_ID` for
-Roblox asset upload.
-The server listens on `127.0.0.1` only, and browsers can't send it commands.
+`FIGMA_BRIDGE_BROWSER`, `FIGMA_BRIDGE_DISABLE_TOOLS`, `FIGMA_TOKEN` for the optional REST tools, and
+`ROBLOX_API_KEY` + `ROBLOX_CREATOR_ID` for Roblox asset upload.
+
+The server listens on `127.0.0.1` only, and browsers can't send it commands. A web page can't pose as the plugin
+either: a sandboxed iframe sends the same `Origin: null` as Figma's plugin UI, so the hub also requires a pairing token
+that only the installed copy in `~/.figma-bridge/plugin` carries (written by setup and refreshed at each server start;
+the token itself is in `~/.figma-bridge/pairing-token`). To run the plugin straight from a clone's `plugin/` folder,
+set `FIGMA_BRIDGE_PAIRING=0` for the server, or import `~/.figma-bridge/plugin/manifest.json`, which the server keeps
+in step with your build.

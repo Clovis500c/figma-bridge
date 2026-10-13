@@ -463,6 +463,8 @@
 <script>
 "use strict";
 const WS_URL = "ws://localhost:3055";
+// Written by the installer (setup, or the server's startup sync): proves to the bridge that this is the real plugin.
+const PAIRING_TOKEN = "__FIGMA_BRIDGE_PAIRING__";
 const CHUNK = 1 << 20;
 const MAX_LOG = 50;
 const HANDSHAKE_MS = 3000;
@@ -504,6 +506,7 @@ let settings = { channel: "default", compact: false };
 let ws = null;
 let state = "connecting";
 let everConnected = false;
+let refusedNotified = false;
 let retryDelay = 400;
 let retryAt = 0;
 let retryTimer = 0;
@@ -719,7 +722,7 @@ function connect() {
   try { sock = new WebSocket(WS_URL); } catch (e) { return scheduleRetry("offline"); }
   ws = sock;
   sock.onopen = () => {
-    send({ t: "hello", role: "plugin", channel: settings.channel, session, version });
+    send({ t: "hello", role: "plugin", channel: settings.channel, session, version, token: PAIRING_TOKEN });
     handshakeTimer = setTimeout(() => { sock.onclose = null; sock.close(); ws = null; scheduleRetry("foreign"); }, HANDSHAKE_MS);
   };
   sock.onmessage = (ev) => {
@@ -734,6 +737,10 @@ function connect() {
       renderVersion();
       setState("connected");
       if (!everConnected) { everConnected = true; toPlugin({ t: "notify", text: "✦ Figma Bridge connected to your AI" }); }
+    } else if (msg.t === "refused") {
+      // The bridge doesn't know this copy's token: only a reopen (loading the updated files) fixes it.
+      clearTimeout(handshakeTimer);
+      if (!refusedNotified) { refusedNotified = true; toPlugin({ t: "notify", text: "Figma Bridge: close and reopen this plugin to pair it with your AI", error: true }); }
     } else if (msg.t === "req") {
       onRequest(msg);
     }

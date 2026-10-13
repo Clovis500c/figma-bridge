@@ -115,7 +115,7 @@ Audit and improve this file${a.target ? ` (fixes limited to ${a.target})` : ""}.
   },
 ];
 
-export function registerGuides(server: McpServer, docs: { instructions: string[]; buildSpec: string; tools: () => ToolDoc[] }) {
+export function registerGuides(server: McpServer, docs: { guides: Record<string, () => string>; tools: () => ToolDoc[] }) {
   for (const p of PROMPTS) {
     const argsSchema: Record<string, z.ZodOptional<z.ZodString>> = {};
     for (const [k, d] of Object.entries(p.args)) argsSchema[k] = z.string().optional().describe(d);
@@ -126,13 +126,27 @@ export function registerGuides(server: McpServer, docs: { instructions: string[]
     "build-spec",
     RESOURCES.build,
     { title: "build spec reference", description: "Every node type and property the build tool accepts, with examples.", mimeType: "text/markdown" },
-    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: buildSpecMarkdown(docs.buildSpec) }] }),
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: docs.guides["build-spec"]!() }] }),
   );
   server.registerResource(
     "workflow",
     RESOURCES.workflow,
     { title: "Figma Bridge workflow", description: "How to work with Figma Bridge: the workflow, rules and every tool.", mimeType: "text/markdown" },
-    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: workflowMarkdown(docs.instructions, docs.tools()) }] }),
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: docs.guides.workflow!() }] }),
+  );
+
+  // The same references as a tool: many clients never read resources, and the server instructions stay short.
+  const topics = Object.keys(docs.guides) as [string, ...string[]];
+  server.registerTool(
+    "guide",
+    {
+      title: "Figma Bridge reference",
+      description:
+        "Reference docs, read on demand (no Figma connection needed). workflow: the full workflow and every tool; build-spec: every build node and " +
+        "property; run-script: helpers and rules for run_script; figjam-slides: FigJam and Slides nodes for build; naming: layer names; roblox: Figma to Roblox.",
+      inputSchema: { topic: z.enum(topics).describe("Which reference to read") },
+    },
+    async ({ topic }: { topic: string }) => ({ content: [{ type: "text" as const, text: docs.guides[topic]!() }] }),
   );
 }
 
