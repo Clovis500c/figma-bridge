@@ -124,7 +124,7 @@ figma.ui.onmessage = function (msg: any) {
     figma.notify("Figma Bridge updated: run it again (Ctrl+Alt+P)", { timeout: 6000 });
     figma.closePlugin();
   }
-  else if (msg.t === "notify") figma.notify(String(msg.text), { timeout: 2500 });
+  else if (msg.t === "notify") figma.notify(String(msg.text), msg.error ? { timeout: 10000, error: true } : { timeout: 2500 });
   else if (msg.t === "focus") void focusNode(String(msg.nodeId));
   else if (msg.t === "cancelWait") cancelWait(String(msg.id));
   else if (msg.t === "cancel") {

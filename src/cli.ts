@@ -3,6 +3,7 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pairingEnabled, pairingToken } from "./pairing";
 import { bold, dim, green, installPlugin, parseClients, printSetup, printSnippets, runSetup, yellow } from "./setup";
 import { version as VERSION } from "../package.json";
 
@@ -15,12 +16,14 @@ const pluginSource = join(dirname(fileURLToPath(import.meta.url)), "..", "plugin
 const pluginTarget = join(home, ".figma-bridge", "plugin");
 
 // Windows clients spawn commands without a shell, and npx is a .cmd script there.
-// @latest makes npx check for a new release each time the AI client starts the server.
-const spec = `${PACKAGE}@latest`;
+// @latest makes npx check for a new release each time the AI client starts the server; --pin keeps this exact
+// version instead, for users who'd rather review each release than run whatever npm serves.
+const pinned = rest.includes("--pin");
+const spec = `${PACKAGE}@${pinned ? VERSION : "latest"}`;
 const npx = process.platform === "win32" ? { command: "cmd", args: ["/c", "npx", "-y", spec] } : { command: "npx", args: ["-y", spec] };
 
 function plugin(): string {
-  const manifest = installPlugin(pluginSource, pluginTarget, VERSION);
+  const manifest = installPlugin(pluginSource, pluginTarget, VERSION, pairingEnabled() ? pairingToken() : undefined);
   console.log(`${bold("Figma plugin")} copied to ${dim(pluginTarget)}`);
   return manifest;
 }
@@ -30,7 +33,7 @@ function next(manifest: string) {
 ${bold("Next")}
   1. Figma desktop → Plugins → Development → Import plugin from manifest…
      ${green(manifest)}
-     (once: updates install themselves when your AI client restarts; then reopen the plugin)
+     (once: ${pinned ? `pinned to v${VERSION}, run setup again to update` : "updates install themselves when your AI client restarts; then reopen the plugin"})
   2. Restart your AI client, then run Plugins → Development → Figma Bridge in a Figma file.
 `);
 }
@@ -74,6 +77,7 @@ Usage: npx ${PACKAGE} [command]
   setup              add it to every AI client found and install the Figma plugin
     --client <id>    only these clients: claude-code, claude-desktop, codex, antigravity, gemini-cli, cursor, windsurf
     --print          print the config snippets instead
+    --pin            run exactly v${VERSION} instead of @latest (no automatic updates)
   plugin             copy the Figma plugin to ${pluginTarget}
   --version          print the version
 `);

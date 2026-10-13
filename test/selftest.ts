@@ -15,7 +15,7 @@ const transport = new StdioClientTransport({
   args: ["run", serverPath],
   stderr: "ignore",
   // Snippets go to a throwaway folder so the test never touches the user's library.
-  env: { ...process.env, FIGMA_BRIDGE_PLUGIN_SYNC: "0", FIGMA_BRIDGE_SNIPPETS: join(tmpdir(), `figma-bridge-selftest-${process.pid}`) } as Record<string, string>,
+  env: { ...process.env, FIGMA_BRIDGE_PLUGIN_SYNC: "0", FIGMA_BRIDGE_PAIRING: "0", FIGMA_BRIDGE_SNIPPETS: join(tmpdir(), `figma-bridge-selftest-${process.pid}`) } as Record<string, string>,
 });
 
 let failures = 0;
@@ -45,7 +45,7 @@ function check(label: string, pass: boolean, detail: unknown) {
 
 await client.connect(transport);
 const { tools } = await client.listTools();
-check("MCP tools", tools.length === 28, tools.map((t) => t.name).join(", "));
+check("MCP tools", tools.length === 29, tools.map((t) => t.name).join(", "));
 
 // Wait for the plugin.
 const deadline = Date.now() + WAIT_PLUGIN_MS;

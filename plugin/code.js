@@ -4588,7 +4588,7 @@
     finish(id, codeError("The user cancelled the selection request", "CANCELLED"));
   }
   // package.json
-  var version = "1.14.3";
+  var version = "1.15.0";
 
   // plugin/code.ts
   var DEFAULT_SIZE = { width: 340, height: 540 };
@@ -4675,7 +4675,7 @@
       figma.notify("Figma Bridge updated: run it again (Ctrl+Alt+P)", { timeout: 6000 });
       figma.closePlugin();
     } else if (msg.t === "notify")
-      figma.notify(String(msg.text), { timeout: 2500 });
+      figma.notify(String(msg.text), msg.error ? { timeout: 1e4, error: true } : { timeout: 2500 });
     else if (msg.t === "focus")
       focusNode(String(msg.nodeId));
     else if (msg.t === "cancelWait")

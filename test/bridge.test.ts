@@ -31,6 +31,7 @@ function browserSocket(port: number, origin?: string): WebSocket {
 class FakePlugin {
   ws: WebSocket;
   welcome?: Msg;
+  refused?: Msg;
   closeCode?: number;
   private framer = new Framer();
   onRequest: (m: Msg) => void = (m) => this.send({ t: "res", id: m.id, ok: true, result: this.reply(m) });
@@ -41,13 +42,16 @@ class FakePlugin {
     readonly id: string,
     readonly fileName: string,
     origin?: string,
+    token?: string,
   ) {
     this.ws = browserSocket(port, origin);
-    this.ws.onopen = () => this.send({ t: "hello", role: "plugin", channel: "default", version: "9.9.9", session: { id, fileName, page: "Page 1", editorType: /board/i.test(fileName) ? "figjam" : "figma" } });
+    this.ws.onopen = () =>
+      this.send({ t: "hello", role: "plugin", channel: "default", version: "9.9.9", token, session: { id, fileName, page: "Page 1", editorType: /board/i.test(fileName) ? "figjam" : "figma" } });
     this.ws.onmessage = (ev) => {
       const m = this.framer.decode(String(ev.data));
       if (!m) return;
       if (m.t === "welcome") this.welcome = m;
+      if (m.t === "refused") this.refused = m;
       if (m.t === "req") this.onRequest(m);
     };
     this.ws.onclose = (ev) => (this.closeCode = ev.code);
@@ -106,9 +110,9 @@ describe("hub", () => {
     for (const fn of cleanup.splice(0).reverse()) await fn();
   });
 
-  async function setup() {
+  async function setup(pluginToken?: string) {
     const port = await freePort();
-    const hub = new Bridge({ port, channel: "default", version: "1.5.0", log: noop, waitForPluginMs: 2000 });
+    const hub = new Bridge({ port, channel: "default", version: "1.5.0", log: noop, waitForPluginMs: 2000, pluginToken });
     hub.start();
     cleanup.push(() => hub.stop());
     await until(() => hub.mode === "hub");
@@ -116,8 +120,8 @@ describe("hub", () => {
     agent.start();
     cleanup.push(() => agent.stop());
     await until(() => agent.mode === "client");
-    const plugin = (id: string, name: string, origin?: string) => {
-      const p = new FakePlugin(port, id, name, origin);
+    const plugin = (id: string, name: string, origin?: string, token?: string) => {
+      const p = new FakePlugin(port, id, name, origin, token);
       cleanup.push(() => p.ws.close());
       return p;
     };
@@ -243,6 +247,22 @@ describe("hub", () => {
     expect(code).toBe(1008);
     const figma = plugin("ok", "Allowed", "https://www.figma.com");
     await figma.ready();
+  });
+
+  test("with a pairing token, only plugins that send it connect", async () => {
+    const token = "ab".repeat(24);
+    const { agent, plugin } = await setup(token);
+    // A web page can open a sandboxed iframe with Origin "null", exactly like the plugin UI.
+    const fake = plugin("x", "Evil", "null");
+    expect(await fake.closed()).toBe(1008);
+    expect(fake.refused).toMatchObject({ code: "PAIRING" });
+    // A plugin from before pairing (no token field) learns the server version, to show "Update installed".
+    expect(fake.welcome).toMatchObject({ version: "1.5.0", role: "refused" });
+    expect(await plugin("y", "Wrong", "null", "cd".repeat(24)).closed()).toBe(1008);
+    await expect(agent.request("ping", {}, 5000, 300)).rejects.toThrow(/pairing token/);
+    const real = plugin("s1", "File A", "null", token);
+    await real.ready();
+    expect(await agent.request<{ from: string }>("ping")).toMatchObject({ from: "s1" });
   });
 
   test("the other agent takes over the port when the hub process stops", async () => {
